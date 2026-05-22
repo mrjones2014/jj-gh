@@ -51,31 +51,58 @@
         devShells.default = craneLib.devShell {
           inputsFrom = [ jj-gh ];
           packages = [
+            pkgs.actionlint
             pkgs.cargo-nextest
-            pkgs.rust-analyzer
-            pkgs.jujutsu
             pkgs.git
+            pkgs.jujutsu
+            pkgs.rust-analyzer
+            pkgs.taplo
+            pkgs.yamlfmt
           ];
         };
-        checks = {
-          inherit jj-gh;
-          clippy = craneLib.cargoClippy (
-            commonArgs
-            // {
-              inherit cargoArtifacts;
-              cargoClippyExtraArgs = "--all-targets -- -D warnings";
-            }
-          );
-          fmt = craneLib.cargoFmt { inherit src; };
-          nextest = craneLib.cargoNextest (
-            commonArgs
-            // {
-              inherit cargoArtifacts;
-              partitions = 1;
-              partitionType = "count";
-            }
-          );
-        };
+        checks =
+          let
+            sourceTree = pkgs.lib.cleanSource ./.;
+          in
+          {
+            inherit jj-gh;
+            clippy = craneLib.cargoClippy (
+              commonArgs
+              // {
+                inherit cargoArtifacts;
+                cargoClippyExtraArgs = "--all-targets -- -D warnings";
+              }
+            );
+            fmt = craneLib.cargoFmt { inherit src; };
+            nextest = craneLib.cargoNextest (
+              commonArgs
+              // {
+                inherit cargoArtifacts;
+                partitions = 1;
+                partitionType = "count";
+              }
+            );
+            yamlfmt = pkgs.runCommand "yamlfmt-check" {
+              nativeBuildInputs = [ pkgs.yamlfmt ];
+            } ''
+              cd ${sourceTree}
+              yamlfmt -lint .
+              touch $out
+            '';
+            actionlint = pkgs.runCommand "actionlint-check" {
+              nativeBuildInputs = [ pkgs.actionlint ];
+            } ''
+              actionlint ${sourceTree}/.github/workflows/*.yml
+              touch $out
+            '';
+            taplo = pkgs.runCommand "taplo-check" {
+              nativeBuildInputs = [ pkgs.taplo ];
+            } ''
+              cd ${sourceTree}
+              taplo fmt --check
+              touch $out
+            '';
+          };
       }
     )
     // {
