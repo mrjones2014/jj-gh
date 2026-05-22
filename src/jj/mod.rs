@@ -55,6 +55,13 @@ pub trait Jj {
     ///
     /// Propagates jj errors.
     fn remote_bookmark_sha(&self, bookmark: &str, remote: &str) -> Result<Option<String>>;
+
+    /// `jj git push -c <rev>`. Pushes the change and creates a bookmark if needed.
+    ///
+    /// # Errors
+    ///
+    /// Propagates jj failures.
+    async fn push(&self, rev: &str) -> Result<()>;
 }
 
 /// Compose the revset used to compute the default PR title.
@@ -110,6 +117,9 @@ mod tests {
                 .remote_branches
                 .contains(&(bookmark.into(), remote.into()))
                 .then(|| format!("{remote}/{bookmark}-sha")))
+        }
+        async fn push(&self, _: &str) -> Result<()> {
+            unimplemented!()
         }
     }
 

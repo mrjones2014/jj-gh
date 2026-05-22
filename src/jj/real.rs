@@ -105,6 +105,18 @@ impl Jj for JjCli {
         Ok(Some(url).filter(|s| !s.is_empty()))
     }
 
+    async fn push(&self, rev: &str) -> Result<()> {
+        let status = tokio::process::Command::new("jj")
+            .args(["git", "push", "-c", rev])
+            .status()
+            .await
+            .context("failed to spawn `jj`")?;
+        if !status.success() {
+            return Err(anyhow!("`jj git push -c {rev}` failed with {status}"));
+        }
+        Ok(())
+    }
+
     fn remote_bookmark_sha(&self, bookmark: &str, remote: &str) -> Result<Option<String>> {
         let revset = format!("remote_bookmarks(exact:{bookmark:?}, remote=exact:{remote:?})");
         let stdout = run_jj(&[
