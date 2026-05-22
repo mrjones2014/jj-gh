@@ -102,4 +102,10 @@ pub enum DebugAction {
     Config,
     /// Resolve the GitHub token and report success or failure. Never prints the token itself.
     Auth,
+    /// Resolve a revision and print commit info, ancestor bookmark, remote URLs,
+    /// and the detected default branch.
+    Rev {
+        #[arg(value_name = "REV")]
+        rev: String,
+    },
 }

@@ -5,6 +5,8 @@ mod auth;
 mod cli;
 mod config;
 mod debug;
+mod git;
+mod jj;
 mod logging;
 
 #[tokio::main(flavor = "current_thread")]

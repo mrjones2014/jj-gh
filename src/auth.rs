@@ -14,8 +14,7 @@ use crate::config::Config;
 use anyhow::{Context, Result, anyhow};
 use secrecy::SecretString;
 use std::time::Duration;
-use tokio::process::Command;
-use tokio::time::timeout;
+use tokio::{process::Command, time::timeout};
 
 const ASKPASS_STDOUT_LIMIT: usize = 4 * 1024;
 
