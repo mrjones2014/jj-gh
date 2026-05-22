@@ -1,8 +1,8 @@
 //! `jj` CLI-backed [`Jj`] implementation.
 //!
-//! Remote-URL reads go through `git config` against jj's embedded git store
-//! (`<workspace>/.jj/repo/store/git`) so the same code path works for both
-//! colocated and pure-jj repos.
+//! Remote-URL reads parse jj's embedded git store config directly (via
+//! [`parse_remote_url`]), which works in both colocated and pure-jj repos
+//! without a `git` binary on `PATH`.
 
 use super::{CommitInfo, Jj};
 use anyhow::{Context, Result, anyhow};
@@ -83,26 +83,16 @@ impl Jj for JjCli {
     }
 
     fn remote_url(&self, name: &str) -> Result<Option<String>> {
-        let git_dir = git_backend_dir()?;
-        let output = Command::new("git")
-            .arg("-C")
-            .arg(&git_dir)
-            .args(["config", "--get", &format!("remote.{name}.url")])
-            .output()
-            .context("failed to spawn `git`")?;
-        if !output.status.success() {
-            // `git config --get` exits 1 when the key is missing.
-            if output.status.code() == Some(1) {
-                return Ok(None);
+        let config_path = git_backend_dir()?.join("config");
+        let contents = match std::fs::read_to_string(&config_path) {
+            Ok(s) => s,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => {
+                return Err(e)
+                    .with_context(|| format!("could not read `{}`", config_path.display()));
             }
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(anyhow!("`git config` failed: {}", stderr.trim()));
-        }
-        let url = String::from_utf8(output.stdout)
-            .context("`git config` output is not UTF-8")?
-            .trim()
-            .to_string();
-        Ok(Some(url).filter(|s| !s.is_empty()))
+        };
+        Ok(parse_remote_url(&contents, name))
     }
 
     async fn push(&self, rev: &str) -> Result<()> {
@@ -162,6 +152,53 @@ fn git_backend_dir() -> Result<PathBuf> {
     Ok(store_dir.join(target))
 }
 
+/// Extract a `[remote "NAME"] url = ...` value from a git-config-format string.
+///
+/// Supports comments (`#`, `;`), whitespace, and optionally-quoted values. Returns
+/// the last `url` value in the matching section.
+fn parse_remote_url(contents: &str, remote: &str) -> Option<String> {
+    let target_header = format!(r#"[remote "{remote}"]"#);
+    contents
+        .lines()
+        .map(strip_comment)
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .fold((false, None), |(in_section, url), line| {
+            if is_section_header(line) {
+                (line == target_header, url)
+            } else if in_section {
+                (in_section, parse_key_value(line, "url").or(url))
+            } else {
+                (in_section, url)
+            }
+        })
+        .1
+}
+
+fn is_section_header(line: &str) -> bool {
+    line.starts_with('[') && line.ends_with(']')
+}
+
+fn strip_comment(line: &str) -> &str {
+    let cut = line.find(['#', ';']).unwrap_or(line.len());
+    &line[..cut]
+}
+
+fn parse_key_value(line: &str, key: &str) -> Option<String> {
+    let rest = line.strip_prefix(key)?;
+    let rest = rest.trim_start();
+    let value = rest.strip_prefix('=')?.trim();
+    let unquoted = value
+        .strip_prefix('"')
+        .and_then(|s| s.strip_suffix('"'))
+        .unwrap_or(value);
+    if unquoted.is_empty() {
+        None
+    } else {
+        Some(unquoted.to_string())
+    }
+}
+
 fn run_jj(args: &[&str]) -> Result<Vec<u8>> {
     let output = Command::new("jj")
         .arg("--ignore-working-copy")
@@ -173,4 +210,106 @@ fn run_jj(args: &[&str]) -> Result<Vec<u8>> {
         return Err(anyhow!("`jj {}` failed: {}", args.join(" "), stderr.trim()));
     }
     Ok(output.stdout)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_url_from_simple_remote_section() {
+        let cfg = r#"
+[remote "origin"]
+	url = git@github.com:o/r.git
+	fetch = +refs/heads/*:refs/remotes/origin/*
+"#;
+        assert_eq!(
+            parse_remote_url(cfg, "origin"),
+            Some("git@github.com:o/r.git".into())
+        );
+    }
+
+    #[test]
+    fn picks_correct_remote_when_multiple_present() {
+        let cfg = r#"
+[remote "origin"]
+	url = git@github.com:fork/r.git
+[remote "upstream"]
+	url = git@github.com:org/r.git
+"#;
+        assert_eq!(
+            parse_remote_url(cfg, "upstream"),
+            Some("git@github.com:org/r.git".into())
+        );
+    }
+
+    #[test]
+    fn returns_none_when_remote_missing() {
+        let cfg = r#"
+[remote "origin"]
+	url = git@github.com:o/r.git
+"#;
+        assert!(parse_remote_url(cfg, "upstream").is_none());
+    }
+
+    #[test]
+    fn returns_none_when_section_has_no_url() {
+        let cfg = r#"
+[remote "origin"]
+	fetch = +refs/heads/*:refs/remotes/origin/*
+"#;
+        assert!(parse_remote_url(cfg, "origin").is_none());
+    }
+
+    #[test]
+    fn ignores_comments() {
+        let cfg = r#"
+# leading comment
+[remote "origin"]
+	# inline comment
+	url = git@github.com:o/r.git ; trailing
+"#;
+        assert_eq!(
+            parse_remote_url(cfg, "origin"),
+            Some("git@github.com:o/r.git".into())
+        );
+    }
+
+    #[test]
+    fn handles_quoted_url() {
+        let cfg = r#"
+[remote "origin"]
+	url = "https://github.com/o/r.git"
+"#;
+        assert_eq!(
+            parse_remote_url(cfg, "origin"),
+            Some("https://github.com/o/r.git".into())
+        );
+    }
+
+    #[test]
+    fn last_url_wins_within_section() {
+        let cfg = r#"
+[remote "origin"]
+	url = git@github.com:o/old.git
+	url = git@github.com:o/new.git
+"#;
+        assert_eq!(
+            parse_remote_url(cfg, "origin"),
+            Some("git@github.com:o/new.git".into())
+        );
+    }
+
+    #[test]
+    fn ignores_other_keys_in_section() {
+        let cfg = r#"
+[remote "origin"]
+	pushurl = git@github.com:o/wrong.git
+	url = git@github.com:o/r.git
+"#;
+        assert_eq!(
+            parse_remote_url(cfg, "origin"),
+            Some("git@github.com:o/r.git".into())
+        );
+    }
 }
