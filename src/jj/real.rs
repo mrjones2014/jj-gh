@@ -107,6 +107,25 @@ impl Jj for JjCli {
         Ok(())
     }
 
+    fn trunk_branch(&self) -> Result<Option<String>> {
+        let stdout = run_jj(&[
+            "log",
+            "--no-graph",
+            "-r",
+            "trunk()",
+            "--limit",
+            "1",
+            "-T",
+            "json(bookmarks.map(|b| b.name()))",
+        ])?;
+        if stdout.is_empty() {
+            return Ok(None);
+        }
+        let names: Vec<String> =
+            serde_json::from_slice(&stdout).context("could not parse jj bookmarks output")?;
+        Ok(names.into_iter().next())
+    }
+
     fn remote_bookmark_sha(&self, bookmark: &str, remote: &str) -> Result<Option<String>> {
         let revset = format!("remote_bookmarks(exact:{bookmark:?}, remote=exact:{remote:?})");
         let stdout = run_jj(&[

@@ -53,7 +53,7 @@ fn print_rev(rev: &str) -> Result<()> {
 
     let origin_url = jj.remote_url("origin")?;
     let upstream_url = jj.remote_url("upstream")?;
-    let default_branch = jj::default_branch(&jj, "origin")?;
+    let default_branch = jj.trunk_branch()?;
     let default_branch_sha = match &default_branch {
         Some(branch) => jj.remote_bookmark_sha(branch, "origin")?,
         None => None,
@@ -96,8 +96,9 @@ async fn print_pr_lookup(rev: &str) -> Result<()> {
     let target = remote::target(&origin_url, upstream_url.as_deref())?;
     let head_spec = target.head_spec(&branch);
 
-    let default_base = jj::default_branch(&jj, "origin")?
-        .ok_or_else(|| anyhow!("could not detect default branch on origin"))?;
+    let default_base = jj
+        .trunk_branch()?
+        .ok_or_else(|| anyhow!("could not detect trunk() bookmark"))?;
 
     let config = config::load()?;
     let token = auth::resolve_token(&config).await?;
