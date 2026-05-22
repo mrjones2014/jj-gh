@@ -1,18 +1,28 @@
 [package]
-name = "jj-gh"
-version = "0.1.0"
+description = "Opinionated `jj` tools for working with GitHub from your terminal"
 edition = "2024"
-description = "Configurable jj subcommand for GitHub PR workflows"
 license = "MIT"
+name = "jj-gh"
 repository = "https://github.com/mrjones2014/jj-gh"
+version = "0.1.0"
 
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
+figment = { version = "0.10", features = ["toml"] }
 flexi_logger = { version = "0.31", default-features = false, features = ["colors"] }
 log = "0.4"
+secrecy = { version = "0.10", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+shell-words = "1"
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt", "process", "time"] }
+toml = "1"
+
+[dev-dependencies]
+insta = { version = "1", features = ["yaml"] }
+pretty_assertions = "1"
+tempfile = "3"
 
 [lints.rust]
 warnings = "deny"

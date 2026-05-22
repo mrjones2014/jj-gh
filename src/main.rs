@@ -1,8 +1,10 @@
 use anyhow::Result;
 use clap::Parser;
 
+mod auth;
 mod cli;
-mod error;
+mod config;
+mod debug;
 mod logging;
 
 #[tokio::main(flavor = "current_thread")]
@@ -16,6 +18,7 @@ async fn main() -> Result<()> {
                 log::info!("pr create not yet implemented (rev = {})", create.rev);
             }
         },
+        cli::Command::Debug { action } => debug::dispatch(action).await?,
     }
     Ok(())
 }
