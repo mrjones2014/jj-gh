@@ -1,0 +1,21 @@
+[package]
+name = "jj-gh"
+version = "0.1.0"
+edition = "2024"
+description = "Configurable jj subcommand for GitHub PR workflows"
+license = "MIT"
+repository = "https://github.com/mrjones2014/jj-gh"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+flexi_logger = { version = "0.31", default-features = false, features = ["colors"] }
+log = "0.4"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt", "process", "time"] }
+
+[lints.rust]
+warnings = "deny"
+
+[lints.clippy]
+pedantic = { level = "deny", priority = -1 }
