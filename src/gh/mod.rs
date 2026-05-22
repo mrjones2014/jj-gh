@@ -3,11 +3,6 @@
 //! All write-side calls go through [`Gh`]. The production impl wraps `octocrab`;
 //! tests use a fake.
 
-#![expect(
-    dead_code,
-    reason = "create_pr / add_labels and friends are not wired up yet"
-)]
-
 use anyhow::Result;
 
 pub mod real;

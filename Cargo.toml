@@ -19,7 +19,9 @@ octocrab = "0.51"
 secrecy = { version = "0.10", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+serde_yml = "0.0.12"
 shell-words = "1"
+tempfile = "3"
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt", "process", "time"] }
 toml = "1"
@@ -28,7 +30,6 @@ url = "2"
 [dev-dependencies]
 insta = { version = "1", features = ["yaml"] }
 pretty_assertions = "1"
-tempfile = "3"
 
 [lints.rust]
 warnings = "deny"
