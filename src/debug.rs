@@ -4,22 +4,24 @@ use crate::{
     auth,
     cli::DebugAction,
     config,
+    gh::{Gh, real::OctocrabGh, remote},
     git::url::parse_owner_repo,
     jj::{self, CommitInfo, Jj, real::JjCli},
 };
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 
 /// Dispatch a `jj-gh debug` invocation.
 ///
 /// # Errors
 ///
 /// Returns an error from the underlying operation; for `auth` this means token
-/// resolution failed, for `rev` it means the jj read failed.
+/// resolution failed, for `rev`/`pr-lookup` the jj or GH read failed.
 pub async fn dispatch(action: DebugAction) -> Result<()> {
     match action {
         DebugAction::Config => print_config(),
         DebugAction::Auth => check_auth().await,
         DebugAction::Rev { rev } => print_rev(&rev),
+        DebugAction::PrLookup { rev } => print_pr_lookup(&rev).await,
     }
 }
 
@@ -75,5 +77,45 @@ fn print_rev(rev: &str) -> Result<()> {
             Err(e) => println!("parsed_origin: error: {e}"),
         }
     }
+    Ok(())
+}
+
+async fn print_pr_lookup(rev: &str) -> Result<()> {
+    let jj = JjCli;
+    let info = jj.resolve_rev(rev)?;
+    let branch = info
+        .bookmarks
+        .first()
+        .cloned()
+        .ok_or_else(|| anyhow!("no local bookmark on `{rev}`; nothing to look up"))?;
+
+    let origin_url = jj
+        .remote_url("origin")?
+        .ok_or_else(|| anyhow!("origin remote is not configured"))?;
+    let upstream_url = jj.remote_url("upstream")?;
+    let target = remote::target(&origin_url, upstream_url.as_deref())?;
+    let head_spec = target.head_spec(&branch);
+
+    let default_base = jj::default_branch(&jj, "origin")?
+        .ok_or_else(|| anyhow!("could not detect default branch on origin"))?;
+
+    let config = config::load()?;
+    let token = auth::resolve_token(&config).await?;
+    let gh = OctocrabGh::new(&token)?;
+
+    let existing = gh
+        .find_open_pr(&target.owner, &target.repo, &head_spec)
+        .await?;
+    let base_exists = gh
+        .branch_exists(&target.owner, &target.repo, &default_base)
+        .await?;
+
+    println!("rev: {rev}");
+    println!("branch: {branch}");
+    println!("target: {target:#?}");
+    println!("head_spec: {head_spec}");
+    println!("default_base: {default_base}");
+    println!("base_branch_exists: {base_exists}");
+    println!("existing_open_pr: {existing:#?}");
     Ok(())
 }
