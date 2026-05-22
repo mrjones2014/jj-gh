@@ -10,8 +10,12 @@ version = "0.1.0"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 figment = { version = "0.10", features = ["toml"] }
-flexi_logger = { version = "0.31", default-features = false, features = ["colors"] }
+flexi_logger = { version = "0.31", default-features = false, features = [
+  "colors",
+] }
+http = "1"
 log = "0.4"
+octocrab = "0.51"
 secrecy = { version = "0.10", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

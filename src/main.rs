@@ -5,6 +5,7 @@ mod auth;
 mod cli;
 mod config;
 mod debug;
+mod gh;
 mod git;
 mod jj;
 mod logging;

@@ -108,4 +108,10 @@ pub enum DebugAction {
         #[arg(value_name = "REV")]
         rev: String,
     },
+    /// Pre-flight lookup for a PR: resolve the target, check if a PR is already
+    /// open for the head, and confirm the base branch exists on the remote.
+    PrLookup {
+        #[arg(value_name = "REV")]
+        rev: String,
+    },
 }
