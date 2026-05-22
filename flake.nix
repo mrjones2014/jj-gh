@@ -53,7 +53,6 @@
           packages = [
             pkgs.actionlint
             pkgs.cargo-nextest
-            pkgs.git
             pkgs.jujutsu
             pkgs.rust-analyzer
             pkgs.taplo
