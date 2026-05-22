@@ -65,8 +65,9 @@ where
     }
 
     let ancestor = jj.stacked_ancestor_bookmark(&args.rev)?;
-    let detected_base =
-        jj::default_branch(jj, "origin")?.unwrap_or_else(|| config.default_base_branch.clone());
+    let detected_base = jj
+        .trunk_branch()?
+        .unwrap_or_else(|| config.default_base_branch.clone());
     let base = resolve_base(args, ancestor.as_deref(), &detected_base);
 
     if !gh.branch_exists(&target.owner, &target.repo, &base).await? {

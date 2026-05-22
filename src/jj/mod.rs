@@ -62,6 +62,15 @@ pub trait Jj {
     ///
     /// Propagates jj failures.
     async fn push(&self, rev: &str) -> Result<()>;
+
+    /// Bookmark at jj's `trunk()` revset, or `Ok(None)` if `trunk()` is empty.
+    ///
+    /// jj's `trunk()` is driven by the repo's `revsets.trunk` setting.
+    ///
+    /// # Errors
+    ///
+    /// Propagates jj errors.
+    fn trunk_branch(&self) -> Result<Option<String>>;
 }
 
 /// Compose the revset used to compute the default PR title.
@@ -76,61 +85,9 @@ pub fn title_base_revset(rev: &str, ancestor: Option<&str>) -> String {
     }
 }
 
-/// Detect the default branch on `remote` by probing `main` then `master`.
-///
-/// # Errors
-///
-/// Propagates errors from [`Jj::remote_bookmark_sha`].
-pub fn default_branch<J: Jj>(jj: &J, remote: &str) -> Result<Option<String>> {
-    for branch in ["main", "master"] {
-        if jj.remote_bookmark_sha(branch, remote)?.is_some() {
-            return Ok(Some(branch.to_string()));
-        }
-    }
-    Ok(None)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashSet;
-
-    struct FakeJj {
-        remote_branches: HashSet<(String, String)>,
-    }
-
-    impl Jj for FakeJj {
-        fn resolve_rev(&self, _: &str) -> Result<CommitInfo> {
-            unimplemented!()
-        }
-        fn stacked_ancestor_bookmark(&self, _: &str) -> Result<Option<String>> {
-            unimplemented!()
-        }
-        fn first_commit_description(&self, _: &str) -> Result<String> {
-            unimplemented!()
-        }
-        fn remote_url(&self, _: &str) -> Result<Option<String>> {
-            unimplemented!()
-        }
-        fn remote_bookmark_sha(&self, bookmark: &str, remote: &str) -> Result<Option<String>> {
-            Ok(self
-                .remote_branches
-                .contains(&(bookmark.into(), remote.into()))
-                .then(|| format!("{remote}/{bookmark}-sha")))
-        }
-        async fn push(&self, _: &str) -> Result<()> {
-            unimplemented!()
-        }
-    }
-
-    fn fake(branches: &[(&str, &str)]) -> FakeJj {
-        FakeJj {
-            remote_branches: branches
-                .iter()
-                .map(|(b, r)| ((*b).to_string(), (*r).to_string()))
-                .collect(),
-        }
-    }
 
     #[test]
     fn revset_with_ancestor() {
@@ -143,36 +100,5 @@ mod tests {
     #[test]
     fn revset_without_ancestor() {
         assert_eq!(title_base_revset("@-", None), "trunk()..(@-)");
-    }
-
-    #[test]
-    fn default_branch_prefers_main() {
-        let jj = fake(&[("main", "origin"), ("master", "origin")]);
-        assert_eq!(default_branch(&jj, "origin").unwrap(), Some("main".into()));
-    }
-
-    #[test]
-    fn default_branch_falls_back_to_master() {
-        let jj = fake(&[("master", "origin")]);
-        assert_eq!(
-            default_branch(&jj, "origin").unwrap(),
-            Some("master".into())
-        );
-    }
-
-    #[test]
-    fn default_branch_none_when_neither_present() {
-        let jj = fake(&[]);
-        assert_eq!(default_branch(&jj, "origin").unwrap(), None);
-    }
-
-    #[test]
-    fn default_branch_honors_remote_name() {
-        let jj = fake(&[("main", "upstream")]);
-        assert_eq!(default_branch(&jj, "origin").unwrap(), None);
-        assert_eq!(
-            default_branch(&jj, "upstream").unwrap(),
-            Some("main".into())
-        );
     }
 }
