@@ -10,9 +10,11 @@
 //! Each file source reads from its `[tools.jj-gh]` subtree via [`JjToolsProvider`].
 
 use anyhow::Result;
-use figment::providers::Serialized;
-use figment::value::{Dict, Map};
-use figment::{Figment, Metadata, Profile, Provider};
+use figment::{
+    Figment, Metadata, Profile, Provider,
+    providers::Serialized,
+    value::{Dict, Map},
+};
 use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
