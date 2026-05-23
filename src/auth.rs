@@ -109,7 +109,7 @@ pub async fn resolve_token_with<R: ProcessRunner>(
     }
 
     Err(anyhow!(
-        "no GitHub token available: set `gh_askpass` or `gh_token` in jj config under `[tools.jj-gh]`"
+        "no GitHub token available: set `gh_askpass` or `gh_token` in jj config under `[jj-gh]`"
     ))
 }
 

@@ -156,10 +156,10 @@ requires a colocated git repository.
 
 ## Config
 
-Add a `[tools.jj-gh]` table to any jj config layer (global `~/.config/jj/config.toml` or repo-local `.jj/repo/config.toml`):
+Add a `[jj-gh]` table to any jj config layer (global `~/.config/jj/config.toml` or repo-local `.jj/repo/config.toml`):
 
 ```toml
-[tools.jj-gh]
+[jj-gh]
 # Auth (one of these is required).
 gh_askpass = ["op", "read", "op://Personal/github/token"] # preferred
 gh_token = "ghp_..."                                      # plain token, less safe

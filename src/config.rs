@@ -7,7 +7,7 @@
 //! 4. File pointed to by `$JJ_GH_EXTRA_CONFIG`.
 //! 5. Env overlay (`GH_ASKPASS`, `JJ_GH_TEMPLATE`).
 //!
-//! Each file source reads from its `[tools.jj-gh]` subtree via [`JjToolsProvider`].
+//! Each file source reads from its `[jj-gh]` subtree via [`JjToolsProvider`].
 
 use anyhow::Result;
 use figment::{
@@ -56,7 +56,7 @@ impl Default for Config {
 pub fn load() -> Result<Config> {
     let mut fig = defaults_figment();
     for path in discover_layers() {
-        fig = fig.merge(JjToolsProvider::from_file(path));
+        fig = fig.merge(JjConfProvider::from_file(path));
     }
     fig = fig.merge(Serialized::defaults(EnvOverlay::from_env()));
     let config: Config = extract(&fig)?;
@@ -99,12 +99,15 @@ fn discover_layers() -> Vec<PathBuf> {
     if let Some(p) = jj_global_config_path() {
         out.push(p);
     }
+
     if let Some(p) = jj_repo_config_path() {
         out.push(p);
     }
+
     if let Some(p) = std::env::var_os("JJ_GH_EXTRA_CONFIG") {
         out.push(PathBuf::from(p));
     }
+
     out
 }
 
@@ -112,9 +115,11 @@ fn jj_global_config_path() -> Option<PathBuf> {
     if let Some(p) = std::env::var_os("JJ_CONFIG") {
         return Some(PathBuf::from(p));
     }
+
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
+
     Some(base.join("jj").join("config.toml"))
 }
 
@@ -141,12 +146,12 @@ enum TomlSource {
     Absent { name: String },
 }
 
-/// Figment provider that extracts the `tools.jj-gh` subtree from a TOML source.
-pub struct JjToolsProvider {
+/// Figment provider that extracts the `jj-gh` subtree from a TOML source.
+pub struct JjConfProvider {
     source: TomlSource,
 }
 
-impl JjToolsProvider {
+impl JjConfProvider {
     #[must_use]
     pub fn from_file(path: impl Into<PathBuf>) -> Self {
         Self {
@@ -196,9 +201,9 @@ impl JjToolsProvider {
     }
 }
 
-impl Provider for JjToolsProvider {
+impl Provider for JjConfProvider {
     fn metadata(&self) -> Metadata {
-        Metadata::named("jj config (tools.jj-gh)").source(self.source_label())
+        Metadata::named("jj config (jj-gh)").source(self.source_label())
     }
 
     fn data(&self) -> Result<Map<Profile, Dict>, figment::Error> {
@@ -223,14 +228,14 @@ enum SourceError {
     Io(String),
     #[error("{0}")]
     Toml(String),
-    #[error("`tools.jj-gh` must be a TOML table")]
+    #[error("`jj-gh` must be a TOML table")]
     NotATable,
 }
 
 fn extract_jj_gh_subtree(contents: &str) -> Result<Option<toml::Table>, SourceError> {
     let parsed: toml::Value =
         toml::from_str(contents).map_err(|e| SourceError::Toml(e.to_string()))?;
-    let Some(subtree) = parsed.get("tools").and_then(|t| t.get("jj-gh")) else {
+    let Some(subtree) = parsed.get("jj-gh") else {
         return Ok(None);
     };
     let table = subtree.as_table().ok_or(SourceError::NotATable)?.clone();
@@ -288,7 +293,7 @@ mod tests {
     use super::*;
     use secrecy::ExposeSecret;
 
-    fn from_layers<I: IntoIterator<Item = JjToolsProvider>>(layers: I) -> Result<Config> {
+    fn from_layers<I: IntoIterator<Item = JjConfProvider>>(layers: I) -> Result<Config> {
         let mut fig = defaults_figment();
         for layer in layers {
             fig = fig.merge(layer);
@@ -307,25 +312,25 @@ mod tests {
 
     #[test]
     fn absent_source_is_non_fatal() {
-        let config = from_layers([JjToolsProvider::from_absent("global")]).unwrap();
+        let config = from_layers([JjConfProvider::from_absent("global")]).unwrap();
         assert_eq!(config.default_base_branch, "master");
     }
 
     #[test]
     fn later_layers_override_earlier_layers() {
         let config = from_layers([
-            JjToolsProvider::from_memory(
+            JjConfProvider::from_memory(
                 "lo",
                 r#"
-                [tools.jj-gh]
+                [jj-gh]
                 default_base_branch = "develop"
                 askpass_timeout_secs = 5
                 "#,
             ),
-            JjToolsProvider::from_memory(
+            JjConfProvider::from_memory(
                 "hi",
                 r#"
-                [tools.jj-gh]
+                [jj-gh]
                 default_base_branch = "trunk"
                 "#,
             ),
@@ -337,10 +342,10 @@ mod tests {
 
     #[test]
     fn token_deserializes_as_redacted_secret() {
-        let config = from_layers([JjToolsProvider::from_memory(
+        let config = from_layers([JjConfProvider::from_memory(
             "with-token",
             r#"
-            [tools.jj-gh]
+            [jj-gh]
             gh_token = "ghp_super_secret"
             "#,
         )])
@@ -357,14 +362,14 @@ mod tests {
 
     #[test]
     fn ignores_unrelated_jj_config_keys() {
-        let config = from_layers([JjToolsProvider::from_memory(
+        let config = from_layers([JjConfProvider::from_memory(
             "noise",
             r#"
             [user]
-            name = "Mat"
-            email = "mat@example.com"
+            name = "user"
+            email = "user@example.com"
 
-            [tools.jj-gh]
+            [jj-gh]
             default_base_branch = "main"
             "#,
         )])
@@ -374,10 +379,9 @@ mod tests {
 
     #[test]
     fn rejects_non_table_subtree() {
-        let err = from_layers([JjToolsProvider::from_memory(
+        let err = from_layers([JjConfProvider::from_memory(
             "bad",
             r#"
-            [tools]
             "jj-gh" = "not a table"
             "#,
         )])
@@ -395,7 +399,7 @@ mod tests {
     fn extract_returns_table_when_present() {
         let parsed = extract_jj_gh_subtree(
             r#"
-            [tools.jj-gh]
+            [jj-gh]
             default_base_branch = "trunk"
             "#,
         )
@@ -409,10 +413,10 @@ mod tests {
 
     #[test]
     fn pr_fetch_bookmark_template_round_trips() {
-        let config = from_layers([JjToolsProvider::from_memory(
+        let config = from_layers([JjConfProvider::from_memory(
             "tmpl",
             r#"
-            [tools.jj-gh]
+            [jj-gh]
             pr_fetch_bookmark_template = "pr-{number}-{user}"
             "#,
         )])
