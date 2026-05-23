@@ -18,7 +18,11 @@ and `git` on `PATH` (jj cannot yet fetch arbitrary refs like
 
 ## Install
 
-Nix flake:
+<details>
+
+  <summary>With Nix</summary>
+
+Add the flake input:
 
 ```nix
 {
@@ -36,15 +40,45 @@ Nix flake:
 }
 ```
 
-From source:
+You can either use the overlay directly, or use the `home-manager` module.
+
+```nix
+{ jj-gh, pkgs, ... }:
+{
+  # overlay, not needed if using home-manager module
+  nixpkgs.overlays = [ jj-gh.overlays.default ];
+  home.packages = [ pkgs.jj-gh ];
+
+  # home-manager
+  imports = [ jj-gh.hmModules.default ];
+  programs.jujutsu.gh = {
+    # this will set up some jj aliases like
+    # pr = ["util", "exec", "--", "jj-gh", "pr"]
+    enable = true;
+    settings = {
+      gh_askpass = [
+        "op"
+        "read"
+        "op://Private/GitHub/token"
+      ];
+    };
+  };
+}
+```
+
+</details>
+
+<details>
+
+  <summary>From source</summary>
+
+Requires Rust toolchain. Will publish to `crates.io` in the future.
 
 ```sh
 cargo install --path .
 ```
 
-Will publish to `crates.io` in the future.
-
-### As a `jj` alias
+### Setup a `jj` alias
 
 Set up `pr` as a built-in `jj` subcommand so you can write `jj pr create <rev>`:
 
@@ -57,6 +91,8 @@ pr = ["util", "exec", "--", "jj-gh", "pr"]
 Now `jj pr create <rev>` (and the alias `jj pr c <rev>`) and
 `jj pr fetch <pr-num>` (alias `jj pr f <pr-num>`) work like any other `jj`
 subcommand.
+
+</details>
 
 ## Usage
 

@@ -53,7 +53,7 @@
             inherit cargoArtifacts;
           }
         );
-        treefmtEval = treefmt-nix.lib.evalModule pkgs (import ./treefmt.nix { inherit rustToolchain; });
+        treefmtEval = treefmt-nix.lib.evalModule pkgs (import ./nix/treefmt.nix { inherit rustToolchain; });
       in
       {
         packages.default = jj-gh;
@@ -103,5 +103,7 @@
       overlays.default = final: _prev: {
         jj-gh = self.packages.${final.stdenv.hostPlatform.system}.default;
       };
+      homeManagerModules.default = import ./nix/hm-module.nix self;
+      homeManagerModules.jj-gh = import ./nix/hm-module.nix self;
     };
 }
