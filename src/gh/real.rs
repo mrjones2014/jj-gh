@@ -142,10 +142,10 @@ fn humanize(e: octocrab::Error) -> anyhow::Error {
     let message = source.message.trim();
     match status {
         401 => anyhow!(
-            "GitHub rejected the token (401). Refresh your `gh_askpass` output or generate a new PAT with the `repo` scope."
+            "GitHub rejected the token (401). Refresh your `gh_askpass` output or generate a new PAT. See README \"GitHub token permissions\" for required scopes."
         ),
         403 => anyhow!(
-            "GitHub denied the request (403): {message}. Check the token's scopes (`repo`) and whether you've hit the API rate limit."
+            "GitHub denied the request (403): {message}. Check the token's permissions (see README \"GitHub token permissions\") and whether you've hit the API rate limit."
         ),
         422 => anyhow!(
             "GitHub rejected the request (422): {message}. Common causes: the head branch is not pushed, there are no commits between head and base, or a PR already exists."
