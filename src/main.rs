@@ -18,19 +18,8 @@ async fn main() -> Result<()> {
     let _logger = logging::init(&args.global)?;
 
     match args.command {
-        cli::Command::Pr { action } => match action {
-            cli::PrAction::Create(create) => run_pr_create(create).await?,
-        },
+        cli::Command::Pr { action } => pr::dispatch(action).await?,
         cli::Command::Debug { action } => debug::dispatch(action).await?,
     }
     Ok(())
-}
-
-async fn run_pr_create(args: cli::CreateArgs) -> Result<()> {
-    let config = config::load()?;
-    let token = auth::resolve_token(&config).await?;
-    let jj = jj::real::JjCli;
-    let gh = gh::real::OctocrabGh::new(&token)?;
-    let editor = pr::TempfileEditor;
-    pr::create(&jj, &gh, &editor, &config, &args).await
 }
