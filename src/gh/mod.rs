@@ -51,7 +51,8 @@ pub struct PrCreated {
 }
 
 pub trait Gh {
-    /// First open PR whose `head` matches `head_spec` (`branch` or `owner:branch`).
+    /// First open PR whose `head` matches `head_spec`. Must be `owner:branch` —
+    /// GitHub silently ignores the `head` filter without the owner prefix.
     ///
     /// # Errors
     ///
