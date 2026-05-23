@@ -29,6 +29,11 @@
         rustToolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
         craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
 
+        nightlyToolchain = pkgs.rust-bin.selectLatestNightlyWith (
+          toolchain: toolchain.minimal
+        );
+        craneLibNightly = (crane.mkLib pkgs).overrideToolchain nightlyToolchain;
+
         src = craneLib.cleanCargoSource ./.;
         commonArgs = {
           inherit src;
@@ -38,6 +43,7 @@
           ];
         };
         cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+        cargoArtifactsNightly = craneLibNightly.buildDepsOnly commonArgs;
         jj-gh = craneLib.buildPackage (
           commonArgs
           // {
@@ -53,6 +59,7 @@
           packages = [
             pkgs.actionlint
             pkgs.cargo-nextest
+            pkgs.cargo-udeps
             pkgs.jujutsu
             pkgs.rust-analyzer
             pkgs.taplo
@@ -79,6 +86,15 @@
                 inherit cargoArtifacts;
                 partitions = 1;
                 partitionType = "count";
+              }
+            );
+            udeps = craneLibNightly.mkCargoDerivation (
+              commonArgs
+              // {
+                cargoArtifacts = cargoArtifactsNightly;
+                pnameSuffix = "-udeps";
+                buildPhaseCargoCommand = "cargo udeps --all-targets --locked";
+                nativeBuildInputs = [ pkgs.cargo-udeps ];
               }
             );
             yamlfmt = pkgs.runCommand "yamlfmt-check" {
