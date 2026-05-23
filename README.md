@@ -151,9 +151,12 @@ draft: false # bool
 The only development dependency is Nix.
 
 ```sh
-direnv allow       # or `nix develop` if preferred
-cargo nextest run  # or `cargo nt` alias, runs nextest
+direnv allow                 # or `nix develop` if preferred
+nix build                    # build the CLI with Nix caching
+nix run .# -- pr create zxy  # run the cached build
+nix flake check              # runs everything via crane
+# running cargo directly loses out on nix caching but still useful for local dev
+cargo nextest run            # or `cargo nt` alias, runs nextest
 cargo clippy
 cargo fmt --check
-nix flake check    # runs everything via crane
 ```
