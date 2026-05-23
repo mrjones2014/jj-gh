@@ -2,6 +2,14 @@
 
 Opinionated `jj` tools for working with GitHub from your terminal.
 
+- Create PRs from any revision, including smart support for stacked PRs
+- Easily fetch PRs for local checkout, including across forks
+
+all from the comfort of your terminal, without touching GitHub's clunky web UI.
+Works great when combined with the [jj megamerge](https://isaaccorbrey.com/notes/jujutsu-megamerges-for-fun-and-profit) workflow!
+
+PRs welcome and encouraged!
+
 ## Requirements
 
 `jj` must be on `PATH`. `pr fetch` additionally requires a colocated git repo
@@ -63,7 +71,7 @@ The editor opens with a buffer like:
 ```markdown
 ---
 title: "feat(thing): do the thing"
-base: "main"
+base: "master"
 labels: []
 draft: false
 ---
@@ -75,7 +83,7 @@ Save and quit. `jj-gh` pushes the change with `jj git push -c`, opens the PR, ap
 
 If a PR is already open for the head, the existing URL is printed and nothing is changed.
 
-### Base-branch resolution
+#### Base-branch resolution
 
 `jj-gh` supports stacked PRs by picking a smart default base:
 
@@ -182,6 +190,26 @@ editor = [
 ```
 
 Precedence (low to high): built-in defaults < jj global < jj repo-local < `$JJ_GH_EXTRA_CONFIG` file < env (`GH_ASKPASS`, `JJ_GH_TEMPLATE`) < CLI flags.
+
+### GitHub token permissions
+
+The token supplied via `gh_askpass` or `gh_token` needs different scopes depending on which subcommands you use.
+
+**Classic personal access token:**
+
+- Private repos: `repo` (full control).
+- Public repos only: `public_repo` is sufficient for `pr create` and `pr fetch`.
+
+**Fine-grained personal access token** (preferred), with access to the target repositories:
+
+| Permission    | Level          | Used by                                                                                         |
+| ------------- | -------------- | ----------------------------------------------------------------------------------------------- |
+| Metadata      | Read           | every API call (always required)                                                                |
+| Contents      | Read           | `pr create` (resolving the base branch ref), `pr fetch` (fetching `refs/pull/<n>/head` via git) |
+| Pull requests | Read and write | `pr create` (list + create), `pr fetch` (get)                                                   |
+| Issues        | Read and write | `pr create` when applying labels (GitHub labels go through the Issues API)                      |
+
+If you don't apply labels, you can drop the Issues permission.
 
 ## Output and logging
 
