@@ -1,8 +1,8 @@
 //! Resolve PR target from configured remotes.
 //!
-//! Rule: with an `upstream` remote, the PR goes to upstream's repo and `head_spec`
-//! is `<origin-owner>:<branch>` (fork workflow). Without, the PR goes to origin
-//! and `head_spec` is just `<branch>`.
+//! Rule: with an `upstream` remote, the PR goes to upstream's repo (fork workflow);
+//! without, the PR goes to origin. In both cases `head_spec` is `<origin-owner>:<branch>`
+//! because GitHub's list-PRs `head` filter is silently ignored without the owner prefix.
 
 use crate::git::url::parse_owner_repo;
 use anyhow::Result;
@@ -12,18 +12,13 @@ pub struct Target {
     pub owner: String,
     pub repo: String,
     origin_owner: String,
-    is_fork: bool,
 }
 
 impl Target {
     /// Compose the GitHub `head` filter for `branch` in this target context.
     #[must_use]
     pub fn head_spec(&self, branch: &str) -> String {
-        if self.is_fork {
-            format!("{}:{branch}", self.origin_owner)
-        } else {
-            branch.to_string()
-        }
+        format!("{}:{branch}", self.origin_owner)
     }
 }
 
@@ -41,14 +36,12 @@ pub fn target(origin_url: &str, upstream_url: Option<&str>) -> Result<Target> {
                 owner,
                 repo,
                 origin_owner,
-                is_fork: true,
             })
         }
         None => Ok(Target {
             owner: origin_owner.clone(),
             repo: origin_repo,
             origin_owner,
-            is_fork: false,
         }),
     }
 }
@@ -58,11 +51,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn origin_only_uses_origin_owner_repo_and_plain_branch() {
+    fn origin_only_uses_origin_owner_repo_with_qualified_head() {
         let t = target("git@github.com:o/r.git", None).unwrap();
         assert_eq!(t.owner, "o");
         assert_eq!(t.repo, "r");
-        assert_eq!(t.head_spec("feature"), "feature");
+        assert_eq!(t.head_spec("feature"), "o:feature");
     }
 
     #[test]
@@ -82,7 +75,7 @@ mod tests {
         let t = target("https://github.com/o/r", None).unwrap();
         assert_eq!(t.owner, "o");
         assert_eq!(t.repo, "r");
-        assert_eq!(t.head_spec("x"), "x");
+        assert_eq!(t.head_spec("x"), "o:x");
     }
 
     #[test]
