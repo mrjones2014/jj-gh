@@ -10,20 +10,34 @@ pub use frontmatter::Frontmatter;
 pub use template::{TemplateChoice, load_template_file, resolve_template_path};
 
 use crate::{
-    cli::CreateArgs,
-    config::Config,
+    auth,
+    cli::{CreateArgs, PrAction},
+    config::{self, Config},
     fs::RealFs,
-    gh::{CreatePrRequest, Gh, remote},
+    gh::{self, CreatePrRequest, Gh, remote},
     jj::{self, Jj},
 };
 use anyhow::{Context, Result, anyhow};
+
+pub async fn dispatch(action: PrAction) -> Result<()> {
+    let config = config::load()?;
+    let token = auth::resolve_token(&config).await?;
+    let jj = jj::real::JjCli;
+    let gh = gh::real::OctocrabGh::new(&token)?;
+    let editor = TempfileEditor;
+    match action {
+        PrAction::Create(args) => create(&jj, &gh, &editor, &config, &args).await?,
+    }
+
+    Ok(())
+}
 
 /// Run the full pr-create flow.
 ///
 /// # Errors
 ///
 /// Returns an error from any step (rev resolution, GH API, push, editor, etc.).
-pub async fn create<J, G, E>(
+async fn create<J, G, E>(
     jj: &J,
     gh: &G,
     editor: &E,
