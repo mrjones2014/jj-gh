@@ -134,7 +134,7 @@ Placeholders:
 
 Use `{{` and `}}` for literal braces.
 
-Recommend keeping a unique, recognizable prefix (the default `pr-{number}/`
+I recommend keeping a unique, recognizable prefix (the default `pr-{number}/`
 form works) so you can bulk-delete stale bookmarks after a PR merges, e.g.
 `jj bookmark delete 'pr-1234/*'`.
 
@@ -236,6 +236,17 @@ draft: false # bool
 ## Development
 
 The only development dependency is Nix.
+
+I recommend setting the following repo configs for `jj`:
+
+```toml
+[aliases]
+pr = ["util", "exec", "--", "nix", "run", ".#", "--", "pr"]
+
+[fix.tools.treefmt]
+command = ["treefmt", "--quiet", "--stdin", "$path"]
+patterns = ["glob:'**/*'"]
+```
 
 ```sh
 direnv allow                 # or `nix develop` if preferred

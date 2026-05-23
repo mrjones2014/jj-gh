@@ -4,11 +4,15 @@
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
+    crane.url = "github:ipetkov/crane";
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    crane.url = "github:ipetkov/crane";
+    treefmt-nix = {
+      url = "github:numtide/treefmt-nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
@@ -18,6 +22,7 @@
       flake-utils,
       rust-overlay,
       crane,
+      treefmt-nix,
     }:
     flake-utils.lib.eachDefaultSystem (
       system:
@@ -29,9 +34,7 @@
         rustToolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
         craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
 
-        nightlyToolchain = pkgs.rust-bin.selectLatestNightlyWith (
-          toolchain: toolchain.minimal
-        );
+        nightlyToolchain = pkgs.rust-bin.selectLatestNightlyWith (toolchain: toolchain.minimal);
         craneLibNightly = (crane.mkLib pkgs).overrideToolchain nightlyToolchain;
 
         src = craneLib.cleanCargoSource ./.;
@@ -50,74 +53,50 @@
             inherit cargoArtifacts;
           }
         );
+        treefmtEval = treefmt-nix.lib.evalModule pkgs (import ./treefmt.nix { inherit rustToolchain; });
       in
       {
         packages.default = jj-gh;
         apps.default = flake-utils.lib.mkApp { drv = jj-gh; };
+        formatter = treefmtEval.config.build.wrapper;
         devShells.default = craneLib.devShell {
           inputsFrom = [ jj-gh ];
           packages = [
-            pkgs.actionlint
             pkgs.cargo-nextest
             pkgs.cargo-udeps
             pkgs.jujutsu
             pkgs.rust-analyzer
-            pkgs.taplo
-            pkgs.yamlfmt
+            treefmtEval.config.build.wrapper
           ];
         };
-        checks =
-          let
-            sourceTree = pkgs.lib.cleanSource ./.;
-          in
-          {
-            inherit jj-gh;
-            clippy = craneLib.cargoClippy (
-              commonArgs
-              // {
-                inherit cargoArtifacts;
-                cargoClippyExtraArgs = "--all-targets -- -D warnings";
-              }
-            );
-            fmt = craneLib.cargoFmt { inherit src; };
-            nextest = craneLib.cargoNextest (
-              commonArgs
-              // {
-                inherit cargoArtifacts;
-                partitions = 1;
-                partitionType = "count";
-              }
-            );
-            udeps = craneLibNightly.mkCargoDerivation (
-              commonArgs
-              // {
-                cargoArtifacts = cargoArtifactsNightly;
-                pnameSuffix = "-udeps";
-                buildPhaseCargoCommand = "cargo udeps --all-targets --locked";
-                nativeBuildInputs = [ pkgs.cargo-udeps ];
-              }
-            );
-            yamlfmt = pkgs.runCommand "yamlfmt-check" {
-              nativeBuildInputs = [ pkgs.yamlfmt ];
-            } ''
-              cd ${sourceTree}
-              yamlfmt -lint .
-              touch $out
-            '';
-            actionlint = pkgs.runCommand "actionlint-check" {
-              nativeBuildInputs = [ pkgs.actionlint ];
-            } ''
-              actionlint ${sourceTree}/.github/workflows/*.yml
-              touch $out
-            '';
-            taplo = pkgs.runCommand "taplo-check" {
-              nativeBuildInputs = [ pkgs.taplo ];
-            } ''
-              cd ${sourceTree}
-              taplo fmt --check
-              touch $out
-            '';
-          };
+        checks = {
+          inherit jj-gh;
+          clippy = craneLib.cargoClippy (
+            commonArgs
+            // {
+              inherit cargoArtifacts;
+              cargoClippyExtraArgs = "--all-targets -- -D warnings";
+            }
+          );
+          nextest = craneLib.cargoNextest (
+            commonArgs
+            // {
+              inherit cargoArtifacts;
+              partitions = 1;
+              partitionType = "count";
+            }
+          );
+          udeps = craneLibNightly.mkCargoDerivation (
+            commonArgs
+            // {
+              cargoArtifacts = cargoArtifactsNightly;
+              pnameSuffix = "-udeps";
+              buildPhaseCargoCommand = "cargo udeps --all-targets --locked";
+              nativeBuildInputs = [ pkgs.cargo-udeps ];
+            }
+          );
+          treefmt = treefmtEval.config.build.check self;
+        };
       }
     )
     // {
