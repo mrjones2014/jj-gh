@@ -3,6 +3,9 @@ on:
   push:
     branches: [master]
   pull_request:
+permissions:
+  contents: read
+  actions: write
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
@@ -15,11 +18,12 @@ jobs:
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
-      - uses: nix-community/cache-nix-action@v6
+      - uses: nix-community/cache-nix-action@v7
         with:
           primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', '**/*.nix', 'rust-toolchain.toml', 'Cargo.lock') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-
-          purge: true
+          save: ${{ github.event_name == 'push' }}
+          purge: ${{ github.event_name == 'push' }}
           purge-prefixes: nix-${{ runner.os }}-
           purge-created: 0
           purge-primary-key: never
