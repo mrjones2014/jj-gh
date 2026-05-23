@@ -2,12 +2,16 @@
 //!
 //! Values come from (low to high priority):
 //! 1. Built-in defaults via [`Config::default`].
-//! 2. jj global config at `$JJ_CONFIG` or `$XDG_CONFIG_HOME/jj/config.toml`.
-//! 3. jj repo-local config at `<repo>/.jj/repo/config.toml`.
-//! 4. File pointed to by `$JJ_GH_EXTRA_CONFIG`.
-//! 5. Env overlay (`GH_ASKPASS`, `JJ_GH_TEMPLATE`).
+//! 2. jj user config (`jj config path --user`).
+//! 3. jj repo config (`jj config path --repo`).
+//! 4. jj workspace config (`jj config path --workspace`).
+//! 5. File pointed to by `$JJ_GH_EXTRA_CONFIG`.
+//! 6. Env overlay (`GH_ASKPASS`, `JJ_GH_TEMPLATE`).
 //!
-//! Each file source reads from its `[jj-gh]` subtree via [`JjToolsProvider`].
+//! Layer paths come from `jj config path --<level>` so we track whatever
+//! storage layout jj uses (XDG dirs in 0.41+, legacy `.jj/repo/config.toml`
+//! before that). Each file source reads from its `[jj-gh]` subtree via
+//! [`JjConfProvider`].
 
 use anyhow::Result;
 use figment::{
@@ -96,12 +100,10 @@ pub fn extract(fig: &Figment) -> Result<Config> {
 
 fn discover_layers() -> Vec<PathBuf> {
     let mut out = Vec::new();
-    if let Some(p) = jj_global_config_path() {
-        out.push(p);
-    }
-
-    if let Some(p) = jj_repo_config_path() {
-        out.push(p);
+    for level in ["--user", "--repo", "--workspace"] {
+        if let Some(p) = jj_config_path(level) {
+            out.push(p);
+        }
     }
 
     if let Some(p) = std::env::var_os("JJ_GH_EXTRA_CONFIG") {
@@ -111,27 +113,22 @@ fn discover_layers() -> Vec<PathBuf> {
     out
 }
 
-fn jj_global_config_path() -> Option<PathBuf> {
-    if let Some(p) = std::env::var_os("JJ_CONFIG") {
-        return Some(PathBuf::from(p));
+/// Ask jj for one of its config-file paths. Returns `None` when jj is missing,
+/// the layer is unavailable (e.g. `--repo` outside any repo), or jj prints an
+/// empty path.
+fn jj_config_path(level: &str) -> Option<PathBuf> {
+    let output = std::process::Command::new("jj")
+        .args(["config", "path", level])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
     }
-
-    let base = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
-
-    Some(base.join("jj").join("config.toml"))
-}
-
-fn jj_repo_config_path() -> Option<PathBuf> {
-    let cwd = std::env::current_dir().ok()?;
-    for dir in cwd.ancestors() {
-        let candidate = dir.join(".jj").join("repo").join("config.toml");
-        if candidate.exists() {
-            return Some(candidate);
-        }
+    let s = std::str::from_utf8(&output.stdout).ok()?.trim();
+    if s.is_empty() {
+        return None;
     }
-    None
+    Some(PathBuf::from(s))
 }
 
 /// Source for a [`JjToolsProvider`].
