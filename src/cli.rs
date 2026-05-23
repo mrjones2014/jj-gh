@@ -48,6 +48,24 @@ pub enum PrAction {
     /// branch is set to the closest ancestor bookmark if one exists, otherwise `trunk()`.
     #[command(visible_alias = "c")]
     Create(CreateArgs),
+    /// Fetch a pull request by number into a local bookmark. Requires a colocated
+    /// git repository; the special `refs/pull/123/head` ref is fetched via `git`
+    /// because `jj` cannot yet fetch arbitrary refs.
+    #[command(visible_alias = "f")]
+    Fetch(FetchArgs),
+}
+
+#[derive(Debug, clap::Args)]
+pub struct AuthArgs {
+    /// Askpass helper command that prints a GitHub token on stdout;
+    /// shell-words split, e.g. `--gh-askpass "op read op://Vault/gh/token"`.
+    /// Default: `gh_askpass` in config, then `$GH_ASKPASS`.
+    #[arg(long = "gh-askpass", value_name = "CMD", value_parser = shell_words::split)]
+    pub gh_askpass: Option<Vec<String>>,
+
+    /// Timeout in seconds for the askpass helper. Default: 20.
+    #[arg(long = "askpass-timeout", value_name = "SECS")]
+    pub askpass_timeout_secs: Option<u64>,
 }
 
 #[derive(Debug, clap::Args)]
@@ -85,15 +103,30 @@ pub struct CreateArgs {
     #[arg(short = 'e', long, value_name = "CMD", value_parser = shell_words::split)]
     pub editor: Option<Vec<String>>,
 
-    /// Askpass helper command that prints a GitHub token on stdout;
-    /// shell-words split, e.g. `--gh-askpass "op read op://Vault/gh/token"`.
-    /// Default: `gh_askpass` in config, then `$GH_ASKPASS`.
-    #[arg(long = "gh-askpass", value_name = "CMD", value_parser = shell_words::split)]
-    pub gh_askpass: Option<Vec<String>>,
+    #[command(flatten)]
+    pub auth: AuthArgs,
+}
 
-    /// Timeout in seconds for the askpass helper. Default: 20.
-    #[arg(long = "askpass-timeout", value_name = "SECS")]
-    pub askpass_timeout_secs: Option<u64>,
+#[derive(Debug, clap::Args)]
+pub struct FetchArgs {
+    /// PR number to fetch.
+    #[arg(value_name = "PR_NUM")]
+    pub pr: u64,
+
+    /// Override the bookmark template. Default: `pr_fetch_bookmark_template`
+    /// in config, else `pr-{number}/{branch}`. Placeholders: `{number}`,
+    /// `{branch}` (head.ref), `{user}`
+    /// (head.user.login), `{repo}` (head.repo.name). `{{` / `}}` are literal
+    /// braces.
+    #[arg(short = 't', long, value_name = "STR")]
+    pub template: Option<String>,
+
+    /// Replace an existing local bookmark of the same name.
+    #[arg(short = 'f', long)]
+    pub force: bool,
+
+    #[command(flatten)]
+    pub auth: AuthArgs,
 }
 
 #[derive(Debug, Subcommand)]

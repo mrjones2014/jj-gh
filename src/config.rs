@@ -26,10 +26,10 @@ pub struct Config {
     pub askpass_timeout_secs: u64,
     pub gh_token: Option<SecretString>,
     pub default_base_branch: String,
-    pub bookmark_template: Option<String>,
     pub template_path: Option<PathBuf>,
     pub draft: bool,
     pub editor: Option<Vec<String>>,
+    pub pr_fetch_bookmark_template: Option<String>,
 }
 
 impl Default for Config {
@@ -39,10 +39,10 @@ impl Default for Config {
             askpass_timeout_secs: 20,
             gh_token: None,
             default_base_branch: "master".into(),
-            bookmark_template: None,
             template_path: None,
             draft: false,
             editor: None,
+            pr_fetch_bookmark_template: None,
         }
     }
 }
@@ -51,14 +51,31 @@ impl Default for Config {
 ///
 /// # Errors
 ///
-/// Returns an error if any layer is malformed or fails serde extraction.
+/// Returns an error if any layer is malformed or fails serde extraction, or if
+/// `pr_fetch_bookmark_template` references an unknown placeholder.
 pub fn load() -> Result<Config> {
     let mut fig = defaults_figment();
     for path in discover_layers() {
         fig = fig.merge(JjToolsProvider::from_file(path));
     }
     fig = fig.merge(Serialized::defaults(EnvOverlay::from_env()));
-    extract(&fig)
+    let config: Config = extract(&fig)?;
+    validate(&config)?;
+    Ok(config)
+}
+
+/// Validate cross-field invariants on a merged [`Config`].
+///
+/// # Errors
+///
+/// Returns an error if `pr_fetch_bookmark_template` references an unknown
+/// placeholder.
+pub fn validate(config: &Config) -> Result<()> {
+    if let Some(t) = config.pr_fetch_bookmark_template.as_deref() {
+        crate::pr::fetch::bookmark_template::validate(t)
+            .map_err(|e| anyhow::anyhow!("invalid `pr_fetch_bookmark_template`: {e}"))?;
+    }
+    Ok(())
 }
 
 /// A [`Figment`] preloaded with the built-in defaults. Compose [`JjToolsProvider`]s
@@ -388,5 +405,34 @@ mod tests {
             table.get("default_base_branch").and_then(|v| v.as_str()),
             Some("trunk")
         );
+    }
+
+    #[test]
+    fn pr_fetch_bookmark_template_round_trips() {
+        let config = from_layers([JjToolsProvider::from_memory(
+            "tmpl",
+            r#"
+            [tools.jj-gh]
+            pr_fetch_bookmark_template = "pr-{number}-{user}"
+            "#,
+        )])
+        .unwrap();
+        assert_eq!(
+            config.pr_fetch_bookmark_template.as_deref(),
+            Some("pr-{number}-{user}")
+        );
+        validate(&config).unwrap();
+    }
+
+    #[test]
+    fn validate_rejects_unknown_placeholder_in_template() {
+        let config = Config {
+            pr_fetch_bookmark_template: Some("pr-{nope}".into()),
+            ..Config::default()
+        };
+        let err = validate(&config).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("pr_fetch_bookmark_template"), "msg: {msg}");
+        assert!(msg.contains("{nope}"), "msg: {msg}");
     }
 }

@@ -4,7 +4,9 @@ Opinionated `jj` tools for working with GitHub from your terminal.
 
 ## Requirements
 
-`jj` must be on `PATH`.
+`jj` must be on `PATH`. `pr fetch` additionally requires a colocated git repo
+and `git` on `PATH` (jj cannot yet fetch arbitrary refs like
+`refs/pull/123/head`, so the fetch step shells out to git).
 
 ## Install
 
@@ -44,9 +46,13 @@ Set up `pr` as a built-in `jj` subcommand so you can write `jj pr create <rev>`:
 pr = ["util", "exec", "--", "jj-gh", "pr"]
 ```
 
-Now `jj pr create <rev>` (and the alias `jj pr c <rev>`) works like any other `jj` subcommand.
+Now `jj pr create <rev>` (and the alias `jj pr c <rev>`) and
+`jj pr fetch <pr-num>` (alias `jj pr f <pr-num>`) work like any other `jj`
+subcommand.
 
 ## Usage
+
+### Creating a PR
 
 ```sh
 jj pr create <rev>
@@ -90,6 +96,55 @@ If a PR is already open for the head, the existing URL is printed and nothing is
 | `--gh-askpass <cmd>`        | config `gh_askpass` / `$GH_ASKPASS`                  | Askpass helper command that prints the GitHub token to stdout.                                                                                                |
 | `--askpass-timeout <secs>`  | `20`                                                 | Timeout for the askpass helper.                                                                                                                               |
 
+### Fetching a PR
+
+```sh
+jj pr fetch <pr-num>
+```
+
+Downloads `refs/pull/<pr-num>/head` from `origin` into a local bookmark and
+imports it into jj. The bookmark name on stdout is pipe-friendly; the title,
+head commit, PR URL, and a follow-up hint go to stderr (TTY only).
+
+```sh
+$ jj pr fetch 1234
+PR #1234: Add the feature
+head: abc123... (https://github.com/o/r/pull/1234)
+hint: jj new pr-1234/feature/foo
+pr-1234/feature/foo
+```
+
+The bookmark name comes from a template (`pr_fetch_bookmark_template` in
+config, or `-t/--template` on the CLI). Default: `pr-{number}/{branch}`.
+
+Placeholders:
+
+- `{number}`: PR number.
+- `{branch}`: `head.ref` of the PR, raw (slashes preserved).
+- `{user}`: `head.user.login` (the fork owner's GitHub login).
+- `{repo}`: `head.repo.name` (the head repository's name).
+
+Use `{{` and `}}` for literal braces.
+
+Recommend keeping a unique, recognizable prefix (the default `pr-{number}/`
+form works) so you can bulk-delete stale bookmarks after a PR merges, e.g.
+`jj bookmark delete 'pr-1234/*'`.
+
+#### Requirements
+
+`pr fetch` shells out to `git` to grab the special `refs/pull/123/head` ref
+because jj cannot yet fetch arbitrary refs (only `refs/heads/*`). It therefore
+requires a colocated git repository.
+
+#### Flags
+
+| Flag                       | Default                                                      | Effect                                                                                 |
+| -------------------------- | ------------------------------------------------------------ | -------------------------------------------------------------------------------------- |
+| `-t, --template <STR>`     | config `pr_fetch_bookmark_template` / `pr-{number}/{branch}` | Override the bookmark template.                                                        |
+| `-f, --force`              | off                                                          | Replace an existing local bookmark of the same name (passes `--force` to `git fetch`). |
+| `--gh-askpass <cmd>`       | config `gh_askpass` / `$GH_ASKPASS`                          | Askpass helper command that prints the GitHub token to stdout.                         |
+| `--askpass-timeout <secs>` | `20`                                                         | Timeout for the askpass helper.                                                        |
+
 ### Debug subcommands
 
 | Command                       | Purpose                                                                                       |
@@ -114,6 +169,10 @@ askpass_timeout_secs = 20                                 # default 20
 default_base_branch = "main"                       # default "master"
 template_path = ".github/PULL_REQUEST_TEMPLATE.md"
 draft = false                                      # default false
+
+# Bookmark name template for `pr fetch`. Default "pr-{number}/{branch}".
+# Placeholders: {number}, {branch}, {user}, {repo}. `{{` / `}}` are literal.
+pr_fetch_bookmark_template = "pr-{number}/{branch}"
 
 # Editor command, shell-words split. Falls back to $VISUAL, then $EDITOR.
 editor = [

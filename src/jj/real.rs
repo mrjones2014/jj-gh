@@ -144,6 +144,22 @@ impl Jj for JjCli {
             .to_string();
         Ok(Some(sha).filter(|s| !s.is_empty()))
     }
+
+    fn workspace_root(&self) -> Result<PathBuf> {
+        workspace_root()
+    }
+
+    async fn git_import(&self) -> Result<()> {
+        let status = tokio::process::Command::new("jj")
+            .args(["git", "import"])
+            .status()
+            .await
+            .context("failed to spawn `jj`")?;
+        if !status.success() {
+            return Err(anyhow!("`jj git import` failed with {status}"));
+        }
+        Ok(())
+    }
 }
 
 fn workspace_root() -> Result<PathBuf> {

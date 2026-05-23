@@ -6,6 +6,7 @@
 
 use anyhow::Result;
 use serde::Deserialize;
+use std::path::PathBuf;
 
 pub mod real;
 
@@ -71,6 +72,20 @@ pub trait Jj {
     ///
     /// Propagates jj errors.
     fn trunk_branch(&self) -> Result<Option<String>>;
+
+    /// Absolute path to the jj workspace root.
+    ///
+    /// # Errors
+    ///
+    /// Propagates jj errors.
+    fn workspace_root(&self) -> Result<PathBuf>;
+
+    /// Run `jj git import` to re-read refs from the underlying git store.
+    ///
+    /// # Errors
+    ///
+    /// Propagates jj failures.
+    async fn git_import(&self) -> Result<()>;
 }
 
 /// Compose the revset used to compute the default PR title.

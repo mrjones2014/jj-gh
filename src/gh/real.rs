@@ -1,6 +1,6 @@
 //! `octocrab`-backed [`Gh`] implementation.
 
-use super::{CreatePrRequest, Gh, PrCreated, PrSummary};
+use super::{CreatePrRequest, Gh, PrCreated, PrDetails, PrSummary};
 use anyhow::{Context, Result, anyhow};
 use octocrab::{Octocrab, params};
 use secrecy::{ExposeSecret, SecretString};
@@ -100,6 +100,28 @@ impl Gh for OctocrabGh {
             .map_err(humanize)
             .with_context(|| format!("adding labels to {owner}/{repo}#{pr_num}"))?;
         Ok(())
+    }
+
+    async fn get_pr(&self, owner: &str, repo: &str, number: u64) -> Result<PrDetails> {
+        let pr = match self.octo.pulls(owner, repo).get(number).await {
+            Ok(pr) => pr,
+            Err(e) if is_not_found(&e) => {
+                return Err(anyhow!("PR #{number} not found on {owner}/{repo}"));
+            }
+            Err(e) => {
+                return Err(humanize(e))
+                    .with_context(|| format!("fetching PR #{number} on {owner}/{repo}"));
+            }
+        };
+        Ok(PrDetails {
+            number: pr.number,
+            title: pr.title,
+            html_url: pr.html_url.to_string(),
+            head_ref: pr.head.ref_field.clone(),
+            head_sha: pr.head.sha.clone(),
+            head_user_login: pr.head.user.as_ref().map(|u| u.login.clone()),
+            head_repo_name: pr.head.repo.as_ref().map(|r| r.name.clone()),
+        })
     }
 }
 

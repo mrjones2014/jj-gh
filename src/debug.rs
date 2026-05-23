@@ -33,9 +33,16 @@ fn print_config() -> Result<()> {
 
 async fn check_auth() -> Result<()> {
     let config = config::load()?;
-    auth::resolve_token(&config).await?;
+    auth::resolve_token(&empty_auth(), &config).await?;
     println!("ok");
     Ok(())
+}
+
+fn empty_auth() -> crate::cli::AuthArgs {
+    crate::cli::AuthArgs {
+        gh_askpass: None,
+        askpass_timeout_secs: None,
+    }
 }
 
 fn print_rev(rev: &str) -> Result<()> {
@@ -101,7 +108,7 @@ async fn print_pr_lookup(rev: &str) -> Result<()> {
         .ok_or_else(|| anyhow!("could not detect trunk() bookmark"))?;
 
     let config = config::load()?;
-    let token = auth::resolve_token(&config).await?;
+    let token = auth::resolve_token(&empty_auth(), &config).await?;
     let gh = OctocrabGh::new(&token)?;
 
     let existing = gh

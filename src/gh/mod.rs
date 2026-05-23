@@ -17,6 +17,20 @@ pub struct PrSummary {
     pub state: String,
 }
 
+/// Full PR metadata used to render bookmark templates and stderr hints in
+/// `pr fetch`. `head_user_login` / `head_repo_name` are `None` when GitHub
+/// returns a null user/repo (e.g. the source fork has been deleted).
+#[derive(Debug, Clone)]
+pub struct PrDetails {
+    pub number: u64,
+    pub title: String,
+    pub html_url: String,
+    pub head_ref: String,
+    pub head_sha: String,
+    pub head_user_login: Option<String>,
+    pub head_repo_name: Option<String>,
+}
+
 /// Inputs to [`Gh::create_pr`].
 #[derive(Debug, Clone)]
 pub struct CreatePrRequest {
@@ -75,4 +89,11 @@ pub trait Gh {
         pr_num: u64,
         labels: &[String],
     ) -> Result<()>;
+
+    /// Fetch full metadata for a PR by number.
+    ///
+    /// # Errors
+    ///
+    /// Returns a clear "not found" error on 404; propagates other API errors.
+    async fn get_pr(&self, owner: &str, repo: &str, number: u64) -> Result<PrDetails>;
 }
