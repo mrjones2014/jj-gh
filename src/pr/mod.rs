@@ -1,6 +1,7 @@
-//! End-to-end orchestrator for `jj-gh pr create`.
+//! End-to-end orchestrator for `jj-gh pr create` / `jj-gh pr fetch`.
 
 mod editor;
+pub mod fetch;
 mod frontmatter;
 mod template;
 mod validation;
@@ -21,12 +22,17 @@ use anyhow::{Context, Result, anyhow};
 
 pub async fn dispatch(action: PrAction) -> Result<()> {
     let config = config::load()?;
-    let token = auth::resolve_token(&config).await?;
+    let auth = match &action {
+        PrAction::Create(a) => &a.auth,
+        PrAction::Fetch(a) => &a.auth,
+    };
+    let token = auth::resolve_token(auth, &config).await?;
     let jj = jj::real::JjCli;
     let gh = gh::real::OctocrabGh::new(&token)?;
     let editor = TempfileEditor;
     match action {
         PrAction::Create(args) => create(&jj, &gh, &editor, &config, &args).await?,
+        PrAction::Fetch(args) => fetch::run(&jj, &gh, &config, &args).await?,
     }
 
     Ok(())
@@ -193,8 +199,10 @@ mod tests {
             template: None,
             no_template: false,
             editor: None,
-            gh_askpass: None,
-            askpass_timeout_secs: None,
+            auth: crate::cli::AuthArgs {
+                gh_askpass: None,
+                askpass_timeout_secs: None,
+            },
         }
     }
 
