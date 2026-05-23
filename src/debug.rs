@@ -20,7 +20,7 @@ pub async fn dispatch(action: DebugAction) -> Result<()> {
     match action {
         DebugAction::Config => print_config(),
         DebugAction::Auth => check_auth().await,
-        DebugAction::Rev { rev } => print_rev(&rev),
+        DebugAction::Rev { rev } => print_rev(&rev).await,
         DebugAction::PrLookup { rev } => print_pr_lookup(&rev).await,
     }
 }
@@ -45,7 +45,7 @@ fn empty_auth() -> crate::cli::AuthArgs {
     }
 }
 
-fn print_rev(rev: &str) -> Result<()> {
+async fn print_rev(rev: &str) -> Result<()> {
     let jj = JjCli;
 
     let CommitInfo {
@@ -53,16 +53,16 @@ fn print_rev(rev: &str) -> Result<()> {
         commit_id,
         description,
         bookmarks,
-    } = jj.resolve_rev(rev)?;
-    let ancestor = jj.stacked_ancestor_bookmark(rev)?;
+    } = jj.resolve_rev(rev).await?;
+    let ancestor = jj.stacked_ancestor_bookmark(rev).await?;
     let title_revset = jj::title_base_revset(rev, ancestor.as_deref());
-    let default_title = jj.first_commit_description(&title_revset)?;
+    let default_title = jj.first_commit_description(&title_revset).await?;
 
-    let origin_url = jj.remote_url("origin")?;
-    let upstream_url = jj.remote_url("upstream")?;
-    let default_branch = jj.trunk_branch()?;
+    let origin_url = jj.remote_url("origin").await?;
+    let upstream_url = jj.remote_url("upstream").await?;
+    let default_branch = jj.trunk_branch().await?;
     let default_branch_sha = match &default_branch {
-        Some(branch) => jj.remote_bookmark_sha(branch, "origin")?,
+        Some(branch) => jj.remote_bookmark_sha(branch, "origin").await?,
         None => None,
     };
 
@@ -89,7 +89,7 @@ fn print_rev(rev: &str) -> Result<()> {
 
 async fn print_pr_lookup(rev: &str) -> Result<()> {
     let jj = JjCli;
-    let info = jj.resolve_rev(rev)?;
+    let info = jj.resolve_rev(rev).await?;
     let branch = info
         .bookmarks
         .first()
@@ -97,14 +97,16 @@ async fn print_pr_lookup(rev: &str) -> Result<()> {
         .ok_or_else(|| anyhow!("no local bookmark on `{rev}`; nothing to look up"))?;
 
     let origin_url = jj
-        .remote_url("origin")?
+        .remote_url("origin")
+        .await?
         .ok_or_else(|| anyhow!("origin remote is not configured"))?;
-    let upstream_url = jj.remote_url("upstream")?;
+    let upstream_url = jj.remote_url("upstream").await?;
     let target = remote::target(&origin_url, upstream_url.as_deref())?;
     let head_spec = target.head_spec(&branch);
 
     let default_base = jj
-        .trunk_branch()?
+        .trunk_branch()
+        .await?
         .ok_or_else(|| anyhow!("could not detect trunk() bookmark"))?;
 
     let config = config::load()?;

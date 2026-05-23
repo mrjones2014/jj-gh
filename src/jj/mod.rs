@@ -26,14 +26,14 @@ pub trait Jj {
     ///
     /// Returns an error if the revset does not resolve to exactly one commit or if
     /// the jj invocation fails.
-    fn resolve_rev(&self, rev: &str) -> Result<CommitInfo>;
+    async fn resolve_rev(&self, rev: &str) -> Result<CommitInfo>;
 
     /// Closest ancestor commit (excluding `rev` itself) that carries a bookmark.
     ///
     /// # Errors
     ///
     /// Propagates jj errors. Returns `Ok(None)` when no such ancestor exists.
-    fn stacked_ancestor_bookmark(&self, rev: &str) -> Result<Option<String>>;
+    async fn stacked_ancestor_bookmark(&self, rev: &str) -> Result<Option<String>>;
 
     /// First-line description of the oldest commit in `revset`. Used to compute the
     /// default PR title.
@@ -41,21 +41,21 @@ pub trait Jj {
     /// # Errors
     ///
     /// Propagates jj errors.
-    fn first_commit_description(&self, revset: &str) -> Result<String>;
+    async fn first_commit_description(&self, revset: &str) -> Result<String>;
 
     /// URL configured for the given git remote, or `Ok(None)` if unset.
     ///
     /// # Errors
     ///
     /// Propagates failures from the embedded git store query.
-    fn remote_url(&self, name: &str) -> Result<Option<String>>;
+    async fn remote_url(&self, name: &str) -> Result<Option<String>>;
 
     /// Commit SHA of `bookmark@remote` if it exists, else `Ok(None)`.
     ///
     /// # Errors
     ///
     /// Propagates jj errors.
-    fn remote_bookmark_sha(&self, bookmark: &str, remote: &str) -> Result<Option<String>>;
+    async fn remote_bookmark_sha(&self, bookmark: &str, remote: &str) -> Result<Option<String>>;
 
     /// `jj git push -c <rev>`. Pushes the change and creates a bookmark if needed.
     ///
@@ -71,14 +71,14 @@ pub trait Jj {
     /// # Errors
     ///
     /// Propagates jj errors.
-    fn trunk_branch(&self) -> Result<Option<String>>;
+    async fn trunk_branch(&self) -> Result<Option<String>>;
 
     /// Absolute path to the jj workspace root.
     ///
     /// # Errors
     ///
     /// Propagates jj errors.
-    fn workspace_root(&self) -> Result<PathBuf>;
+    async fn workspace_root(&self) -> Result<PathBuf>;
 
     /// Run `jj git import` to re-read refs from the underlying git store.
     ///

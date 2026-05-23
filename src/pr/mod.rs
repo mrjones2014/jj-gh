@@ -55,13 +55,14 @@ where
     G: Gh,
     E: EditorRoundTrip,
 {
-    let info = jj.resolve_rev(&args.rev)?;
+    let info = jj.resolve_rev(&args.rev).await?;
     let existing_branch = info.bookmarks.first().cloned();
 
     let origin_url = jj
-        .remote_url("origin")?
+        .remote_url("origin")
+        .await?
         .ok_or_else(|| anyhow!("origin remote is not configured"))?;
-    let upstream_url = jj.remote_url("upstream")?;
+    let upstream_url = jj.remote_url("upstream").await?;
     let target = remote::target(&origin_url, upstream_url.as_deref())?;
 
     // Pre-flight only when we already have a bookmark; an unpushed rev can't have
@@ -84,9 +85,10 @@ where
         }
     }
 
-    let ancestor = jj.stacked_ancestor_bookmark(&args.rev)?;
+    let ancestor = jj.stacked_ancestor_bookmark(&args.rev).await?;
     let detected_base = jj
-        .trunk_branch()?
+        .trunk_branch()
+        .await?
         .unwrap_or_else(|| config.default_base_branch.clone());
     let base = resolve_base(args, ancestor.as_deref(), &detected_base);
 
@@ -99,7 +101,7 @@ where
     }
 
     let title_revset = jj::title_base_revset(&args.rev, ancestor.as_deref());
-    let default_title = jj.first_commit_description(&title_revset)?;
+    let default_title = jj.first_commit_description(&title_revset).await?;
 
     let raw_template = load_template_for(args, config, jj)?;
     let initial_fm = Frontmatter {
@@ -123,7 +125,7 @@ where
     let branch = if let Some(b) = existing_branch {
         b
     } else {
-        let refreshed = jj.resolve_rev(&args.rev)?;
+        let refreshed = jj.resolve_rev(&args.rev).await?;
         refreshed
             .bookmarks
             .into_iter()

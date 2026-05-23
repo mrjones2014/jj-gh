@@ -6,7 +6,8 @@
 
 use super::{CommitInfo, Jj};
 use anyhow::{Context, Result, anyhow};
-use std::{path::PathBuf, process::Command};
+use std::path::PathBuf;
+use tokio::process::Command;
 
 /// Build a jj template that emits a JSON object: each `(key, expr)` becomes
 /// `"key": json(expr)`.
@@ -23,7 +24,7 @@ fn json_object_template(fields: &[(&str, &str)]) -> String {
 pub struct JjCli;
 
 impl Jj for JjCli {
-    fn resolve_rev(&self, rev: &str) -> Result<CommitInfo> {
+    async fn resolve_rev(&self, rev: &str) -> Result<CommitInfo> {
         let template = json_object_template(&[
             ("change_id", "change_id"),
             ("commit_id", "commit_id"),
@@ -39,12 +40,13 @@ impl Jj for JjCli {
             "1",
             "-T",
             &template,
-        ])?;
+        ])
+        .await?;
         serde_json::from_slice(&stdout)
             .with_context(|| format!("could not parse jj log output for `{rev}`"))
     }
 
-    fn stacked_ancestor_bookmark(&self, rev: &str) -> Result<Option<String>> {
+    async fn stacked_ancestor_bookmark(&self, rev: &str) -> Result<Option<String>> {
         let revset = format!("ancestors(({rev})-) & bookmarks()");
         let stdout = run_jj(&[
             "log",
@@ -55,7 +57,8 @@ impl Jj for JjCli {
             "1",
             "-T",
             "json(bookmarks.map(|b| b.name()))",
-        ])?;
+        ])
+        .await?;
         if stdout.is_empty() {
             return Ok(None);
         }
@@ -64,7 +67,7 @@ impl Jj for JjCli {
         Ok(bookmarks.into_iter().next())
     }
 
-    fn first_commit_description(&self, revset: &str) -> Result<String> {
+    async fn first_commit_description(&self, revset: &str) -> Result<String> {
         let stdout = run_jj(&[
             "log",
             "--no-graph",
@@ -75,15 +78,16 @@ impl Jj for JjCli {
             "1",
             "-T",
             "description.first_line()",
-        ])?;
+        ])
+        .await?;
         Ok(std::str::from_utf8(&stdout)
             .context("jj log output is not UTF-8")?
             .trim()
             .to_string())
     }
 
-    fn remote_url(&self, name: &str) -> Result<Option<String>> {
-        let config_path = git_backend_dir()?.join("config");
+    async fn remote_url(&self, name: &str) -> Result<Option<String>> {
+        let config_path = git_backend_dir().await?.join("config");
         let contents = match std::fs::read_to_string(&config_path) {
             Ok(s) => s,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -96,7 +100,7 @@ impl Jj for JjCli {
     }
 
     async fn push(&self, rev: &str) -> Result<()> {
-        let status = tokio::process::Command::new("jj")
+        let status = Command::new("jj")
             .args(["git", "push", "-c", rev])
             .status()
             .await
@@ -107,7 +111,7 @@ impl Jj for JjCli {
         Ok(())
     }
 
-    fn trunk_branch(&self) -> Result<Option<String>> {
+    async fn trunk_branch(&self) -> Result<Option<String>> {
         let stdout = run_jj(&[
             "log",
             "--no-graph",
@@ -117,7 +121,8 @@ impl Jj for JjCli {
             "1",
             "-T",
             "json(bookmarks.map(|b| b.name()))",
-        ])?;
+        ])
+        .await?;
         if stdout.is_empty() {
             return Ok(None);
         }
@@ -126,7 +131,7 @@ impl Jj for JjCli {
         Ok(names.into_iter().next())
     }
 
-    fn remote_bookmark_sha(&self, bookmark: &str, remote: &str) -> Result<Option<String>> {
+    async fn remote_bookmark_sha(&self, bookmark: &str, remote: &str) -> Result<Option<String>> {
         let revset = format!("remote_bookmarks(exact:{bookmark:?}, remote=exact:{remote:?})");
         let stdout = run_jj(&[
             "log",
@@ -137,7 +142,8 @@ impl Jj for JjCli {
             "1",
             "-T",
             "commit_id",
-        ])?;
+        ])
+        .await?;
         let sha = std::str::from_utf8(&stdout)
             .context("jj log output is not UTF-8")?
             .trim()
@@ -145,12 +151,12 @@ impl Jj for JjCli {
         Ok(Some(sha).filter(|s| !s.is_empty()))
     }
 
-    fn workspace_root(&self) -> Result<PathBuf> {
-        workspace_root()
+    async fn workspace_root(&self) -> Result<PathBuf> {
+        workspace_root().await
     }
 
     async fn git_import(&self) -> Result<()> {
-        let status = tokio::process::Command::new("jj")
+        let status = Command::new("jj")
             .args(["git", "import"])
             .status()
             .await
@@ -162,8 +168,8 @@ impl Jj for JjCli {
     }
 }
 
-fn workspace_root() -> Result<PathBuf> {
-    let stdout = run_jj(&["workspace", "root"])?;
+async fn workspace_root() -> Result<PathBuf> {
+    let stdout = run_jj(&["workspace", "root"]).await?;
     let path = std::str::from_utf8(&stdout)
         .context("jj workspace root output is not UTF-8")?
         .trim()
@@ -179,8 +185,12 @@ fn workspace_root() -> Result<PathBuf> {
 /// jj writes the path to its git backend in `.jj/repo/store/git_target` as a
 /// path relative to `.jj/repo/store/`. Colocated repos point at `../../../.git`;
 /// pure-jj repos point to a git dir embedded under `.jj/`.
-fn git_backend_dir() -> Result<PathBuf> {
-    let store_dir = workspace_root()?.join(".jj").join("repo").join("store");
+async fn git_backend_dir() -> Result<PathBuf> {
+    let store_dir = workspace_root()
+        .await?
+        .join(".jj")
+        .join("repo")
+        .join("store");
     let target = std::fs::read_to_string(store_dir.join("git_target"))
         .context("could not read `.jj/repo/store/git_target`")?;
     let target = target.trim();
@@ -234,11 +244,12 @@ fn parse_key_value(line: &str, key: &str) -> Option<String> {
     }
 }
 
-fn run_jj(args: &[&str]) -> Result<Vec<u8>> {
+async fn run_jj(args: &[&str]) -> Result<Vec<u8>> {
     let output = Command::new("jj")
         .arg("--ignore-working-copy")
         .args(args)
         .output()
+        .await
         .context("failed to spawn `jj`")?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
