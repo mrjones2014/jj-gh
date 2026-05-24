@@ -20,6 +20,8 @@ use crate::{
 };
 use anyhow::{Context, Result, anyhow};
 use clap::Subcommand;
+use figment::providers::Serialized;
+use serde::Serialize;
 
 #[derive(Debug, Subcommand)]
 pub enum PrAction {
@@ -38,25 +40,29 @@ pub enum PrAction {
     AutoMerge(AutoMergeArgs),
 }
 
-#[derive(Debug, clap::Args)]
+#[derive(Debug, clap::Args, Serialize)]
 pub struct AutoMergeArgs {
     /// PR number, or revision ID to look up a PR from.
     #[arg(value_name = "PR_NUM|REV")]
+    #[serde(skip)]
     pub number_or_rev: String,
 
     /// Merge method used when enabling auto-merge. Overrides config
     /// `auto_merge_method` (default `merge`).
     #[arg(long = "method", short = 'm', value_name = "METHOD", value_enum)]
+    #[serde(rename = "auto_merge_method", skip_serializing_if = "Option::is_none")]
     pub method: Option<AutoMergeMethod>,
 
     #[command(flatten)]
+    #[serde(flatten)]
     pub auth: AuthArgs,
 }
 
-#[derive(Debug, clap::Args)]
+#[derive(Debug, clap::Args, Serialize)]
 pub struct FetchArgs {
     /// PR number to fetch.
     #[arg(value_name = "PR_NUM")]
+    #[serde(skip)]
     pub pr: u64,
 
     /// Override the bookmark template. Default: `pr_fetch_bookmark_template`
@@ -65,85 +71,121 @@ pub struct FetchArgs {
     /// (head.user.login), `{repo}` (head.repo.name). `{{` / `}}` are literal
     /// braces.
     #[arg(short = 't', long, value_name = "STR")]
+    #[serde(
+        rename = "pr_fetch_bookmark_template",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub template: Option<String>,
 
     /// Replace an existing local bookmark of the same name.
     #[arg(short = 'f', long)]
+    #[serde(skip)]
     pub force: bool,
 
     #[command(flatten)]
+    #[serde(flatten)]
     pub auth: AuthArgs,
 }
 
-#[derive(Debug, clap::Args)]
-#[expect(clippy::struct_excessive_bools)]
+#[derive(Debug, clap::Args, Serialize)]
 pub struct CreateArgs {
     /// Revision to create the PR from.
     #[arg(value_name = "REV")]
+    #[serde(skip)]
     pub rev: String,
 
     /// Override the base bookmark. Default: closest ancestor bookmark on the
     /// stack, falling back to the remote's `main` / `master` / configured
     /// `default_base_branch`.
     #[arg(long, value_name = "BRANCH")]
+    #[serde(skip)]
     pub base: Option<String>,
 
     /// Force the PR to be a draft. Overrides config (default: `draft = false`).
-    #[arg(long)]
-    pub draft: bool,
+    /// Use `--draft=false` or `--no-draft` to force non-draft.
+    #[arg(
+        long,
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = "true",
+        default_value_if("no_draft", "true", Some("false")),
+    )]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub draft: Option<bool>,
 
-    /// Force the PR to be non-draft. Overrides config.
+    /// Force the PR to be non-draft. Overrides config. Equivalent to `--draft false`.
     #[arg(long = "no-draft", conflicts_with = "draft")]
+    #[serde(skip)]
     pub no_draft: bool,
 
     /// Enable auto-merge on the PR after creation (merges once required checks
-    /// pass). Overrides config (default: `auto_merge = false`).
-    #[arg(long = "auto-merge")]
-    pub auto_merge: bool,
+    /// pass). Overrides config (default: `auto_merge = false`). Use
+    /// `--auto-merge=false` or `--no-auto-merge` force no auto merge.
+    #[arg(
+        long = "auto-merge",
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = "true",
+        default_value_if("no_auto_merge", "true", Some("false")),
+    )]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_merge: Option<bool>,
 
-    /// Disable auto-merge on the created PR. Overrides config.
+    /// Disable auto-merge on the created PR. Overrides config. Equivalent to
+    /// `--auto-merge=false`.
     #[arg(long = "no-auto-merge", conflicts_with = "auto_merge")]
+    #[serde(skip)]
     pub no_auto_merge: bool,
 
     /// Merge method used when auto-merge is enabled. Overrides config
     /// `auto_merge_method` (default `merge`).
     #[arg(long = "auto-merge-method", value_name = "METHOD", value_enum)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub auto_merge_method: Option<AutoMergeMethod>,
 
     /// Template path or name under `.github/PULL_REQUEST_TEMPLATE/`. Default:
     /// `template_path` in config, else auto-detect
-    /// `.github/PULL_REQUEST_TEMPLATE.md`.
+    /// `.github/PULL_REQUEST_TEMPLATE.md`. CLI path resolution needs the repo
+    /// root, so this stays out of figment merging and is handled by
+    /// `resolve_template_path` at handler time.
     #[arg(long, value_name = "PATH_OR_NAME")]
+    #[serde(skip)]
     pub template: Option<String>,
 
     /// Skip template selection entirely.
     #[arg(long = "no-template", conflicts_with = "template")]
+    #[serde(skip)]
     pub no_template: bool,
 
     /// Editor command; shell-words split, e.g. `--editor "nvim +7"`. Default:
     /// `editor` in config, then `$VISUAL`, then `$EDITOR`.
     #[arg(short = 'e', long, value_name = "CMD", value_parser = shell_words::split)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub editor: Option<Vec<String>>,
 
     #[command(flatten)]
+    #[serde(flatten)]
     pub auth: AuthArgs,
 }
 
 pub async fn dispatch(action: PrAction) -> Result<()> {
-    let config = config::load()?;
-    let auth = match &action {
-        PrAction::Create(a) => &a.auth,
-        PrAction::Fetch(a) => &a.auth,
-        PrAction::AutoMerge(a) => &a.auth,
+    let mut fig = config::load_figment();
+    fig = match &action {
+        PrAction::Create(a) => fig.merge(Serialized::defaults(a)),
+        PrAction::Fetch(a) => fig.merge(Serialized::defaults(a)),
+        PrAction::AutoMerge(a) => fig.merge(Serialized::defaults(a)),
     };
-    let token = auth::resolve_token(auth, &config).await?;
+    let config = config::extract(&fig)?;
+    config::validate(&config)?;
+
+    let token = auth::resolve_token(&config).await?;
     let jj = jj::real::JjCli;
     let gh = gh::real::OctocrabGh::new(&token)?;
     let editor = TempfileEditor;
     match action {
         PrAction::Create(args) => create(&jj, &gh, &editor, &config, &args).await?,
         PrAction::Fetch(args) => fetch::run(&jj, &gh, &config, &args).await?,
-        PrAction::AutoMerge(args) => auto_merge(&jj, &gh, &config, &args).await?,
+        PrAction::AutoMerge(args) => auto_merge(&jj, &gh, &config, &args.number_or_rev).await?,
     }
 
     Ok(())
@@ -204,12 +246,12 @@ pub async fn resolve_pr<J: Jj, G: Gh>(jj: &J, gh: &G, rev: &str) -> Result<PrLoo
     })
 }
 
-async fn auto_merge<J, G>(jj: &J, gh: &G, config: &Config, args: &AutoMergeArgs) -> Result<()>
+async fn auto_merge<J, G>(jj: &J, gh: &G, config: &Config, number_or_rev: &str) -> Result<()>
 where
     J: Jj,
     G: Gh,
 {
-    let pr = if let Ok(num) = args.number_or_rev.parse::<u64>() {
+    let pr = if let Ok(num) = number_or_rev.parse::<u64>() {
         let origin_url = jj
             .remote_url("origin")
             .await?
@@ -218,11 +260,10 @@ where
         let target = remote::target(&origin_url, upstream_url.as_deref())?;
         gh.get_pr(&target.owner, &target.repo, num).await?
     } else {
-        let lookup = resolve_pr(jj, gh, &args.number_or_rev).await?;
+        let lookup = resolve_pr(jj, gh, number_or_rev).await?;
         let summary = lookup.summary.ok_or_else(|| {
             anyhow!(
-                "no open PR for revision `{}` (head `{}`)",
-                args.number_or_rev,
+                "no open PR for revision `{number_or_rev}` (head `{}`)",
                 lookup.head_spec,
             )
         })?;
@@ -230,8 +271,7 @@ where
             .await?
     };
 
-    let method = args.method.unwrap_or(config.auto_merge_method);
-    gh.enable_auto_merge(&pr.graphql_node_id, method)
+    gh.enable_auto_merge(&pr.graphql_node_id, config.auto_merge_method)
         .await
         .with_context(|| format!("enabling auto-merge on #{}", pr.number))?;
 
@@ -310,16 +350,16 @@ where
         title: default_title,
         base: base.clone(),
         labels: vec![],
-        draft: resolve_draft(args, config),
-        auto_merge: resolve_auto_merge(args, config),
-        auto_merge_method: resolve_auto_merge_method(args, config),
+        draft: config.draft,
+        auto_merge: config.auto_merge,
+        auto_merge_method: config.auto_merge_method,
     };
     let initial_buffer = initial_fm.render(raw_template.as_deref().unwrap_or(""))?;
     let raw_template_body = raw_template.unwrap_or_default();
 
     let visual = std::env::var("VISUAL").ok();
     let editor_env = std::env::var("EDITOR").ok();
-    let editor_argv = resolve_editor_argv(args, config, visual.as_deref(), editor_env.as_deref())?;
+    let editor_argv = resolve_editor_argv(config, visual.as_deref(), editor_env.as_deref())?;
     let edited = editor.edit(&editor_argv, &initial_buffer).await?;
     let (final_fm, body) = Frontmatter::parse(&edited)?;
     validation::validate(&final_fm, &body, &raw_template_body)?;
@@ -379,34 +419,6 @@ fn resolve_base(args: &CreateArgs, ancestor: Option<&str>, detected: &str) -> St
         .unwrap_or_else(|| detected.to_string())
 }
 
-fn resolve_draft(args: &CreateArgs, config: &Config) -> bool {
-    if args.draft {
-        return true;
-    }
-
-    if args.no_draft {
-        return false;
-    }
-
-    config.draft
-}
-
-fn resolve_auto_merge(args: &CreateArgs, config: &Config) -> bool {
-    if args.auto_merge {
-        return true;
-    }
-
-    if args.no_auto_merge {
-        return false;
-    }
-
-    config.auto_merge
-}
-
-fn resolve_auto_merge_method(args: &CreateArgs, config: &Config) -> AutoMergeMethod {
-    args.auto_merge_method.unwrap_or(config.auto_merge_method)
-}
-
 fn load_template_for<J: Jj>(args: &CreateArgs, config: &Config, _jj: &J) -> Result<Option<String>> {
     let repo_root = std::env::current_dir().context("could not read cwd")?;
     let fs = RealFs;
@@ -420,13 +432,13 @@ fn load_template_for<J: Jj>(args: &CreateArgs, config: &Config, _jj: &J) -> Resu
 mod tests {
     use super::*;
 
-    fn cli(draft: bool, no_draft: bool) -> CreateArgs {
+    fn cli() -> CreateArgs {
         CreateArgs {
             rev: "@-".into(),
             base: None,
-            draft,
-            no_draft,
-            auto_merge: false,
+            draft: None,
+            no_draft: false,
+            auto_merge: None,
             no_auto_merge: false,
             auto_merge_method: None,
             template: None,
@@ -439,8 +451,28 @@ mod tests {
         }
     }
 
+    fn merge_into_config(
+        config_draft: Option<bool>,
+        config_auto: Option<bool>,
+        config_method: Option<AutoMergeMethod>,
+        args: &CreateArgs,
+    ) -> Config {
+        let mut fig = config::defaults_figment();
+        if let Some(v) = config_draft {
+            fig = fig.merge(Serialized::default("draft", v));
+        }
+        if let Some(v) = config_auto {
+            fig = fig.merge(Serialized::default("auto_merge", v));
+        }
+        if let Some(v) = config_method {
+            fig = fig.merge(Serialized::default("auto_merge_method", v));
+        }
+        fig = fig.merge(Serialized::defaults(args));
+        config::extract(&fig).unwrap()
+    }
+
     fn args_with_base(base: Option<&str>) -> CreateArgs {
-        let mut a = cli(false, false);
+        let mut a = cli();
         a.base = base.map(str::to_string);
         a
     }
@@ -466,88 +498,133 @@ mod tests {
         assert_eq!(resolve_base(&args_with_base(None), None, "main"), "main");
     }
 
-    fn cfg_with_draft(draft: bool) -> Config {
-        Config {
-            draft,
-            ..Config::default()
+    #[test]
+    fn cli_draft_overrides_config() {
+        let mut a = cli();
+        a.draft = Some(true);
+        let c = merge_into_config(Some(false), None, None, &a);
+        assert!(c.draft);
+    }
+
+    #[test]
+    fn cli_no_draft_overrides_config() {
+        let mut a = cli();
+        a.draft = Some(false);
+        let c = merge_into_config(Some(true), None, None, &a);
+        assert!(!c.draft);
+    }
+
+    #[test]
+    fn draft_defaults_to_config_when_cli_unset() {
+        let c1 = merge_into_config(Some(true), None, None, &cli());
+        assert!(c1.draft);
+        let c2 = merge_into_config(Some(false), None, None, &cli());
+        assert!(!c2.draft);
+    }
+
+    #[test]
+    fn cli_auto_merge_overrides_config() {
+        let mut a = cli();
+        a.auto_merge = Some(true);
+        let c = merge_into_config(None, Some(false), None, &a);
+        assert!(c.auto_merge);
+    }
+
+    #[test]
+    fn cli_no_auto_merge_overrides_config() {
+        let mut a = cli();
+        a.auto_merge = Some(false);
+        let c = merge_into_config(None, Some(true), None, &a);
+        assert!(!c.auto_merge);
+    }
+
+    #[test]
+    fn auto_merge_defaults_to_config_when_cli_unset() {
+        let c = merge_into_config(None, Some(true), None, &cli());
+        assert!(c.auto_merge);
+    }
+
+    #[test]
+    fn cli_auto_merge_method_overrides_config() {
+        let mut a = cli();
+        a.auto_merge_method = Some(AutoMergeMethod::Squash);
+        let c = merge_into_config(None, None, Some(AutoMergeMethod::Rebase), &a);
+        assert_eq!(c.auto_merge_method, AutoMergeMethod::Squash);
+    }
+
+    #[test]
+    fn auto_merge_method_defaults_to_config_when_cli_unset() {
+        let c = merge_into_config(None, None, Some(AutoMergeMethod::Rebase), &cli());
+        assert_eq!(c.auto_merge_method, AutoMergeMethod::Rebase);
+    }
+
+    fn empty_auth() -> crate::cli::AuthArgs {
+        crate::cli::AuthArgs {
+            gh_askpass: None,
+            askpass_timeout_secs: None,
         }
     }
 
     #[test]
-    fn draft_flag_forces_true() {
-        assert!(resolve_draft(&cli(true, false), &cfg_with_draft(false)));
-    }
-
-    #[test]
-    fn no_draft_flag_forces_false_even_when_config_draft() {
-        assert!(!resolve_draft(&cli(false, true), &cfg_with_draft(true)));
-    }
-
-    #[test]
-    fn draft_defaults_to_config() {
-        assert!(resolve_draft(&cli(false, false), &cfg_with_draft(true)));
-        assert!(!resolve_draft(&cli(false, false), &cfg_with_draft(false)));
-    }
-
-    fn cfg_with_auto_merge(auto_merge: bool, method: AutoMergeMethod) -> Config {
-        Config {
-            auto_merge,
-            auto_merge_method: method,
-            ..Config::default()
-        }
-    }
-
-    fn cli_with_auto_merge(
-        auto_merge: bool,
-        no_auto_merge: bool,
-        method: Option<AutoMergeMethod>,
-    ) -> CreateArgs {
-        let mut a = cli(false, false);
-        a.auto_merge = auto_merge;
-        a.no_auto_merge = no_auto_merge;
-        a.auto_merge_method = method;
-        a
-    }
-
-    #[test]
-    fn auto_merge_flag_forces_true() {
-        assert!(resolve_auto_merge(
-            &cli_with_auto_merge(true, false, None),
-            &cfg_with_auto_merge(false, AutoMergeMethod::Merge),
-        ));
-    }
-
-    #[test]
-    fn no_auto_merge_flag_forces_false() {
-        assert!(!resolve_auto_merge(
-            &cli_with_auto_merge(false, true, None),
-            &cfg_with_auto_merge(true, AutoMergeMethod::Merge),
-        ));
-    }
-
-    #[test]
-    fn auto_merge_defaults_to_config() {
-        assert!(resolve_auto_merge(
-            &cli_with_auto_merge(false, false, None),
-            &cfg_with_auto_merge(true, AutoMergeMethod::Merge),
-        ));
-    }
-
-    #[test]
-    fn auto_merge_method_cli_wins() {
-        let m = resolve_auto_merge_method(
-            &cli_with_auto_merge(true, false, Some(AutoMergeMethod::Squash)),
-            &cfg_with_auto_merge(false, AutoMergeMethod::Rebase),
+    fn fetch_cli_template_overrides_config() {
+        let args = FetchArgs {
+            pr: 1,
+            template: Some("cli-{number}".into()),
+            force: false,
+            auth: empty_auth(),
+        };
+        let fig = config::defaults_figment()
+            .merge(Serialized::default(
+                "pr_fetch_bookmark_template",
+                "cfg-{number}",
+            ))
+            .merge(Serialized::defaults(&args));
+        let c = config::extract(&fig).unwrap();
+        assert_eq!(
+            c.pr_fetch_bookmark_template.as_deref(),
+            Some("cli-{number}")
         );
-        assert_eq!(m, AutoMergeMethod::Squash);
     }
 
     #[test]
-    fn auto_merge_method_defaults_to_config() {
-        let m = resolve_auto_merge_method(
-            &cli_with_auto_merge(true, false, None),
-            &cfg_with_auto_merge(true, AutoMergeMethod::Rebase),
+    fn auto_merge_args_method_overrides_config_via_rename() {
+        let args = AutoMergeArgs {
+            number_or_rev: "1".into(),
+            method: Some(AutoMergeMethod::Squash),
+            auth: empty_auth(),
+        };
+        let fig = config::defaults_figment()
+            .merge(Serialized::default(
+                "auto_merge_method",
+                AutoMergeMethod::Rebase,
+            ))
+            .merge(Serialized::defaults(&args));
+        let c = config::extract(&fig).unwrap();
+        assert_eq!(c.auto_merge_method, AutoMergeMethod::Squash);
+    }
+
+    #[test]
+    fn auth_cli_overrides_config_via_flatten() {
+        let args = AutoMergeArgs {
+            number_or_rev: "1".into(),
+            method: None,
+            auth: crate::cli::AuthArgs {
+                gh_askpass: Some(vec!["cli-askpass".into()]),
+                askpass_timeout_secs: Some(99),
+            },
+        };
+        let fig = config::defaults_figment()
+            .merge(Serialized::default(
+                "gh_askpass",
+                vec!["cfg-askpass".to_string()],
+            ))
+            .merge(Serialized::default("askpass_timeout_secs", 5u64))
+            .merge(Serialized::defaults(&args));
+        let c = config::extract(&fig).unwrap();
+        assert_eq!(
+            c.gh_askpass.as_deref(),
+            Some(&["cli-askpass".to_string()][..])
         );
-        assert_eq!(m, AutoMergeMethod::Rebase);
+        assert_eq!(c.askpass_timeout_secs, 99);
     }
 }
