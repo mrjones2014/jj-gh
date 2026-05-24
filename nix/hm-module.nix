@@ -116,8 +116,8 @@ in
           "exec"
           "--"
           "${cfg.package}/bin/jj-gh"
-          "--"
           "pr"
+          "--"
         ];
       }
       (optionalAttrs (jjGhTable != { }) { "jj-gh" = jjGhTable; })
