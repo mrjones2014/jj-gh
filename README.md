@@ -53,7 +53,7 @@ You can either use the overlay directly, or use the `home-manager` module.
   imports = [ jj-gh.homeManagerModules.default ];
   programs.jujutsu.gh = {
     # this will set up some jj aliases like
-    # pr = ["util", "exec", "--", "jj-gh", "pr"]
+    # pr = ["util", "exec", "--", "jj-gh", "pr", "--"]
     enable = true;
     settings = {
       gh_askpass = [
@@ -85,7 +85,7 @@ Set up `pr` as a built-in `jj` subcommand so you can write `jj pr create <rev>`:
 ```toml
 # ~/.config/jj/config.toml
 [aliases]
-pr = ["util", "exec", "--", "jj-gh", "--", "pr"]
+pr = ["util", "exec", "--", "jj-gh", "pr", "--"]
 ```
 
 Now `jj pr create <rev>` (and the alias `jj pr c <rev>`) and
