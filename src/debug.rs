@@ -4,11 +4,12 @@ use crate::{
     auth,
     cli::DebugAction,
     config,
-    gh::{Gh, real::OctocrabGh, remote},
+    gh::{Gh, real::OctocrabGh},
     git::url::parse_owner_repo,
     jj::{self, CommitInfo, Jj, real::JjCli},
+    pr,
 };
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 
 /// Dispatch a `jj-gh debug` invocation.
 ///
@@ -89,43 +90,25 @@ async fn print_rev(rev: &str) -> Result<()> {
 
 async fn print_pr_lookup(rev: &str) -> Result<()> {
     let jj = JjCli;
-    let info = jj.resolve_rev(rev).await?;
-    let branch = info
-        .bookmarks
-        .first()
-        .cloned()
-        .ok_or_else(|| anyhow!("no local bookmark on `{rev}`; nothing to look up"))?;
-
-    let origin_url = jj
-        .remote_url("origin")
-        .await?
-        .ok_or_else(|| anyhow!("origin remote is not configured"))?;
-    let upstream_url = jj.remote_url("upstream").await?;
-    let target = remote::target(&origin_url, upstream_url.as_deref())?;
-    let head_spec = target.head_spec(&branch);
-
-    let default_base = jj
-        .trunk_branch()
-        .await?
-        .ok_or_else(|| anyhow!("could not detect trunk() bookmark"))?;
-
     let config = config::load()?;
     let token = auth::resolve_token(&empty_auth(), &config).await?;
     let gh = OctocrabGh::new(&token)?;
 
-    let existing = gh
-        .find_open_pr(&target.owner, &target.repo, &head_spec)
-        .await?;
+    let lookup = pr::resolve_pr(&jj, &gh, rev).await?;
     let base_exists = gh
-        .branch_exists(&target.owner, &target.repo, &default_base)
+        .branch_exists(
+            &lookup.target.owner,
+            &lookup.target.repo,
+            &lookup.default_base,
+        )
         .await?;
 
     println!("rev: {rev}");
-    println!("branch: {branch}");
-    println!("target: {target:#?}");
-    println!("head_spec: {head_spec}");
-    println!("default_base: {default_base}");
+    println!("branch: {}", lookup.branch);
+    println!("target: {:#?}", lookup.target);
+    println!("head_spec: {}", lookup.head_spec);
+    println!("default_base: {}", lookup.default_base);
     println!("base_branch_exists: {base_exists}");
-    println!("existing_open_pr: {existing:#?}");
+    println!("existing_open_pr: {:#?}", lookup.summary);
     Ok(())
 }

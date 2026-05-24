@@ -3,6 +3,7 @@
 //! All write-side calls go through [`Gh`]. The production impl wraps `octocrab`;
 //! tests use a fake.
 
+use crate::config::AutoMergeMethod;
 use anyhow::Result;
 
 pub mod real;
@@ -29,6 +30,7 @@ pub struct PrDetails {
     pub head_sha: String,
     pub head_user_login: Option<String>,
     pub head_repo_name: Option<String>,
+    pub graphql_node_id: String,
 }
 
 /// Inputs to [`Gh::create_pr`].
@@ -48,6 +50,8 @@ pub struct CreatePrRequest {
 pub struct PrCreated {
     pub number: u64,
     pub html_url: String,
+    /// GraphQL node ID for the PR. Needed to enable auto-merge.
+    pub node_id: String,
 }
 
 pub trait Gh {
@@ -97,4 +101,15 @@ pub trait Gh {
     ///
     /// Returns a clear "not found" error on 404; propagates other API errors.
     async fn get_pr(&self, owner: &str, repo: &str, number: u64) -> Result<PrDetails>;
+
+    /// Enable auto-merge on a PR via the GraphQL `enablePullRequestAutoMerge`
+    /// mutation. The PR is identified by its GraphQL node ID (see
+    /// [`PrCreated::node_id`]).
+    ///
+    /// # Errors
+    ///
+    /// Propagates API errors. Common failures: the repo does not have
+    /// auto-merge enabled, required branch protections are missing, or the PR
+    /// is already mergeable.
+    async fn enable_auto_merge(&self, pr_node_id: &str, method: AutoMergeMethod) -> Result<()>;
 }

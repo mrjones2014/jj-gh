@@ -33,6 +33,18 @@
         "type": "github"
       }
     },
+    "github-graphql-schema": {
+      "flake": false,
+      "locked": {
+        "narHash": "sha256-yqeZRMfUZtwGgjJJAPl5h2ZB0D3Ifbjt/saeWoxiZAo=",
+        "type": "file",
+        "url": "https://docs.github.com/public/fpt/schema.docs.graphql"
+      },
+      "original": {
+        "type": "file",
+        "url": "https://docs.github.com/public/fpt/schema.docs.graphql"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1778869304,
@@ -53,6 +65,7 @@
       "inputs": {
         "crane": "crane",
         "flake-utils": "flake-utils",
+        "github-graphql-schema": "github-graphql-schema",
         "nixpkgs": "nixpkgs",
         "rust-overlay": "rust-overlay",
         "treefmt-nix": "treefmt-nix"

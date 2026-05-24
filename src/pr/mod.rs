@@ -1,4 +1,4 @@
-//! End-to-end orchestrator for `jj-gh pr create` / `jj-gh pr fetch`.
+//! End-to-end orchestrator for `jj-gh pr create` / `jj-gh pr fetch` / `jj-gh pr auto-merge`.
 
 mod editor;
 pub mod fetch;
@@ -12,19 +12,129 @@ pub use template::{TemplateChoice, load_template_file, resolve_template_path};
 
 use crate::{
     auth,
-    cli::{CreateArgs, PrAction},
-    config::{self, Config},
+    cli::AuthArgs,
+    config::{self, AutoMergeMethod, Config},
     fs::RealFs,
-    gh::{self, CreatePrRequest, Gh, remote},
+    gh::{self, CreatePrRequest, Gh, PrSummary, remote},
     jj::{self, Jj},
 };
 use anyhow::{Context, Result, anyhow};
+use clap::Subcommand;
+
+#[derive(Debug, Subcommand)]
+pub enum PrAction {
+    /// Create a pull request from a revision. This supports stacked PRs; by default the base
+    /// branch is set to the closest ancestor bookmark if one exists, otherwise `trunk()`.
+    #[command(visible_alias = "c")]
+    Create(CreateArgs),
+    /// Fetch a pull request by number into a local bookmark. Requires a colocated
+    /// git repository; the special `refs/pull/123/head` ref is fetched via `git`
+    /// because `jj` cannot yet fetch arbitrary refs.
+    #[command(visible_alias = "f")]
+    Fetch(FetchArgs),
+    /// Enable auto-merge on a PR. Accepts either a PR number or a revision; with
+    /// a revision, the PR is looked up by the rev's local bookmark.
+    #[command(visible_alias = "am")]
+    AutoMerge(AutoMergeArgs),
+}
+
+#[derive(Debug, clap::Args)]
+pub struct AutoMergeArgs {
+    /// PR number, or revision ID to look up a PR from.
+    #[arg(value_name = "PR_NUM|REV")]
+    pub number_or_rev: String,
+
+    /// Merge method used when enabling auto-merge. Overrides config
+    /// `auto_merge_method` (default `merge`).
+    #[arg(long = "method", short = 'm', value_name = "METHOD", value_enum)]
+    pub method: Option<AutoMergeMethod>,
+
+    #[command(flatten)]
+    pub auth: AuthArgs,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct FetchArgs {
+    /// PR number to fetch.
+    #[arg(value_name = "PR_NUM")]
+    pub pr: u64,
+
+    /// Override the bookmark template. Default: `pr_fetch_bookmark_template`
+    /// in config, else `pr-{number}/{branch}`. Placeholders: `{number}`,
+    /// `{branch}` (head.ref), `{user}`
+    /// (head.user.login), `{repo}` (head.repo.name). `{{` / `}}` are literal
+    /// braces.
+    #[arg(short = 't', long, value_name = "STR")]
+    pub template: Option<String>,
+
+    /// Replace an existing local bookmark of the same name.
+    #[arg(short = 'f', long)]
+    pub force: bool,
+
+    #[command(flatten)]
+    pub auth: AuthArgs,
+}
+
+#[derive(Debug, clap::Args)]
+#[expect(clippy::struct_excessive_bools)]
+pub struct CreateArgs {
+    /// Revision to create the PR from.
+    #[arg(value_name = "REV")]
+    pub rev: String,
+
+    /// Override the base bookmark. Default: closest ancestor bookmark on the
+    /// stack, falling back to the remote's `main` / `master` / configured
+    /// `default_base_branch`.
+    #[arg(long, value_name = "BRANCH")]
+    pub base: Option<String>,
+
+    /// Force the PR to be a draft. Overrides config (default: `draft = false`).
+    #[arg(long)]
+    pub draft: bool,
+
+    /// Force the PR to be non-draft. Overrides config.
+    #[arg(long = "no-draft", conflicts_with = "draft")]
+    pub no_draft: bool,
+
+    /// Enable auto-merge on the PR after creation (merges once required checks
+    /// pass). Overrides config (default: `auto_merge = false`).
+    #[arg(long = "auto-merge")]
+    pub auto_merge: bool,
+
+    /// Disable auto-merge on the created PR. Overrides config.
+    #[arg(long = "no-auto-merge", conflicts_with = "auto_merge")]
+    pub no_auto_merge: bool,
+
+    /// Merge method used when auto-merge is enabled. Overrides config
+    /// `auto_merge_method` (default `merge`).
+    #[arg(long = "auto-merge-method", value_name = "METHOD", value_enum)]
+    pub auto_merge_method: Option<AutoMergeMethod>,
+
+    /// Template path or name under `.github/PULL_REQUEST_TEMPLATE/`. Default:
+    /// `template_path` in config, else auto-detect
+    /// `.github/PULL_REQUEST_TEMPLATE.md`.
+    #[arg(long, value_name = "PATH_OR_NAME")]
+    pub template: Option<String>,
+
+    /// Skip template selection entirely.
+    #[arg(long = "no-template", conflicts_with = "template")]
+    pub no_template: bool,
+
+    /// Editor command; shell-words split, e.g. `--editor "nvim +7"`. Default:
+    /// `editor` in config, then `$VISUAL`, then `$EDITOR`.
+    #[arg(short = 'e', long, value_name = "CMD", value_parser = shell_words::split)]
+    pub editor: Option<Vec<String>>,
+
+    #[command(flatten)]
+    pub auth: AuthArgs,
+}
 
 pub async fn dispatch(action: PrAction) -> Result<()> {
     let config = config::load()?;
     let auth = match &action {
         PrAction::Create(a) => &a.auth,
         PrAction::Fetch(a) => &a.auth,
+        PrAction::AutoMerge(a) => &a.auth,
     };
     let token = auth::resolve_token(auth, &config).await?;
     let jj = jj::real::JjCli;
@@ -33,8 +143,100 @@ pub async fn dispatch(action: PrAction) -> Result<()> {
     match action {
         PrAction::Create(args) => create(&jj, &gh, &editor, &config, &args).await?,
         PrAction::Fetch(args) => fetch::run(&jj, &gh, &config, &args).await?,
+        PrAction::AutoMerge(args) => auto_merge(&jj, &gh, &config, &args).await?,
     }
 
+    Ok(())
+}
+
+/// Resolved lookup state for a revision: the bookmark, the remote target, the
+/// `owner:branch` head spec, the detected trunk bookmark, and the open PR (if
+/// any) whose head matches.
+///
+/// Shared by `jj-gh pr auto-merge <rev>` and `jj-gh debug pr-lookup`.
+#[derive(Debug)]
+pub struct PrLookup {
+    pub branch: String,
+    pub target: remote::Target,
+    pub head_spec: String,
+    pub default_base: String,
+    pub summary: Option<PrSummary>,
+}
+
+/// Resolve a revision into its PR-lookup context: bookmark, remote target,
+/// head spec, trunk bookmark, and any existing open PR.
+///
+/// # Errors
+///
+/// Returns an error if `rev` has no local bookmark, if `origin` is unset, if
+/// `trunk()` is empty, or if any underlying jj/GH call fails.
+pub async fn resolve_pr<J: Jj, G: Gh>(jj: &J, gh: &G, rev: &str) -> Result<PrLookup> {
+    let info = jj.resolve_rev(rev).await?;
+    let branch = info
+        .bookmarks
+        .first()
+        .cloned()
+        .ok_or_else(|| anyhow!("no local bookmark on `{rev}`; nothing to look up"))?;
+
+    let origin_url = jj
+        .remote_url("origin")
+        .await?
+        .ok_or_else(|| anyhow!("origin remote is not configured"))?;
+    let upstream_url = jj.remote_url("upstream").await?;
+    let target = remote::target(&origin_url, upstream_url.as_deref())?;
+    let head_spec = target.head_spec(&branch);
+
+    let default_base = jj
+        .trunk_branch()
+        .await?
+        .ok_or_else(|| anyhow!("could not detect trunk() bookmark"))?;
+
+    let summary = gh
+        .find_open_pr(&target.owner, &target.repo, &head_spec)
+        .await?;
+
+    Ok(PrLookup {
+        branch,
+        target,
+        head_spec,
+        default_base,
+        summary,
+    })
+}
+
+async fn auto_merge<J, G>(jj: &J, gh: &G, config: &Config, args: &AutoMergeArgs) -> Result<()>
+where
+    J: Jj,
+    G: Gh,
+{
+    let pr = if let Ok(num) = args.number_or_rev.parse::<u64>() {
+        let origin_url = jj
+            .remote_url("origin")
+            .await?
+            .ok_or_else(|| anyhow!("origin remote is not configured"))?;
+        let upstream_url = jj.remote_url("upstream").await?;
+        let target = remote::target(&origin_url, upstream_url.as_deref())?;
+        gh.get_pr(&target.owner, &target.repo, num).await?
+    } else {
+        let lookup = resolve_pr(jj, gh, &args.number_or_rev).await?;
+        let summary = lookup.summary.ok_or_else(|| {
+            anyhow!(
+                "no open PR for revision `{}` (head `{}`)",
+                args.number_or_rev,
+                lookup.head_spec,
+            )
+        })?;
+        gh.get_pr(&lookup.target.owner, &lookup.target.repo, summary.number)
+            .await?
+    };
+
+    let method = args.method.unwrap_or(config.auto_merge_method);
+    gh.enable_auto_merge(&pr.graphql_node_id, method)
+        .await
+        .with_context(|| format!("enabling auto-merge on #{}", pr.number))?;
+
+    log::info!("Enabled auto-merge for PR");
+    println!("{}", pr.html_url);
     Ok(())
 }
 
@@ -109,6 +311,8 @@ where
         base: base.clone(),
         labels: vec![],
         draft: resolve_draft(args, config),
+        auto_merge: resolve_auto_merge(args, config),
+        auto_merge_method: resolve_auto_merge_method(args, config),
     };
     let initial_buffer = initial_fm.render(raw_template.as_deref().unwrap_or(""))?;
     let raw_template_body = raw_template.unwrap_or_default();
@@ -158,6 +362,12 @@ where
         .context("PR created, but adding labels failed")?;
     }
 
+    if final_fm.auto_merge {
+        gh.enable_auto_merge(&created.node_id, final_fm.auto_merge_method)
+            .await
+            .context("PR created, but enabling auto-merge failed")?;
+    }
+
     println!("{}", created.html_url);
     Ok(())
 }
@@ -173,10 +383,28 @@ fn resolve_draft(args: &CreateArgs, config: &Config) -> bool {
     if args.draft {
         return true;
     }
+
     if args.no_draft {
         return false;
     }
+
     config.draft
+}
+
+fn resolve_auto_merge(args: &CreateArgs, config: &Config) -> bool {
+    if args.auto_merge {
+        return true;
+    }
+
+    if args.no_auto_merge {
+        return false;
+    }
+
+    config.auto_merge
+}
+
+fn resolve_auto_merge_method(args: &CreateArgs, config: &Config) -> AutoMergeMethod {
+    args.auto_merge_method.unwrap_or(config.auto_merge_method)
 }
 
 fn load_template_for<J: Jj>(args: &CreateArgs, config: &Config, _jj: &J) -> Result<Option<String>> {
@@ -198,6 +426,9 @@ mod tests {
             base: None,
             draft,
             no_draft,
+            auto_merge: false,
+            no_auto_merge: false,
+            auto_merge_method: None,
             template: None,
             no_template: false,
             editor: None,
@@ -256,5 +487,67 @@ mod tests {
     fn draft_defaults_to_config() {
         assert!(resolve_draft(&cli(false, false), &cfg_with_draft(true)));
         assert!(!resolve_draft(&cli(false, false), &cfg_with_draft(false)));
+    }
+
+    fn cfg_with_auto_merge(auto_merge: bool, method: AutoMergeMethod) -> Config {
+        Config {
+            auto_merge,
+            auto_merge_method: method,
+            ..Config::default()
+        }
+    }
+
+    fn cli_with_auto_merge(
+        auto_merge: bool,
+        no_auto_merge: bool,
+        method: Option<AutoMergeMethod>,
+    ) -> CreateArgs {
+        let mut a = cli(false, false);
+        a.auto_merge = auto_merge;
+        a.no_auto_merge = no_auto_merge;
+        a.auto_merge_method = method;
+        a
+    }
+
+    #[test]
+    fn auto_merge_flag_forces_true() {
+        assert!(resolve_auto_merge(
+            &cli_with_auto_merge(true, false, None),
+            &cfg_with_auto_merge(false, AutoMergeMethod::Merge),
+        ));
+    }
+
+    #[test]
+    fn no_auto_merge_flag_forces_false() {
+        assert!(!resolve_auto_merge(
+            &cli_with_auto_merge(false, true, None),
+            &cfg_with_auto_merge(true, AutoMergeMethod::Merge),
+        ));
+    }
+
+    #[test]
+    fn auto_merge_defaults_to_config() {
+        assert!(resolve_auto_merge(
+            &cli_with_auto_merge(false, false, None),
+            &cfg_with_auto_merge(true, AutoMergeMethod::Merge),
+        ));
+    }
+
+    #[test]
+    fn auto_merge_method_cli_wins() {
+        let m = resolve_auto_merge_method(
+            &cli_with_auto_merge(true, false, Some(AutoMergeMethod::Squash)),
+            &cfg_with_auto_merge(false, AutoMergeMethod::Rebase),
+        );
+        assert_eq!(m, AutoMergeMethod::Squash);
+    }
+
+    #[test]
+    fn auto_merge_method_defaults_to_config() {
+        let m = resolve_auto_merge_method(
+            &cli_with_auto_merge(true, false, None),
+            &cfg_with_auto_merge(true, AutoMergeMethod::Rebase),
+        );
+        assert_eq!(m, AutoMergeMethod::Rebase);
     }
 }

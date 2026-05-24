@@ -51,6 +51,8 @@ mod tests {
             base: "main".into(),
             labels: vec![],
             draft: false,
+            auto_merge: false,
+            auto_merge_method: crate::config::AutoMergeMethod::Merge,
         }
     }
 
@@ -60,6 +62,8 @@ mod tests {
             base: base.into(),
             labels: vec![],
             draft: false,
+            auto_merge: false,
+            auto_merge_method: crate::config::AutoMergeMethod::Merge,
         }
     }
 

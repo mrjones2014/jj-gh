@@ -6,7 +6,7 @@
 //! Requires a colocated git repository: jj cannot yet fetch arbitrary refs
 //! (only `refs/heads/*`), so we shell to git for the special pull ref.
 
-use crate::{cli::FetchArgs, config::Config, gh::Gh, git::url::parse_owner_repo, jj::Jj};
+use crate::{config::Config, gh::Gh, git::url::parse_owner_repo, jj::Jj, pr::FetchArgs};
 use anyhow::{Result, anyhow};
 use std::path::{Path, PathBuf};
 
@@ -230,6 +230,13 @@ mod tests {
         async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<()> {
             unimplemented!("fetch does not call add_labels")
         }
+        async fn enable_auto_merge(
+            &self,
+            _node_id: &str,
+            _method: crate::config::AutoMergeMethod,
+        ) -> Result<()> {
+            unimplemented!("fetch does not call enable_auto_merge")
+        }
         async fn get_pr(&self, owner: &str, repo: &str, number: u64) -> Result<PrDetails> {
             assert_eq!(owner, self.expected.0);
             assert_eq!(repo, self.expected.1);
@@ -279,6 +286,7 @@ mod tests {
             head_sha: "abc123".into(),
             head_user_login: Some("octocat".into()),
             head_repo_name: Some("r".into()),
+            graphql_node_id: "PR_kwDOABCDEF".into(),
         }
     }
 

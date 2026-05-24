@@ -32,6 +32,8 @@ pub struct Config {
     pub default_base_branch: String,
     pub template_path: Option<PathBuf>,
     pub draft: bool,
+    pub auto_merge: bool,
+    pub auto_merge_method: AutoMergeMethod,
     pub editor: Option<Vec<String>>,
     pub pr_fetch_bookmark_template: Option<String>,
 }
@@ -45,8 +47,33 @@ impl Default for Config {
             default_base_branch: "master".into(),
             template_path: None,
             draft: false,
+            auto_merge: false,
+            auto_merge_method: AutoMergeMethod::default(),
             editor: None,
             pr_fetch_bookmark_template: None,
+        }
+    }
+}
+
+/// GitHub merge method used when enabling auto-merge on a PR.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
+#[serde(rename_all = "lowercase")]
+#[clap(rename_all = "lowercase")]
+pub enum AutoMergeMethod {
+    #[default]
+    Merge,
+    Squash,
+    Rebase,
+}
+
+impl AutoMergeMethod {
+    /// GraphQL `PullRequestMergeMethod` enum literal.
+    #[must_use]
+    pub fn as_graphql(self) -> &'static str {
+        match self {
+            Self::Merge => "MERGE",
+            Self::Squash => "SQUASH",
+            Self::Rebase => "REBASE",
         }
     }
 }
@@ -244,6 +271,8 @@ struct DefaultsOverlay {
     askpass_timeout_secs: u64,
     default_base_branch: String,
     draft: bool,
+    auto_merge: bool,
+    auto_merge_method: AutoMergeMethod,
 }
 
 impl DefaultsOverlay {
@@ -253,6 +282,8 @@ impl DefaultsOverlay {
             askpass_timeout_secs: d.askpass_timeout_secs,
             default_base_branch: d.default_base_branch,
             draft: d.draft,
+            auto_merge: d.auto_merge,
+            auto_merge_method: d.auto_merge_method,
         }
     }
 }
