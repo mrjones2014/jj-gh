@@ -116,6 +116,7 @@ in
           "exec"
           "--"
           "${cfg.package}/bin/jj-gh"
+          "--"
           "pr"
         ];
       }
