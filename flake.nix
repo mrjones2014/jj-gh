@@ -124,7 +124,7 @@
                   echo "no .gql files found under src/gh" >&2
                   exit 1
                 fi
-                python3 ${./nix/graphql-validate.py} ${github-graphql-schema} "''${docs[@]}"
+                python3 ${./graphql-validate.py} ${github-graphql-schema} "''${docs[@]}"
                 touch $out
               '';
         };
