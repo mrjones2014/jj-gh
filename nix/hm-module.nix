@@ -15,7 +15,7 @@ let
     types
     ;
 
-  cfg = config.programs.jj.gh;
+  cfg = config.programs.jujutsu.gh;
 
   jjGhTable = lib.filterAttrs (_: v: v != null) {
     inherit (cfg.settings)
