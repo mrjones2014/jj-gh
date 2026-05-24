@@ -50,7 +50,7 @@ You can either use the overlay directly, or use the `home-manager` module.
   home.packages = [ pkgs.jj-gh ];
 
   # home-manager
-  imports = [ jj-gh.hmModules.default ];
+  imports = [ jj-gh.homeManagerModules.default ];
   programs.jujutsu.gh = {
     # this will set up some jj aliases like
     # pr = ["util", "exec", "--", "jj-gh", "pr"]
