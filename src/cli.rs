@@ -3,6 +3,7 @@
 use crate::pr::PrAction;
 use clap::{Parser, Subcommand};
 use log::LevelFilter;
+use serde::Serialize;
 
 #[derive(Debug, Parser)]
 #[command(name = "jj-gh", version, about)]
@@ -43,16 +44,18 @@ pub enum Command {
     },
 }
 
-#[derive(Debug, clap::Args)]
+#[derive(Debug, clap::Args, Serialize)]
 pub struct AuthArgs {
     /// Askpass helper command that prints a GitHub token on stdout;
     /// shell-words split, e.g. `--gh-askpass "op read op://Vault/gh/token"`.
     /// Default: `gh_askpass` in config, then `$GH_ASKPASS`.
     #[arg(long = "gh-askpass", value_name = "CMD", value_parser = shell_words::split)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub gh_askpass: Option<Vec<String>>,
 
     /// Timeout in seconds for the askpass helper. Default: 20.
     #[arg(long = "askpass-timeout", value_name = "SECS")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub askpass_timeout_secs: Option<u64>,
 }
 

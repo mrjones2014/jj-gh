@@ -78,6 +78,18 @@ impl AutoMergeMethod {
     }
 }
 
+/// Build the layered figment without extracting. Callers (e.g. CLI dispatch)
+/// can stack additional providers (like `Serialized::defaults(&args)`) before
+/// calling [`extract`].
+#[must_use]
+pub fn load_figment() -> Figment {
+    let mut fig = defaults_figment();
+    for path in discover_layers() {
+        fig = fig.merge(JjConfProvider::from_file(path));
+    }
+    fig.merge(Serialized::defaults(EnvOverlay::from_env()))
+}
+
 /// Discover config layers and merge them into a [`Config`].
 ///
 /// # Errors
@@ -85,12 +97,7 @@ impl AutoMergeMethod {
 /// Returns an error if any layer is malformed or fails serde extraction, or if
 /// `pr_fetch_bookmark_template` references an unknown placeholder.
 pub fn load() -> Result<Config> {
-    let mut fig = defaults_figment();
-    for path in discover_layers() {
-        fig = fig.merge(JjConfProvider::from_file(path));
-    }
-    fig = fig.merge(Serialized::defaults(EnvOverlay::from_env()));
-    let config: Config = extract(&fig)?;
+    let config: Config = extract(&load_figment())?;
     validate(&config)?;
     Ok(config)
 }

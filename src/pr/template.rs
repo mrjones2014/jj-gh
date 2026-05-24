@@ -101,9 +101,9 @@ mod tests {
         CreateArgs {
             rev: rev.into(),
             base: None,
-            draft: false,
+            draft: None,
             no_draft: false,
-            auto_merge: false,
+            auto_merge: None,
             no_auto_merge: false,
             auto_merge_method: None,
             template: None,

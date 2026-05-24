@@ -3,7 +3,7 @@
 //! Production [`TempfileEditor`] writes the initial buffer to a tempfile, spawns
 //! the editor (inheriting stdio), then reads back. Tests use a fake.
 
-use crate::{config::Config, pr::CreateArgs};
+use crate::config::Config;
 use anyhow::{Context, Result, anyhow};
 use tokio::process::Command;
 
@@ -16,27 +16,23 @@ pub trait EditorRoundTrip {
     async fn edit(&self, argv: &[String], initial: &str) -> Result<String>;
 }
 
-/// Resolve the editor argv from CLI, config, and shell env.
+/// Resolve the editor argv from the merged config and shell env. CLI
+/// `--editor` is folded into `config.editor` by the figment overlay in
+/// `pr::dispatch`.
 ///
 /// Precedence (high to low):
-/// 1. `--editor` CLI flag
-/// 2. `editor` in config
-/// 3. `$VISUAL`
-/// 4. `$EDITOR`
+/// 1. `editor` in (merged) config, including `--editor` if passed
+/// 2. `$VISUAL`
+/// 3. `$EDITOR`
 ///
 /// # Errors
 ///
 /// Returns an error if no source produced a non-empty argv.
 pub fn resolve_editor_argv(
-    args: &CreateArgs,
     config: &Config,
     visual: Option<&str>,
     editor: Option<&str>,
 ) -> Result<Vec<String>> {
-    if let Some(argv) = args.editor.as_deref().filter(|v| !v.is_empty()) {
-        return Ok(argv.to_vec());
-    }
-
     if let Some(argv) = config.editor.as_deref().filter(|v| !v.is_empty()) {
         return Ok(argv.to_vec());
     }
@@ -89,74 +85,47 @@ impl EditorRoundTrip for TempfileEditor {
 mod tests {
     use super::*;
 
-    fn args() -> CreateArgs {
-        CreateArgs {
-            rev: "@-".into(),
-            base: None,
-            draft: false,
-            no_draft: false,
-            auto_merge: false,
-            no_auto_merge: false,
-            auto_merge_method: None,
-            template: None,
-            no_template: false,
-            editor: None,
-            auth: crate::cli::AuthArgs {
-                gh_askpass: None,
-                askpass_timeout_secs: None,
-            },
-        }
-    }
-
     fn cfg() -> Config {
         Config::default()
     }
 
     #[test]
-    fn cli_takes_priority() {
-        let mut a = args();
-        a.editor = Some(vec!["nvim".into(), "+7".into()]);
-        let argv = resolve_editor_argv(&a, &cfg(), Some("vim"), Some("vi")).unwrap();
-        assert_eq!(argv, vec!["nvim".to_string(), "+7".into()]);
-    }
-
-    #[test]
-    fn falls_back_to_config_when_no_cli() {
+    fn config_used_when_set() {
         let mut c = cfg();
         c.editor = Some(vec!["code".into(), "--wait".into()]);
-        let argv = resolve_editor_argv(&args(), &c, Some("vim"), Some("vi")).unwrap();
+        let argv = resolve_editor_argv(&c, Some("vim"), Some("vi")).unwrap();
         assert_eq!(argv, vec!["code".to_string(), "--wait".into()]);
     }
 
     #[test]
     fn visual_outranks_editor() {
-        let argv = resolve_editor_argv(&args(), &cfg(), Some("nvim +7"), Some("vi")).unwrap();
+        let argv = resolve_editor_argv(&cfg(), Some("nvim +7"), Some("vi")).unwrap();
         assert_eq!(argv, vec!["nvim".to_string(), "+7".into()]);
     }
 
     #[test]
     fn editor_env_used_when_visual_absent() {
-        let argv = resolve_editor_argv(&args(), &cfg(), None, Some("vi")).unwrap();
+        let argv = resolve_editor_argv(&cfg(), None, Some("vi")).unwrap();
         assert_eq!(argv, vec!["vi".to_string()]);
     }
 
     #[test]
-    fn empty_strings_are_skipped() {
-        let argv = resolve_editor_argv(&args(), &cfg(), Some(""), Some("vi")).unwrap();
+    fn empty_visual_falls_through_to_editor() {
+        let argv = resolve_editor_argv(&cfg(), Some(""), Some("vi")).unwrap();
         assert_eq!(argv, vec!["vi".to_string()]);
     }
 
     #[test]
-    fn empty_cli_falls_through() {
-        let mut a = args();
-        a.editor = Some(vec![]);
-        let argv = resolve_editor_argv(&a, &cfg(), None, Some("vi")).unwrap();
+    fn empty_config_editor_falls_through() {
+        let mut c = cfg();
+        c.editor = Some(vec![]);
+        let argv = resolve_editor_argv(&c, None, Some("vi")).unwrap();
         assert_eq!(argv, vec!["vi".to_string()]);
     }
 
     #[test]
     fn no_sources_errors() {
-        let err = resolve_editor_argv(&args(), &cfg(), None, None).unwrap_err();
+        let err = resolve_editor_argv(&cfg(), None, None).unwrap_err();
         assert!(err.to_string().contains("no editor configured"));
     }
 }

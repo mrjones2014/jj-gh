@@ -87,10 +87,10 @@ fn ensure_colocated(workspace_root: &Path) -> Result<()> {
     ))
 }
 
-fn resolve_template<'a>(args: &'a FetchArgs, config: &'a Config) -> &'a str {
-    args.template
+fn resolve_template(config: &Config) -> &str {
+    config
+        .pr_fetch_bookmark_template
         .as_deref()
-        .or(config.pr_fetch_bookmark_template.as_deref())
         .unwrap_or(DEFAULT_FETCH_TEMPLATE)
 }
 
@@ -127,7 +127,7 @@ pub async fn run_with<J: Jj, G: Gh, GO: GitOps>(
 
     let pr = gh.get_pr(&owner, &repo, args.pr).await?;
 
-    let template = resolve_template(args, config);
+    let template = resolve_template(config);
     let bookmark = bookmark_template::render(
         template,
         &Fields {
@@ -384,7 +384,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cli_template_overrides_config() {
+    async fn config_template_is_used() {
         let dir = colocated_workspace();
         let jj = jj_for(&dir, Some("git@github.com:o/r.git"));
         let gh = gh_for(details(), "o", "r");
@@ -393,21 +393,15 @@ mod tests {
             fetches: RefCell::new(vec![]),
         };
         let config = Config {
-            pr_fetch_bookmark_template: Some("from-config-{number}".into()),
+            pr_fetch_bookmark_template: Some("cfg-{number}-{user}".into()),
             ..Config::default()
         };
 
-        run_with(
-            &jj,
-            &gh,
-            &git,
-            &config,
-            &args(1234, Some("cli-{number}-{user}"), false),
-        )
-        .await
-        .unwrap();
+        run_with(&jj, &gh, &git, &config, &args(1234, None, false))
+            .await
+            .unwrap();
 
-        assert_eq!(git.fetches.borrow()[0].bookmark, "cli-1234-octocat");
+        assert_eq!(git.fetches.borrow()[0].bookmark, "cfg-1234-octocat");
     }
 
     #[tokio::test]
@@ -439,17 +433,14 @@ mod tests {
             exists: false,
             fetches: RefCell::new(vec![]),
         };
-        let config = Config::default();
+        let config = Config {
+            pr_fetch_bookmark_template: Some("pr-{nope}".into()),
+            ..Config::default()
+        };
 
-        let err = run_with(
-            &jj,
-            &gh,
-            &git,
-            &config,
-            &args(1234, Some("pr-{nope}"), false),
-        )
-        .await
-        .unwrap_err();
+        let err = run_with(&jj, &gh, &git, &config, &args(1234, None, false))
+            .await
+            .unwrap_err();
         let msg = format!("{err:#}");
         assert!(msg.contains("unknown placeholder"), "msg: {msg}");
         assert!(msg.contains("{nope}"), "msg: {msg}");
@@ -525,17 +516,14 @@ mod tests {
             exists: false,
             fetches: RefCell::new(vec![]),
         };
-        let config = Config::default();
+        let config = Config {
+            pr_fetch_bookmark_template: Some("pr-{number}-{user}".into()),
+            ..Config::default()
+        };
 
-        let err = run_with(
-            &jj,
-            &gh,
-            &git,
-            &config,
-            &args(1234, Some("pr-{number}-{user}"), false),
-        )
-        .await
-        .unwrap_err();
+        let err = run_with(&jj, &gh, &git, &config, &args(1234, None, false))
+            .await
+            .unwrap_err();
         let msg = format!("{err:#}");
         assert!(msg.contains("{user}"), "msg: {msg}");
         assert!(

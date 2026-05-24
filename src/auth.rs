@@ -10,7 +10,7 @@
 //! canned outcomes without having to run an actual subprocess or touch the
 //! filesystem.
 
-use crate::{cli::AuthArgs, config::Config};
+use crate::config::Config;
 use anyhow::{Context, Result, anyhow};
 use secrecy::SecretString;
 use std::time::Duration;
@@ -66,38 +66,28 @@ impl ProcessRunner for TokioProcessRunner {
 }
 
 /// Resolve a [`SecretString`] using the production [`TokioProcessRunner`]. CLI
-/// `--gh-askpass` / `--askpass-timeout` flags in `auth` take precedence over
-/// `config`.
+/// `--gh-askpass` / `--askpass-timeout` flags are folded into `config` by the
+/// figment overlay in `pr::dispatch`.
 ///
 /// # Errors
 ///
 /// See [`resolve_token_with`].
-pub async fn resolve_token(auth: &AuthArgs, config: &Config) -> Result<SecretString> {
-    resolve_token_with(auth, config, &TokioProcessRunner).await
+pub async fn resolve_token(config: &Config) -> Result<SecretString> {
+    resolve_token_with(config, &TokioProcessRunner).await
 }
 
-/// Resolve a [`SecretString`] using an explicit runner. Used in tests. CLI
-/// flags in `auth` override matching fields in `config`.
+/// Resolve a [`SecretString`] using an explicit runner. Used in tests.
 ///
 /// # Errors
 ///
 /// Returns an error if the askpass helper fails (timeout, non-zero exit, empty
 /// or oversize output) or if neither source is configured.
-pub async fn resolve_token_with<R: ProcessRunner>(
-    auth: &AuthArgs,
-    config: &Config,
-    runner: &R,
-) -> Result<SecretString> {
-    let askpass = auth.gh_askpass.as_deref().or(config.gh_askpass.as_deref());
-    let timeout_secs = auth
-        .askpass_timeout_secs
-        .unwrap_or(config.askpass_timeout_secs);
-
-    if let Some(argv) = askpass {
+async fn resolve_token_with<R: ProcessRunner>(config: &Config, runner: &R) -> Result<SecretString> {
+    if let Some(argv) = config.gh_askpass.as_deref() {
         if argv.is_empty() {
             return Err(anyhow!("`gh_askpass` is set but empty"));
         }
-        let dur = Duration::from_secs(timeout_secs);
+        let dur = Duration::from_secs(config.askpass_timeout_secs);
         return run_askpass(runner, argv, dur)
             .await
             .with_context(|| format!("askpass `{}` failed", shell_words::join(argv)));
@@ -177,13 +167,6 @@ mod tests {
         }
     }
 
-    fn empty_auth() -> AuthArgs {
-        AuthArgs {
-            gh_askpass: None,
-            askpass_timeout_secs: None,
-        }
-    }
-
     fn config_with_askpass() -> Config {
         Config {
             gh_askpass: Some(vec!["/fake/askpass".into()]),
@@ -199,7 +182,7 @@ mod tests {
             stdout: b"ghp_from_askpass\n".to_vec(),
             stderr: vec![],
         });
-        let token = resolve_token_with(&empty_auth(), &config_with_askpass(), &runner)
+        let token = resolve_token_with(&config_with_askpass(), &runner)
             .await
             .unwrap();
         assert_eq!(token.expose_secret(), "ghp_from_askpass");
@@ -212,7 +195,7 @@ mod tests {
             stdout: vec![],
             stderr: b"something went wrong".to_vec(),
         });
-        let err = resolve_token_with(&empty_auth(), &config_with_askpass(), &runner)
+        let err = resolve_token_with(&config_with_askpass(), &runner)
             .await
             .unwrap_err();
         let msg = format!("{err:#}");
@@ -227,7 +210,7 @@ mod tests {
             stdout: vec![],
             stderr: vec![],
         });
-        let err = resolve_token_with(&empty_auth(), &config_with_askpass(), &runner)
+        let err = resolve_token_with(&config_with_askpass(), &runner)
             .await
             .unwrap_err();
         let msg = format!("{err:#}");
@@ -241,7 +224,7 @@ mod tests {
             stdout: vec![b'a'; ASKPASS_STDOUT_LIMIT + 1],
             stderr: vec![],
         });
-        let err = resolve_token_with(&empty_auth(), &config_with_askpass(), &runner)
+        let err = resolve_token_with(&config_with_askpass(), &runner)
             .await
             .unwrap_err();
         let msg = format!("{err:#}");
@@ -251,7 +234,7 @@ mod tests {
     #[tokio::test]
     async fn errors_on_timeout() {
         let runner = FakeRunner::new(SpawnOutcome::TimedOut);
-        let err = resolve_token_with(&empty_auth(), &config_with_askpass(), &runner)
+        let err = resolve_token_with(&config_with_askpass(), &runner)
             .await
             .unwrap_err();
         let msg = format!("{err:#}");
@@ -263,7 +246,7 @@ mod tests {
         let runner = FakeRunner::new(SpawnOutcome::SpawnFailed(
             "no such file or directory".into(),
         ));
-        let err = resolve_token_with(&empty_auth(), &config_with_askpass(), &runner)
+        let err = resolve_token_with(&config_with_askpass(), &runner)
             .await
             .unwrap_err();
         let msg = format!("{err:#}");
@@ -277,16 +260,14 @@ mod tests {
             gh_token: Some(SecretString::from("ghp_plain".to_string())),
             ..Config::default()
         };
-        let token = resolve_token_with(&empty_auth(), &config, &runner)
-            .await
-            .unwrap();
+        let token = resolve_token_with(&config, &runner).await.unwrap();
         assert_eq!(token.expose_secret(), "ghp_plain");
     }
 
     #[tokio::test]
     async fn errors_when_neither_source_configured() {
         let runner = FakeRunner::new(SpawnOutcome::TimedOut); // unused
-        let err = resolve_token_with(&empty_auth(), &Config::default(), &runner)
+        let err = resolve_token_with(&Config::default(), &runner)
             .await
             .unwrap_err();
         let msg = format!("{err:#}");
@@ -300,9 +281,7 @@ mod tests {
             gh_askpass: Some(vec![]),
             ..Config::default()
         };
-        let err = resolve_token_with(&empty_auth(), &config, &runner)
-            .await
-            .unwrap_err();
+        let err = resolve_token_with(&config, &runner).await.unwrap_err();
         let msg = format!("{err:#}");
         assert!(msg.contains("`gh_askpass` is set but empty"), "msg: {msg}");
     }
@@ -323,46 +302,7 @@ mod tests {
             askpass_timeout_secs: 5,
             ..Config::default()
         };
-        let token = resolve_token_with(&empty_auth(), &config, &runner)
-            .await
-            .unwrap();
+        let token = resolve_token_with(&config, &runner).await.unwrap();
         assert_eq!(token.expose_secret(), "ghp_from_op");
-    }
-
-    #[tokio::test]
-    async fn cli_askpass_overrides_config() {
-        let runner = FakeRunner::new(SpawnOutcome::Completed {
-            code: Some(0),
-            stdout: b"ghp_from_cli\n".to_vec(),
-            stderr: vec![],
-        });
-        let auth = AuthArgs {
-            gh_askpass: Some(vec!["cli-askpass".into()]),
-            askpass_timeout_secs: Some(99),
-        };
-        let token = resolve_token_with(&auth, &config_with_askpass(), &runner)
-            .await
-            .unwrap();
-        assert_eq!(token.expose_secret(), "ghp_from_cli");
-    }
-
-    #[tokio::test]
-    async fn cli_timeout_overrides_config_when_only_config_has_askpass() {
-        // With askpass only on config and a CLI-set timeout, the CLI timeout wins
-        // (we can't observe it directly through FakeRunner, but the resolution
-        // path still works end-to-end).
-        let runner = FakeRunner::new(SpawnOutcome::Completed {
-            code: Some(0),
-            stdout: b"ghp_x\n".to_vec(),
-            stderr: vec![],
-        });
-        let auth = AuthArgs {
-            gh_askpass: None,
-            askpass_timeout_secs: Some(1),
-        };
-        let token = resolve_token_with(&auth, &config_with_askpass(), &runner)
-            .await
-            .unwrap();
-        assert_eq!(token.expose_secret(), "ghp_x");
     }
 }
