@@ -113,7 +113,7 @@ pub struct CreateArgs {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub draft: Option<bool>,
 
-    /// Force the PR to be non-draft. Overrides config. Equivalent to `--draft false`.
+    /// Force the PR to be non-draft. Overrides config. Equivalent to `--draft=false`.
     #[arg(long = "no-draft", conflicts_with = "draft")]
     #[serde(skip)]
     pub no_draft: bool,
