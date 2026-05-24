@@ -107,7 +107,7 @@ in
     };
   };
 
-  config = (mkIf cfg.enable && config.programs.jujutsu.enable) {
+  config = mkIf (cfg.enable && config.programs.jujutsu.enable) {
     home.packages = [ cfg.package ];
     programs.jujutsu.settings = mkMerge [
       {
