@@ -85,7 +85,7 @@ Set up `pr` as a built-in `jj` subcommand so you can write `jj pr create <rev>`:
 ```toml
 # ~/.config/jj/config.toml
 [aliases]
-pr = ["util", "exec", "--", "jj-gh", "pr", "--"]
+pr = ["util", "exec", "--", "jj-gh", "pr"]
 ```
 
 Now `jj pr create <rev>` (and the alias `jj pr c <rev>`) and
