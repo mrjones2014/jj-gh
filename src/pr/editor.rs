@@ -3,7 +3,7 @@
 //! Production [`TempfileEditor`] writes the initial buffer to a tempfile, spawns
 //! the editor (inheriting stdio), then reads back. Tests use a fake.
 
-use crate::{cli::CreateArgs, config::Config};
+use crate::{config::Config, pr::CreateArgs};
 use anyhow::{Context, Result, anyhow};
 use tokio::process::Command;
 
@@ -95,6 +95,9 @@ mod tests {
             base: None,
             draft: false,
             no_draft: false,
+            auto_merge: false,
+            no_auto_merge: false,
+            auto_merge_method: None,
             template: None,
             no_template: false,
             editor: None,

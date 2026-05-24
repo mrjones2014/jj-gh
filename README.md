@@ -130,15 +130,17 @@ If a PR is already open for the head, the existing URL is printed and nothing is
 
 ### Flags
 
-| Flag                        | Default                                              | Effect                                                                                                                                                        |
-| --------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--base <branch>`           | stacked ancestor / `trunk()` / `default_base_branch` | Override the base branch.                                                                                                                                     |
-| `--draft` / `--no-draft`    | config `draft` (default `false`)                     | Force the draft state.                                                                                                                                        |
-| `--template <path-or-name>` | config `template_path` / auto-detect                 | Use a specific template. Paths starting with `./`, `../`, `/`, or `~` are taken verbatim; bare names resolve under `.github/PULL_REQUEST_TEMPLATE/<name>.md`. |
-| `--no-template`             | off                                                  | Skip template selection entirely.                                                                                                                             |
-| `--editor <cmd>`            | config `editor` / `$VISUAL` / `$EDITOR`              | Editor command.                                                                                                                                               |
-| `--gh-askpass <cmd>`        | config `gh_askpass` / `$GH_ASKPASS`                  | Askpass helper command that prints the GitHub token to stdout.                                                                                                |
-| `--askpass-timeout <secs>`  | `20`                                                 | Timeout for the askpass helper.                                                                                                                               |
+| Flag                               | Default                                              | Effect                                                                                                                                                        |
+| ---------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--base <branch>`                  | stacked ancestor / `trunk()` / `default_base_branch` | Override the base branch.                                                                                                                                     |
+| `--draft` / `--no-draft`           | config `draft` (default `false`)                     | Force the draft state.                                                                                                                                        |
+| `--auto-merge` / `--no-auto-merge` | config `auto_merge` (default `false`)                | Enable auto-merge once required checks pass.                                                                                                                  |
+| `--auto-merge-method <METHOD>`     | config `auto_merge_method` (default `merge`)         | Merge method when auto-merge fires. One of `merge`, `squash`, `rebase`.                                                                                       |
+| `--template <path-or-name>`        | config `template_path` / auto-detect                 | Use a specific template. Paths starting with `./`, `../`, `/`, or `~` are taken verbatim; bare names resolve under `.github/PULL_REQUEST_TEMPLATE/<name>.md`. |
+| `--no-template`                    | off                                                  | Skip template selection entirely.                                                                                                                             |
+| `--editor <cmd>`                   | config `editor` / `$VISUAL` / `$EDITOR`              | Editor command.                                                                                                                                               |
+| `--gh-askpass <cmd>`               | config `gh_askpass` / `$GH_ASKPASS`                  | Askpass helper command that prints the GitHub token to stdout.                                                                                                |
+| `--askpass-timeout <secs>`         | `20`                                                 | Timeout for the askpass helper.                                                                                                                               |
 
 ### Fetching a PR
 
@@ -213,6 +215,8 @@ askpass_timeout_secs = 20                                 # default 20
 default_base_branch = "main"                       # default "master"
 template_path = ".github/PULL_REQUEST_TEMPLATE.md"
 draft = false                                      # default false
+auto_merge = false                                 # default false; enable auto-merge on PR after creation
+auto_merge_method = "merge"                        # default "merge"; one of "merge", "squash", "rebase"
 
 # Bookmark name template for `pr fetch`. Default "pr-{number}/{branch}".
 # Placeholders: {number}, {branch}, {user}, {repo}. `{{` / `}}` are literal.
@@ -242,7 +246,7 @@ The token supplied via `gh_askpass` or `gh_token` needs different scopes dependi
 | ------------- | -------------- | ----------------------------------------------------------------------------------------------- |
 | Metadata      | Read           | every API call (always required)                                                                |
 | Contents      | Read           | `pr create` (resolving the base branch ref), `pr fetch` (fetching `refs/pull/<n>/head` via git) |
-| Pull requests | Read and write | `pr create` (list + create), `pr fetch` (get)                                                   |
+| Pull requests | Read and write | `pr create` (list + create, enable auto-merge), `pr fetch` (get)                                |
 | Issues        | Read and write | `pr create` when applying labels (GitHub labels go through the Issues API)                      |
 
 If you don't apply labels, you can drop the Issues permission.
@@ -267,6 +271,9 @@ title: "" # required, non-empty
 base: "main" # required; pre-filled with the resolved base branch
 labels: [] # list of strings, applied via a follow-up API call after creation
 draft: false # bool
+auto_merge: false # bool; enable GitHub auto-merge once required checks pass
+# this value is not present by default but may be set here as well
+auto_merge_method: "merge" # one of "merge", "squash", "rebase"
 ```
 
 ## Development

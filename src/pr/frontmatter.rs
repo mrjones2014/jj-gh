@@ -12,8 +12,13 @@
 //! <body>
 //! ```
 
+use crate::config::AutoMergeMethod;
 use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
+
+fn is_default<T: Default + PartialEq>(val: &T) -> bool {
+    *val == T::default()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Frontmatter {
@@ -23,6 +28,10 @@ pub struct Frontmatter {
     pub labels: Vec<String>,
     #[serde(default)]
     pub draft: bool,
+    #[serde(default)]
+    pub auto_merge: bool,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub auto_merge_method: AutoMergeMethod,
 }
 
 impl Frontmatter {
@@ -68,6 +77,8 @@ mod tests {
             base: "main".into(),
             labels: vec!["bug".into(), "p1".into()],
             draft: false,
+            auto_merge: false,
+            auto_merge_method: AutoMergeMethod::Merge,
         }
     }
 
@@ -101,7 +112,24 @@ mod tests {
         assert_eq!(fm.base, "main");
         assert!(fm.labels.is_empty());
         assert!(!fm.draft);
+        assert!(!fm.auto_merge);
+        assert_eq!(fm.auto_merge_method, AutoMergeMethod::Merge);
         assert_eq!(body, "body text\n");
+    }
+
+    #[test]
+    fn render_omits_auto_merge_behavior_by_default() {
+        let data = fm("feat: hi :)");
+        let rendered = data.render("").unwrap();
+        assert!(!rendered.contains("auto_merge_method:"));
+    }
+
+    #[test]
+    fn parse_reads_auto_merge_fields() {
+        let buffer = "---\ntitle: hello\nbase: main\nauto_merge: true\nauto_merge_method: squash\n---\n\nbody\n";
+        let (fm, _) = Frontmatter::parse(buffer).unwrap();
+        assert!(fm.auto_merge);
+        assert_eq!(fm.auto_merge_method, AutoMergeMethod::Squash);
     }
 
     #[test]

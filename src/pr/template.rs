@@ -4,7 +4,7 @@
 //! that path is done by [`load_template_file`]. Both delegate filesystem reads
 //! to a [`FileSystem`] so tests stay hermetic.
 
-use crate::{cli::CreateArgs, config::Config, fs::FileSystem};
+use crate::{config::Config, fs::FileSystem, pr::CreateArgs};
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
@@ -103,6 +103,9 @@ mod tests {
             base: None,
             draft: false,
             no_draft: false,
+            auto_merge: false,
+            no_auto_merge: false,
+            auto_merge_method: None,
             template: None,
             no_template: false,
             editor: None,

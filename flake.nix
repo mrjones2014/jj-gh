@@ -13,6 +13,11 @@
       url = "github:numtide/treefmt-nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    github-graphql-schema = {
+      url = "https://docs.github.com/public/fpt/schema.docs.graphql";
+      type = "file";
+      flake = false;
+    };
   };
 
   outputs =
@@ -23,6 +28,7 @@
       rust-overlay,
       crane,
       treefmt-nix,
+      github-graphql-schema,
     }:
     flake-utils.lib.eachDefaultSystem (
       system:
@@ -37,7 +43,17 @@
         nightlyToolchain = pkgs.rust-bin.selectLatestNightlyWith (toolchain: toolchain.minimal);
         craneLibNightly = (crane.mkLib pkgs).overrideToolchain nightlyToolchain;
 
-        src = craneLib.cleanCargoSource ./.;
+        src =
+          let
+            root = ./.;
+          in
+          pkgs.lib.fileset.toSource {
+            inherit root;
+            fileset = pkgs.lib.fileset.unions [
+              (craneLib.fileset.commonCargoSources root)
+              (pkgs.lib.fileset.fileFilter (f: f.hasExt "gql") root)
+            ];
+          };
         commonArgs = {
           inherit src;
           strictDeps = true;
@@ -96,6 +112,21 @@
             }
           );
           treefmt = treefmtEval.config.build.check self;
+          graphql-validate =
+            pkgs.runCommand "graphql-validate"
+              {
+                nativeBuildInputs = [ (pkgs.python3.withPackages (ps: [ ps.graphql-core ])) ];
+              }
+              ''
+                shopt -s nullglob
+                docs=(${./src/gh}/*.gql)
+                if (( ''${#docs[@]} == 0 )); then
+                  echo "no .gql files found under src/gh" >&2
+                  exit 1
+                fi
+                python3 ${./nix/graphql-validate.py} ${github-graphql-schema} "''${docs[@]}"
+                touch $out
+              '';
         };
       }
     )

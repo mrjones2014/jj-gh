@@ -1,9 +1,11 @@
 //! `octocrab`-backed [`Gh`] implementation.
 
 use super::{CreatePrRequest, Gh, PrCreated, PrDetails, PrSummary};
+use crate::config::AutoMergeMethod;
 use anyhow::{Context, Result, anyhow};
 use octocrab::{Octocrab, params};
 use secrecy::{ExposeSecret, SecretString};
+use serde_json::json;
 
 /// Production [`Gh`] impl wrapping an authenticated `octocrab` client.
 pub struct OctocrabGh {
@@ -83,6 +85,7 @@ impl Gh for OctocrabGh {
         Ok(PrCreated {
             number: pr.number,
             html_url: pr.html_url.to_string(),
+            node_id: pr.node_id,
         })
     }
 
@@ -99,6 +102,24 @@ impl Gh for OctocrabGh {
             .await
             .map_err(humanize)
             .with_context(|| format!("adding labels to {owner}/{repo}#{pr_num}"))?;
+        Ok(())
+    }
+
+    async fn enable_auto_merge(&self, pr_node_id: &str, method: AutoMergeMethod) -> Result<()> {
+        const MUTATION: &str = include_str!("./enable_auto_merge.gql");
+
+        let payload = json!({
+            "query": MUTATION,
+            "variables": {
+                "prId": pr_node_id,
+                "method": method.as_graphql(),
+            },
+        });
+        self.octo
+            .graphql::<serde_json::Value>(&payload)
+            .await
+            .map_err(humanize)
+            .context("enabling auto-merge")?;
         Ok(())
     }
 
@@ -121,6 +142,7 @@ impl Gh for OctocrabGh {
             head_sha: pr.head.sha.clone(),
             head_user_login: pr.head.user.as_ref().map(|u| u.login.clone()),
             head_repo_name: pr.head.repo.as_ref().map(|r| r.name.clone()),
+            graphql_node_id: pr.node_id,
         })
     }
 }
