@@ -983,6 +983,7 @@ dependencies = [
  "flexi_logger",
  "http",
  "log",
+ "nu-ansi-term",
  "octocrab",
  "secrecy",
  "serde",

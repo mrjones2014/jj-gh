@@ -15,6 +15,7 @@ flexi_logger = { version = "0.31", default-features = false, features = [
 ] }
 http = "1"
 log = "0.4"
+nu-ansi-term = "0.50"
 octocrab = "0.51"
 secrecy = { version = "0.10", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
