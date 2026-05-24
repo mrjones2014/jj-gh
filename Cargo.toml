@@ -6,6 +6,9 @@ name = "jj-gh"
 repository = "https://github.com/mrjones2014/jj-gh"
 version = "0.1.0"
 
+[workspace]
+members = ["tools/gen-docs"]
+
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }

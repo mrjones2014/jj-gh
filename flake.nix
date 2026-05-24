@@ -67,13 +67,39 @@
           commonArgs
           // {
             inherit cargoArtifacts;
+            cargoExtraArgs = "--package jj-gh";
+          }
+        );
+        gen-docs = craneLib.buildPackage (
+          commonArgs
+          // {
+            inherit cargoArtifacts;
+            pname = "gen-docs";
+            cargoExtraArgs = "--package gen-docs";
+            doCheck = false;
           }
         );
         treefmtEval = treefmt-nix.lib.evalModule pkgs (import ./nix/treefmt.nix { inherit rustToolchain; });
+        gen-docs-app = pkgs.writeShellApplication {
+          name = "gen-docs";
+          runtimeInputs = [
+            gen-docs
+            treefmtEval.config.build.wrapper
+          ];
+          text = ''
+            gen-docs > DOCS.md
+            treefmt --no-cache DOCS.md
+          '';
+        };
       in
       {
         packages.default = jj-gh;
+        packages.gen-docs = gen-docs;
         apps.default = flake-utils.lib.mkApp { drv = jj-gh; };
+        apps.docs = flake-utils.lib.mkApp {
+          drv = gen-docs-app;
+          name = "gen-docs";
+        };
         formatter = treefmtEval.config.build.wrapper;
         devShells.default = craneLib.devShell {
           inputsFrom = [ jj-gh ];
@@ -91,13 +117,14 @@
             commonArgs
             // {
               inherit cargoArtifacts;
-              cargoClippyExtraArgs = "--all-targets -- -D warnings";
+              cargoClippyExtraArgs = "--workspace --all-targets -- -D warnings";
             }
           );
           nextest = craneLib.cargoNextest (
             commonArgs
             // {
               inherit cargoArtifacts;
+              cargoNextestExtraArgs = "--workspace";
               partitions = 1;
               partitionType = "count";
             }
@@ -107,7 +134,7 @@
             // {
               cargoArtifacts = cargoArtifactsNightly;
               pnameSuffix = "-udeps";
-              buildPhaseCargoCommand = "cargo udeps --all-targets --locked";
+              buildPhaseCargoCommand = "cargo udeps --workspace --all-targets --locked";
               nativeBuildInputs = [ pkgs.cargo-udeps ];
             }
           );
@@ -126,6 +153,22 @@
                 fi
                 python3 ${./graphql-validate.py} ${github-graphql-schema} "''${docs[@]}"
                 touch $out
+              '';
+          docs =
+            pkgs.runCommand "docs-check"
+              {
+                nativeBuildInputs = [ pkgs.diffutils ];
+              }
+              ''
+                mkdir -p $out
+                cp ${./DOCS.md} "$out/expected.md"
+                touch "$out/flake.nix"
+                cd "$out"
+                ${gen-docs-app}/bin/gen-docs
+                if ! diff -u expected.md DOCS.md; then
+                  echo "DOCS.md out of date; run \`nix run .#docs\`" >&2
+                  exit 1
+                fi
               '';
         };
       }

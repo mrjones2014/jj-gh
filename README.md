@@ -1,14 +1,16 @@
 # jj-gh
 
-Opinionated `jj` tools for working with GitHub from your terminal.
+`jj` tools for working with GitHub from your terminal.
 
-- Create PRs from any revision, including smart support for stacked PRs
-- Easily fetch PRs for local checkout, including across forks
+- Create PRs locally from your preferred editor, for any arbitrary revision ID
+  - Intelligently supports stacked PRs by choosing the correct base if the revision has an ancestor bookmark for which an open PR exists
+- Enable auto-merge for a PR by its revision ID, without having to know/find its PR number (e.g. `jj pr auto-merge zqxy`)
+- Create local bookmarks for PRs, including across forks (e.g. `jj pr fetch 1234 && jj new pr-1234/...`, useful for testing PRs to OSS repos)
 
 all from the comfort of your terminal, without touching GitHub's clunky web UI.
 Works great when combined with the [jj megamerge](https://isaaccorbrey.com/notes/jujutsu-megamerges-for-fun-and-profit) workflow!
 
-PRs welcome and encouraged!
+See [DOCS.md](./DOCS.md) for all commands, flags, and features. PRs welcome and encouraged!
 
 ## Requirements
 
@@ -94,120 +96,14 @@ subcommand.
 
 </details>
 
-## Usage
-
-### Creating a PR
-
-```sh
-jj pr create <rev>
-```
-
-The editor opens with a buffer like:
-
-```markdown
----
-title: "feat(thing): do the thing"
-base: "master"
-labels: []
-draft: false
----
-
-Body in markdown.
-```
-
-Save and quit. `jj-gh` pushes the change with `jj git push -c`, opens the PR, applies labels, and prints the URL on `STDOUT`.
-
-If a PR is already open for the head, the existing URL is printed and nothing is changed.
-
-#### Base-branch resolution
-
-`jj-gh` supports stacked PRs by picking a smart default base:
-
-1. `--base <branch>` if you pass one.
-2. Otherwise the closest ancestor commit with a bookmark (so PR #2 stacked on PR #1's branch targets PR #1's bookmark).
-3. Otherwise the bookmark at `jj`'s `trunk()` revset (whatever the repo's `revsets.trunk` resolves to; default probes `main@<remote>`, `master@<remote>`, `trunk@<remote>`).
-4. Otherwise the configured `default_base_branch` (default `master`).
-
-### Flags
-
-| Flag                               | Default                                              | Effect                                                                                                                                                        |
-| ---------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--base <branch>`                  | stacked ancestor / `trunk()` / `default_base_branch` | Override the base branch.                                                                                                                                     |
-| `--draft` / `--no-draft`           | config `draft` (default `false`)                     | Force the draft state.                                                                                                                                        |
-| `--auto-merge` / `--no-auto-merge` | config `auto_merge` (default `false`)                | Enable auto-merge once required checks pass.                                                                                                                  |
-| `--auto-merge-method <METHOD>`     | config `auto_merge_method` (default `merge`)         | Merge method when auto-merge fires. One of `merge`, `squash`, `rebase`.                                                                                       |
-| `--template <path-or-name>`        | config `template_path` / auto-detect                 | Use a specific template. Paths starting with `./`, `../`, `/`, or `~` are taken verbatim; bare names resolve under `.github/PULL_REQUEST_TEMPLATE/<name>.md`. |
-| `--no-template`                    | off                                                  | Skip template selection entirely.                                                                                                                             |
-| `--editor <cmd>`                   | config `editor` / `$VISUAL` / `$EDITOR`              | Editor command.                                                                                                                                               |
-| `--gh-askpass <cmd>`               | config `gh_askpass` / `$GH_ASKPASS`                  | Askpass helper command that prints the GitHub token to `STDOUT`.                                                                                              |
-| `--askpass-timeout <secs>`         | `20`                                                 | Timeout for the askpass helper.                                                                                                                               |
-
-### Fetching a PR
-
-```sh
-jj pr fetch <pr-num>
-```
-
-Downloads `refs/pull/<pr-num>/head` from `origin` into a local bookmark and
-imports it into jj. The bookmark name on `STDOUT` is pipe-friendly; the title,
-head commit, PR URL, and a follow-up hint go to `STDERR` (TTY only) so that
-it's pipe-friendly (can be used in scripts etc.).
-
-```sh
-$ jj pr fetch 1234
-PR #1234: Add the feature
-head: abc123... (https://github.com/o/r/pull/1234)
-hint: jj new pr-1234/feature/foo
-pr-1234/feature/foo
-```
-
-The bookmark name comes from a template (`pr_fetch_bookmark_template` in
-config, or `-t/--template` on the CLI). Default: `pr-{number}/{branch}`.
-
-Placeholders:
-
-- `{number}`: PR number.
-- `{branch}`: `head.ref` of the PR, raw (slashes preserved).
-- `{user}`: `head.user.login` (the fork owner's GitHub login).
-- `{repo}`: `head.repo.name` (the head repository's name).
-
-Use `{{` and `}}` for literal braces.
-
-I recommend keeping a unique, recognizable prefix (the default `pr-{number}/`
-form works) so you can bulk-delete stale bookmarks after a PR merges, e.g.
-`jj bookmark delete 'pr-1234/*'`.
-
-#### Requirements
-
-`pr fetch` shells out to `git` to grab the special `refs/pull/123/head` ref
-because jj cannot yet fetch arbitrary refs (only `refs/heads/*`). It therefore
-requires a colocated git repository.
-
-#### Flags
-
-| Flag                       | Default                                                      | Effect                                                                                 |
-| -------------------------- | ------------------------------------------------------------ | -------------------------------------------------------------------------------------- |
-| `-t, --template <STR>`     | config `pr_fetch_bookmark_template` / `pr-{number}/{branch}` | Override the bookmark template.                                                        |
-| `-f, --force`              | off                                                          | Replace an existing local bookmark of the same name (passes `--force` to `git fetch`). |
-| `--gh-askpass <cmd>`       | config `gh_askpass` / `$GH_ASKPASS`                          | Askpass helper command that prints the GitHub token to `STDOUT`.                       |
-| `--askpass-timeout <secs>` | `20`                                                         | Timeout for the askpass helper.                                                        |
-
-### Debug subcommands
-
-| Command                       | Purpose                                                                                       |
-| ----------------------------- | --------------------------------------------------------------------------------------------- |
-| `jj-gh debug config`          | Print the merged config with the token redacted.                                              |
-| `jj-gh debug auth`            | Resolve the GitHub token and report success or failure. Never prints the actual token itself. |
-| `jj-gh debug rev <REV>`       | Resolve a rev to commit info, remote URLs, and the detected default branch.                   |
-| `jj-gh debug pr-lookup <REV>` | Pre-flight: target, existing PR (if any), base-branch existence.                              |
-
 ## Config
 
-Add a `[jj-gh]` table to any jj config layer (global `~/.config/jj/config.toml` or repo-local config via `jj config edit --repo`):
+Add a `[jj-gh]` table to any jj config layer (global `~/.config/jj/config.toml` or repo-local config via `jj config edit --repo`).
+Options related to PR metadata may also be overidden via the [markdown frontmatter](#frontmatter-format) when your editor opens.
 
 ```toml
 [jj-gh]
-# Auth (one of these is required).
+# Auth (one of these is required)
 gh_askpass = ["op", "read", "op://Personal/github/token"] # preferred
 gh_token = "ghp_..."                                      # plain token, less safe
 askpass_timeout_secs = 20                                 # default 20
@@ -226,7 +122,7 @@ pr_fetch_bookmark_template = "pr-{number}/{branch}"
 # Editor command, shell-words split. Falls back to $VISUAL, then $EDITOR.
 editor = [
   "nvim",
-  "+7",   # +7 jumps your cursor past the frontmatter
+  "+9",   # +9 jumps your cursor past the frontmatter
 ]
 ```
 
@@ -239,7 +135,19 @@ Precedence (low to high):
 1. env (`GH_ASKPASS`, `JJ_GH_TEMPLATE`)
 1. CLI flags.
 
-### GitHub token permissions
+## Frontmatter format
+
+```yaml
+title: "" # required, non-empty
+base: "main" # required; pre-filled with the resolved base branch
+labels: [] # list of strings, applied via a follow-up API call after creation
+draft: false # bool
+auto_merge: false # bool; enable GitHub auto-merge once required checks pass
+# this value is not present by default but may be set here as well
+auto_merge_method: "merge" # one of "merge", "squash", "rebase"
+```
+
+## GitHub token permissions
 
 The token supplied via `gh_askpass` or `gh_token` needs different scopes depending on which subcommands you use.
 
@@ -271,18 +179,6 @@ echo "Opened $URL"
 - TTY on `STDOUT`: default log level is `INFO`.
 - Piped `STDOUT`: default log level drops to `ERROR`, so only failures appear on `STDERR`.
 - Override with `-v` / `-vv`, `-q`, `--log-level <level>`, or `$JJ_GH_LOG`.
-
-## Frontmatter format
-
-```yaml
-title: "" # required, non-empty
-base: "main" # required; pre-filled with the resolved base branch
-labels: [] # list of strings, applied via a follow-up API call after creation
-draft: false # bool
-auto_merge: false # bool; enable GitHub auto-merge once required checks pass
-# this value is not present by default but may be set here as well
-auto_merge_method: "merge" # one of "merge", "squash", "rebase"
-```
 
 ## Development
 

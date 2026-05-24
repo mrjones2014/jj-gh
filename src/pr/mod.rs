@@ -25,17 +25,24 @@ use serde::Serialize;
 
 #[derive(Debug, Subcommand)]
 pub enum PrAction {
-    /// Create a pull request from a revision. This supports stacked PRs; by default the base
-    /// branch is set to the closest ancestor bookmark if one exists, otherwise `trunk()`.
+    /// Open your preferred editor to create a PR from a revision. Opens your editor
+    /// to a markdown file where you can write the PR description, and set PR metadata
+    /// like title, labels, auto-merge, etc. via the markdown frontmatter. This supports
+    /// stacked PRs; by default the base branch is set to the closest ancestor bookmark
+    /// if one exists, otherwise `trunk()`.
     #[command(visible_alias = "c")]
     Create(CreateArgs),
-    /// Fetch a pull request by number into a local bookmark. Requires a colocated
-    /// git repository; the special `refs/pull/123/head` ref is fetched via `git`
-    /// because `jj` cannot yet fetch arbitrary refs.
+    /// Fetch a pull request into a local bookmark. This command accepts either a revision
+    /// ID or a PR number. If given a revision ID, the PR number will be looked up via the API.
+    /// Requires a colocated git repository; the special `refs/pull/123/head` ref is fetched via
+    /// `git` because `jj` cannot yet fetch arbitrary refs.
+    ///
+    /// See: <https://github.com/jj-vcs/jj/issues/4388>
     #[command(visible_alias = "f")]
     Fetch(FetchArgs),
     /// Enable auto-merge on a PR. Accepts either a PR number or a revision; with
-    /// a revision, the PR is looked up by the rev's local bookmark.
+    /// a revision, the PR is looked up by the rev's local bookmark. Fails if the
+    /// repo does not allow auto-merge.
     #[command(visible_alias = "am")]
     AutoMerge(AutoMergeArgs),
 }
@@ -164,6 +171,13 @@ pub struct CreateArgs {
     pub auth: AuthArgs,
 }
 
+/// Dispatch the `pr` subcommand to the matching handler.
+///
+/// # Errors
+///
+/// Propagates errors from config loading, auth resolution, jj/GitHub API
+/// calls, the editor round-trip, or any sub-handler (`create`, `fetch`,
+/// `auto-merge`).
 pub async fn dispatch(action: PrAction) -> Result<()> {
     let mut fig = config::load_figment();
     fig = match &action {

@@ -1,0 +1,9 @@
+[package]
+name = "gen-docs"
+edition = "2024"
+version = "0.0.0"
+publish = false
+
+[dependencies]
+clap-markdown = "0.1"
+jj-gh = { path = "../.." }

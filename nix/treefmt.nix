@@ -6,6 +6,10 @@
       enable = true;
       package = rustToolchain;
     };
+    prettier = {
+      enable = true;
+      includes = [ "*.md" ];
+    };
     taplo.enable = true;
     yamlfmt.enable = true;
     nixfmt.enable = true;

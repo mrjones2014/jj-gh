@@ -4,6 +4,7 @@ use crate::pr::PrAction;
 use clap::{Parser, Subcommand};
 use log::LevelFilter;
 use serde::Serialize;
+use std::io::IsTerminal;
 
 #[derive(Debug, Parser)]
 #[command(name = "jj-gh", version, about)]
@@ -28,6 +29,30 @@ pub struct GlobalOpts {
     /// Set log level explicitly, overrides `-v` and `-q`.
     #[arg(long = "log-level", value_name = "LEVEL", global = true)]
     pub log_level: Option<LevelFilter>,
+}
+
+impl GlobalOpts {
+    pub fn resolve_log_level(&self) -> LevelFilter {
+        if let Some(level) = self.log_level {
+            return level;
+        }
+
+        if self.quiet {
+            return LevelFilter::Error;
+        }
+
+        let base = if std::io::stdout().is_terminal() {
+            LevelFilter::Info
+        } else {
+            LevelFilter::Error
+        };
+
+        match self.verbose {
+            0 => base,
+            1 => LevelFilter::Debug,
+            _ => LevelFilter::Trace,
+        }
+    }
 }
 
 #[derive(Debug, Subcommand)]
