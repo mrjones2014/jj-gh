@@ -281,6 +281,7 @@ where
 /// # Errors
 ///
 /// Returns an error from any step (rev resolution, GH API, push, editor, etc.).
+#[expect(clippy::too_many_lines)]
 async fn create<J, G, E>(
     jj: &J,
     gh: &G,
@@ -395,13 +396,19 @@ where
             &final_fm.labels,
         )
         .await
-        .context("PR created, but adding labels failed")?;
+        .context(format!(
+            "PR created ({}), but adding labels failed",
+            created.html_url
+        ))?;
     }
 
     if final_fm.auto_merge {
         gh.enable_auto_merge(&created.node_id, final_fm.auto_merge_method)
             .await
-            .context("PR created, but enabling auto-merge failed")?;
+            .context(format!(
+                "PR created ({}), but enabling auto-merge failed",
+                created.html_url
+            ))?;
     }
 
     println!("{}", created.html_url);
