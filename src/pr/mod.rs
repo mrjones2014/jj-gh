@@ -105,9 +105,7 @@ pub struct CreateArgs {
     /// Use `--draft=false` or `--no-draft` to force non-draft.
     #[arg(
         long,
-        num_args = 0..=1,
-        require_equals = true,
-        default_missing_value = "true",
+        action = clap::ArgAction::SetTrue,
         default_value_if("no_draft", "true", Some("false")),
     )]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -120,12 +118,10 @@ pub struct CreateArgs {
 
     /// Enable auto-merge on the PR after creation (merges once required checks
     /// pass). Overrides config (default: `auto_merge = false`). Use
-    /// `--auto-merge=false` or `--no-auto-merge` force no auto merge.
+    /// `--no-auto-merge` force no auto merge.
     #[arg(
         long = "auto-merge",
-        num_args = 0..=1,
-        require_equals = true,
-        default_missing_value = "true",
+        action = clap::ArgAction::SetTrue,
         default_value_if("no_auto_merge", "true", Some("false")),
     )]
     #[serde(skip_serializing_if = "Option::is_none")]
