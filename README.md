@@ -13,8 +13,8 @@ PRs welcome and encouraged!
 ## Requirements
 
 `jj` must be on `PATH`. `pr fetch` additionally requires a colocated git repo
-and `git` on `PATH` (jj cannot yet fetch arbitrary refs like
-`refs/pull/123/head`, so the fetch step shells out to git).
+and `git` on `PATH` (`jj` cannot yet fetch arbitrary refs like
+`refs/pull/123/head`, so the fetch step shells out to `git`).
 
 ## Install
 
@@ -115,7 +115,7 @@ draft: false
 Body in markdown.
 ```
 
-Save and quit. `jj-gh` pushes the change with `jj git push -c`, opens the PR, applies labels, and prints the URL on stdout.
+Save and quit. `jj-gh` pushes the change with `jj git push -c`, opens the PR, applies labels, and prints the URL on `STDOUT`.
 
 If a PR is already open for the head, the existing URL is printed and nothing is changed.
 
@@ -125,7 +125,7 @@ If a PR is already open for the head, the existing URL is printed and nothing is
 
 1. `--base <branch>` if you pass one.
 2. Otherwise the closest ancestor commit with a bookmark (so PR #2 stacked on PR #1's branch targets PR #1's bookmark).
-3. Otherwise the bookmark at jj's `trunk()` revset (whatever the repo's `revsets.trunk` resolves to; default probes `main@<remote>`, `master@<remote>`, `trunk@<remote>`).
+3. Otherwise the bookmark at `jj`'s `trunk()` revset (whatever the repo's `revsets.trunk` resolves to; default probes `main@<remote>`, `master@<remote>`, `trunk@<remote>`).
 4. Otherwise the configured `default_base_branch` (default `master`).
 
 ### Flags
@@ -139,7 +139,7 @@ If a PR is already open for the head, the existing URL is printed and nothing is
 | `--template <path-or-name>`        | config `template_path` / auto-detect                 | Use a specific template. Paths starting with `./`, `../`, `/`, or `~` are taken verbatim; bare names resolve under `.github/PULL_REQUEST_TEMPLATE/<name>.md`. |
 | `--no-template`                    | off                                                  | Skip template selection entirely.                                                                                                                             |
 | `--editor <cmd>`                   | config `editor` / `$VISUAL` / `$EDITOR`              | Editor command.                                                                                                                                               |
-| `--gh-askpass <cmd>`               | config `gh_askpass` / `$GH_ASKPASS`                  | Askpass helper command that prints the GitHub token to stdout.                                                                                                |
+| `--gh-askpass <cmd>`               | config `gh_askpass` / `$GH_ASKPASS`                  | Askpass helper command that prints the GitHub token to `STDOUT`.                                                                                              |
 | `--askpass-timeout <secs>`         | `20`                                                 | Timeout for the askpass helper.                                                                                                                               |
 
 ### Fetching a PR
@@ -149,8 +149,9 @@ jj pr fetch <pr-num>
 ```
 
 Downloads `refs/pull/<pr-num>/head` from `origin` into a local bookmark and
-imports it into jj. The bookmark name on stdout is pipe-friendly; the title,
-head commit, PR URL, and a follow-up hint go to stderr (TTY only).
+imports it into jj. The bookmark name on `STDOUT` is pipe-friendly; the title,
+head commit, PR URL, and a follow-up hint go to `STDERR` (TTY only) so that
+it's pipe-friendly (can be used in scripts etc.).
 
 ```sh
 $ jj pr fetch 1234
@@ -188,7 +189,7 @@ requires a colocated git repository.
 | -------------------------- | ------------------------------------------------------------ | -------------------------------------------------------------------------------------- |
 | `-t, --template <STR>`     | config `pr_fetch_bookmark_template` / `pr-{number}/{branch}` | Override the bookmark template.                                                        |
 | `-f, --force`              | off                                                          | Replace an existing local bookmark of the same name (passes `--force` to `git fetch`). |
-| `--gh-askpass <cmd>`       | config `gh_askpass` / `$GH_ASKPASS`                          | Askpass helper command that prints the GitHub token to stdout.                         |
+| `--gh-askpass <cmd>`       | config `gh_askpass` / `$GH_ASKPASS`                          | Askpass helper command that prints the GitHub token to `STDOUT`.                       |
 | `--askpass-timeout <secs>` | `20`                                                         | Timeout for the askpass helper.                                                        |
 
 ### Debug subcommands
@@ -202,7 +203,7 @@ requires a colocated git repository.
 
 ## Config
 
-Add a `[jj-gh]` table to any jj config layer (global `~/.config/jj/config.toml` or repo-local `.jj/repo/config.toml`):
+Add a `[jj-gh]` table to any jj config layer (global `~/.config/jj/config.toml` or repo-local config via `jj config edit --repo`):
 
 ```toml
 [jj-gh]
@@ -229,7 +230,14 @@ editor = [
 ]
 ```
 
-Precedence (low to high): built-in defaults < jj global < jj repo-local < `$JJ_GH_EXTRA_CONFIG` file < env (`GH_ASKPASS`, `JJ_GH_TEMPLATE`) < CLI flags.
+Precedence (low to high):
+
+1. built-in defaults
+1. `jj` global config file
+1. `jj` repo-local config file
+1. `$JJ_GH_EXTRA_CONFIG` file
+1. env (`GH_ASKPASS`, `JJ_GH_TEMPLATE`)
+1. CLI flags.
 
 ### GitHub token permissions
 
