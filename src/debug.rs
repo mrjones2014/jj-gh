@@ -87,7 +87,7 @@ async fn print_pr_lookup(rev: &str) -> Result<()> {
     let token = auth::resolve_token(&config).await?;
     let gh = OctocrabGh::new(&token)?;
 
-    let lookup = pr::resolve_pr(&jj, &gh, rev).await?;
+    let lookup = pr::resolve_pr_for_rev(&jj, &gh, rev).await?;
     let base_exists = gh
         .branch_exists(
             &lookup.target.owner,

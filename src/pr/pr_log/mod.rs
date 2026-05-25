@@ -10,16 +10,52 @@
 //! didn't pass their own `-T` / `--template`.
 
 use crate::{
+    cli::AuthArgs,
     config::Config,
     gh::{CiStatus, Gh, PrWithCiStatus},
     git,
     jj::Jj,
-    pr::PrLogArgs,
 };
 use anyhow::{Context, Result, anyhow};
+use serde::Serialize;
 use std::io::Write;
 use tempfile::NamedTempFile;
 use tokio::process::Command;
+
+#[derive(Debug, clap::Args, Serialize)]
+pub struct PrLogArgs {
+    /// Arguments forwarded verbatim to the underlying `jj log` invocation.
+    /// Pass after `--`, e.g. `jj-gh pr log -- -r 'mine()' -T builtin_log_compact`.
+    /// If you pass `-T` / `--template`, the default PR-aware template is not
+    /// applied; use the injected aliases (`pr_number`, `pr_url`,
+    /// `pr_ci_status`, `pr_meta`) from your own template. `pr_meta` is the
+    /// pre-formatted hyperlinked PR number + colored CI icon (empty for
+    /// commits without a PR).
+    #[arg(last = true, allow_hyphen_values = true, value_name = "JJ_LOG_ARGS")]
+    #[serde(skip)]
+    pub jj_log_args: Vec<String>,
+
+    #[command(flatten)]
+    #[serde(flatten)]
+    pub auth: AuthArgs,
+
+    /// Force enable the use of nerdfont icons in the default
+    /// `pr log` template. Overrides config. Use `--no-nerdfonts` to disable.
+    #[arg(
+        long,
+        num_args = 0,
+        default_missing_value = "true",
+        default_value_if("no_nerdfonts", "true", Some("false"))
+    )]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nerdfonts: Option<bool>,
+
+    /// Force the default `pr log` template not to use nerdfont icons.
+    /// Overrides config.
+    #[arg(long = "no-nerdfonts", conflicts_with = "nerdfonts")]
+    #[serde(skip)]
+    pub no_nerdfonts: bool,
+}
 
 pub async fn log(args: &PrLogArgs, config: &Config, gh: &impl Gh, jj: &impl Jj) -> Result<()> {
     let origin_url = jj
