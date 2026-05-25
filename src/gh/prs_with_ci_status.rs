@@ -22,6 +22,7 @@ struct PullRequest {
     number: u64,
     url: String,
     title: String,
+    merged: bool,
     head_ref_oid: String,
     is_draft: bool,
     is_in_merge_queue: bool,
@@ -81,6 +82,8 @@ pub struct PrWithCiStatus {
     pub head_sha: String,
     /// Whether the PR is a draft.
     pub is_draft: bool,
+    /// Whether the PR is merged
+    pub merged: bool,
     /// Whether the PR is in the merge queue.
     pub is_in_merge_queue: bool,
     /// Rolled-up CI status across all required checks.
@@ -99,6 +102,7 @@ impl From<PrsWithCiStatusInternal> for Vec<PrWithCiStatus> {
                      number,
                      url,
                      title,
+                     merged,
                      head_ref_oid,
                      is_draft,
                      is_in_merge_queue,
@@ -108,9 +112,10 @@ impl From<PrsWithCiStatusInternal> for Vec<PrWithCiStatus> {
                     number,
                     url,
                     title,
-                    head_sha: head_ref_oid,
+                    merged,
                     is_draft,
                     is_in_merge_queue,
+                    head_sha: head_ref_oid,
                     ci_status: status_check_rollup.into(),
                 },
             )

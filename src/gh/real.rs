@@ -195,7 +195,7 @@ const MAX_SEARCH_QUERY_LEN: usize = 900;
 /// `repo:owner/repo is:pr is:open head:b1 head:b2 ...`, each under
 /// [`MAX_SEARCH_QUERY_LEN`].
 fn build_search_queries(owner: &str, repo: &str, branches: &[String]) -> Vec<String> {
-    let prefix = format!("repo:{owner}/{repo} is:pr is:open");
+    let prefix = format!("repo:{owner}/{repo} is:pr");
     let mut queries = Vec::new();
     let mut current = prefix.clone();
     for branch in branches {
@@ -252,7 +252,7 @@ mod tests {
     #[test]
     fn single_query_when_under_limit() {
         let qs = build_search_queries("o", "r", &["a".into(), "b".into()]);
-        assert_eq!(qs, vec!["repo:o/r is:pr is:open head:a head:b".to_string()]);
+        assert_eq!(qs, vec!["repo:o/r is:pr head:a head:b".to_string()]);
     }
 
     #[test]
@@ -263,7 +263,7 @@ mod tests {
         assert!(qs.len() >= 2, "expected multiple batches, got {qs:?}");
         for q in &qs {
             assert!(q.len() <= MAX_SEARCH_QUERY_LEN, "batch too long: {q}");
-            assert!(q.starts_with("repo:o/r is:pr is:open"));
+            assert!(q.starts_with("repo:o/r is:pr"));
         }
     }
 }

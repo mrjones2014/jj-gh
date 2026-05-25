@@ -8,6 +8,7 @@ query PrsWithCiStatus($query: String!) {
         title
         headRefOid
         isDraft
+        merged
         isInMergeQueue
         statusCheckRollup {
           state
