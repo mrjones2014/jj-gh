@@ -29,19 +29,13 @@ struct PullRequest {
 }
 
 #[derive(Deserialize)]
-struct PullRequestsConnection {
+struct SearchResults {
     nodes: Vec<PullRequest>,
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Repository {
-    pull_requests: PullRequestsConnection,
-}
-
-#[derive(Deserialize)]
 pub struct PrsWithCiStatusInternal {
-    repository: Repository,
+    search: SearchResults,
 }
 
 /// Status of CI checks for a pull request.
@@ -96,8 +90,7 @@ pub struct PrWithCiStatus {
 impl From<PrsWithCiStatusInternal> for Vec<PrWithCiStatus> {
     fn from(value: PrsWithCiStatusInternal) -> Self {
         value
-            .repository
-            .pull_requests
+            .search
             .nodes
             .into_iter()
             .map(
