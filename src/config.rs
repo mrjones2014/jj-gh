@@ -193,7 +193,7 @@ impl JjConfProvider {
     }
 
     #[cfg(test)]
-    fn from_memory(name: impl Into<String>, contents: impl Into<String>) -> Self {
+    pub(crate) fn from_memory(name: impl Into<String>, contents: impl Into<String>) -> Self {
         Self {
             source: TomlSource::Memory {
                 name: name.into(),

@@ -63,10 +63,10 @@ Open your preferred editor to create a PR from a revision. Opens your editor to 
 ###### **Options:**
 
 - `--base <BRANCH>` — Override the base bookmark. Default: closest ancestor bookmark on the stack, falling back to the remote's `main` / `master` / configured `default_base_branch`
-- `--draft` — Force the PR to be a draft. Overrides config (default: `draft = false`). Use `--draft=false` or `--no-draft` to force non-draft
-- `--no-draft` — Force the PR to be non-draft. Overrides config. Equivalent to `--draft=false`
-- `--auto-merge` — Enable auto-merge on the PR after creation (merges once required checks pass). Overrides config (default: `auto_merge = false`). Use `--no-auto-merge` force no auto merge
-- `--no-auto-merge` — Disable auto-merge on the created PR. Overrides config. Equivalent to `--auto-merge=false`
+- `--draft <DRAFT>` — Force the PR to be a draft. Overrides config (default: `draft = false`). Use `--no-draft` to force non-draft
+- `--no-draft` — Force the PR to be non-draft. Overrides config
+- `--auto-merge <AUTO_MERGE>` — Enable auto-merge on the PR after creation (merges once required checks pass). Overrides config (default: `auto_merge = false`). Use `--no-auto-merge` to force no auto-merge
+- `--no-auto-merge` — Disable auto-merge on the created PR. Overrides config
 - `--auto-merge-method <METHOD>` — Merge method used when auto-merge is enabled. Overrides config `auto_merge_method` (default `merge`)
 
   Possible values: `merge`, `squash`, `rebase`
@@ -135,11 +135,8 @@ Like `jj log`, but injects PR metadata (number, CI status, URL) as template alia
 
 - `--gh-askpass <CMD>` — Askpass helper command that prints a GitHub token on stdout; shell-words split, e.g. `--gh-askpass "op read op://Vault/gh/token"`. Default: `gh_askpass` in config, then `$GH_ASKPASS`
 - `--askpass-timeout <SECS>` — Timeout in seconds for the askpass helper. Default: 20
-- `--nerdfonts` — Force enable the use of nerdfont icons in the default `pr log` template. Overrides config
-
-  Default value: `true`
-
-- `--no-nerdfonts` — Force the default `pr log` template not to use nerdfont icons. Overrides config. Equivalent to `--nerdfonts=false`
+- `--nerdfonts <NERDFONTS>` — Force enable the use of nerdfont icons in the default `pr log` template. Overrides config. Use `--no-nerdfonts` to disable
+- `--no-nerdfonts` — Force the default `pr log` template not to use nerdfont icons. Overrides config
 
 ## `jj-gh debug`
 
