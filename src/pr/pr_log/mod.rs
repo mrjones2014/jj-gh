@@ -26,7 +26,8 @@ pub async fn log(args: &PrLogArgs, gh: &impl Gh, jj: &impl Jj) -> Result<()> {
         .await?
         .ok_or_else(|| anyhow!("origin remote is not configured"))?;
     let (owner, repo) = git::url::parse_owner_repo(&origin_url)?;
-    let prs = gh.local_pulls(&owner, &repo).await?;
+    let branches = jj.pushed_bookmarks().await?;
+    let prs = gh.local_pulls(&owner, &repo, &branches).await?;
 
     let config_toml = render_config(&prs);
     let mut tmp = NamedTempFile::with_suffix(".toml").context("creating temp config file")?;

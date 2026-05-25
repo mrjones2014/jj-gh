@@ -116,11 +116,23 @@ pub trait Gh {
     /// is already mergeable.
     async fn enable_auto_merge(&self, pr_node_id: &str, method: AutoMergeMethod) -> Result<()>;
 
-    /// Fetch open PRs with head commit SHA and CI status. Used by `pr log` to
-    /// build a `commit_id` → PR mapping for jj template aliases.
+    /// Fetch open PRs with head commit SHA and CI status, scoped to the given
+    /// `branches` (head ref names). Used by `pr log` to build a `commit_id` →
+    /// PR mapping for jj template aliases.
+    ///
+    /// The search is `is:pr is:open head:<b1> head:<b2> ...`. Implementations
+    /// may batch large `branches` lists into multiple requests to stay under
+    /// GitHub's search query length limit.
+    ///
+    /// Returns an empty vec when `branches` is empty (skips the API call).
     ///
     /// # Errors
     ///
     /// Propagates GraphQL/API errors.
-    async fn local_pulls(&self, owner: &str, repo: &str) -> Result<Vec<PrWithCiStatus>>;
+    async fn local_pulls(
+        &self,
+        owner: &str,
+        repo: &str,
+        branches: &[String],
+    ) -> Result<Vec<PrWithCiStatus>>;
 }
