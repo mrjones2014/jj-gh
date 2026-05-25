@@ -3,7 +3,7 @@
 use super::{CreatePrRequest, Gh, PrCreated, PrDetails, PrSummary};
 use crate::{
     config::AutoMergeMethod,
-    gh::prs_with_ci_status::{PrWithCiStatus, PrsWithCiStatusInternal},
+    gh::prs_with_ci_status::{PrWithCiStatus, PrsWithCiStatusResponseData},
 };
 use anyhow::{Context, Result, anyhow};
 use octocrab::{Octocrab, params};
@@ -170,7 +170,7 @@ impl Gh for OctocrabGh {
             });
             let batch: Vec<PrWithCiStatus> = self
                 .octo
-                .graphql::<PrsWithCiStatusInternal>(&payload)
+                .graphql::<PrsWithCiStatusResponseData>(&payload)
                 .await
                 .map_err(humanize)
                 .context("fetching local PRs")?

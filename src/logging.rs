@@ -7,8 +7,26 @@ use log::Record;
 use nu_ansi_term::{Color, Style};
 
 pub use log::{LevelFilter, debug, error, info, warn};
+use std::fmt::Display;
 
 const ENV_FILTER: &str = "JJ_GH_LOG";
+
+pub trait ResultExt {
+    #[must_use]
+    fn log_err(self) -> Self;
+}
+
+impl<T, E> ResultExt for Result<T, E>
+where
+    E: Display,
+{
+    fn log_err(self) -> Self {
+        if let Err(e) = &self {
+            log::error!("{e}");
+        }
+        self
+    }
+}
 
 /// Initialize the global logger. Holding onto the returned handle keeps the
 /// logger alive for the duration of the program.

@@ -16,6 +16,7 @@ figment = { version = "0.10", features = ["toml"] }
 flexi_logger = { version = "0.31", default-features = false, features = [
   "colors",
 ] }
+graphql_client = "0.16"
 http = "1"
 log = "0.4"
 nu-ansi-term = "0.50"
@@ -33,3 +34,6 @@ url = "2"
 
 [lints.clippy]
 pedantic = { level = "deny", priority = -1 }
+
+[profile.release]
+strip = "symbols"

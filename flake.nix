@@ -42,18 +42,22 @@
 
         nightlyToolchain = pkgs.rust-bin.selectLatestNightlyWith (toolchain: toolchain.minimal);
         craneLibNightly = (crane.mkLib pkgs).overrideToolchain nightlyToolchain;
-
         src =
           let
             root = ./.;
+            baseSrc = pkgs.lib.fileset.toSource {
+              inherit root;
+              fileset = pkgs.lib.fileset.unions [
+                (craneLib.fileset.commonCargoSources root)
+                (pkgs.lib.fileset.fileFilter (f: f.hasExt "gql") root)
+              ];
+            };
           in
-          pkgs.lib.fileset.toSource {
-            inherit root;
-            fileset = pkgs.lib.fileset.unions [
-              (craneLib.fileset.commonCargoSources root)
-              (pkgs.lib.fileset.fileFilter (f: f.hasExt "gql") root)
-            ];
-          };
+          pkgs.runCommand "jj-gh-src" { } ''
+            cp -r ${baseSrc} $out
+            chmod -R u+w $out
+            cp ${github-graphql-schema} $out/src/gh/github.graphql
+          '';
         commonArgs = {
           inherit src;
           strictDeps = true;
@@ -110,6 +114,9 @@
             pkgs.rust-analyzer
             treefmtEval.config.build.wrapper
           ];
+          shellHook = ''
+            ln -sfn ${github-graphql-schema} src/gh/github.graphql
+          '';
         };
         checks = {
           inherit jj-gh;
