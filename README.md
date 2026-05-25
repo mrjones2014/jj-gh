@@ -6,6 +6,7 @@
   - Intelligently supports stacked PRs by choosing the correct base if the revision has an ancestor bookmark for which an open PR exists
 - Enable auto-merge for a PR by its revision ID, without having to know/find its PR number (e.g. `jj pr auto-merge zqxy`)
 - Create local bookmarks for PRs, including across forks (e.g. `jj pr fetch 1234 && jj new pr-1234/...`, useful for testing PRs to OSS repos)
+- Show PR metadata like number and CI status in commit graph (e.g. `jj pr log`)
 
 all from the comfort of your terminal, without touching GitHub's clunky web UI.
 Works great when combined with the [jj megamerge](https://isaaccorbrey.com/notes/jujutsu-megamerges-for-fun-and-profit) workflow!
@@ -124,6 +125,10 @@ editor = [
   "nvim",
   "+9",   # +9 jumps your cursor past the frontmatter
 ]
+
+# enable or disable the use of nerdfont icons
+# (e.g. in the `pr log` default template)
+nerdfonts = true
 ```
 
 Precedence (low to high):

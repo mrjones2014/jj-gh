@@ -205,6 +205,9 @@ mod tests {
             *self.import_calls.lock().unwrap() += 1;
             Ok(())
         }
+        async fn pushed_bookmarks(&self) -> Result<Vec<String>> {
+            unimplemented!("fetch does not call pushed_bookmarks")
+        }
     }
 
     struct FakeGh {
@@ -242,6 +245,15 @@ mod tests {
             assert_eq!(repo, self.expected.1);
             assert_eq!(number, self.expected.2);
             Ok(self.pr.clone())
+        }
+
+        async fn local_pulls(
+            &self,
+            _owner: &str,
+            _repo: &str,
+            _branches: &[String],
+        ) -> Result<Vec<crate::gh::PrWithCiStatus>> {
+            unimplemented!("fetch does not call local_pulls")
         }
     }
 

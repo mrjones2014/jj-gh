@@ -1,7 +1,10 @@
 //! `octocrab`-backed [`Gh`] implementation.
 
 use super::{CreatePrRequest, Gh, PrCreated, PrDetails, PrSummary};
-use crate::config::AutoMergeMethod;
+use crate::{
+    config::AutoMergeMethod,
+    gh::prs_with_ci_status::{PrWithCiStatus, PrsWithCiStatusInternal},
+};
 use anyhow::{Context, Result, anyhow};
 use octocrab::{Octocrab, params};
 use secrecy::{ExposeSecret, SecretString};
@@ -105,24 +108,6 @@ impl Gh for OctocrabGh {
         Ok(())
     }
 
-    async fn enable_auto_merge(&self, pr_node_id: &str, method: AutoMergeMethod) -> Result<()> {
-        const MUTATION: &str = include_str!("./enable_auto_merge.gql");
-
-        let payload = json!({
-            "query": MUTATION,
-            "variables": {
-                "prId": pr_node_id,
-                "method": method.as_graphql(),
-            },
-        });
-        self.octo
-            .graphql::<serde_json::Value>(&payload)
-            .await
-            .map_err(humanize)
-            .context("enabling auto-merge")?;
-        Ok(())
-    }
-
     async fn get_pr(&self, owner: &str, repo: &str, number: u64) -> Result<PrDetails> {
         let pr = match self.octo.pulls(owner, repo).get(number).await {
             Ok(pr) => pr,
@@ -145,6 +130,85 @@ impl Gh for OctocrabGh {
             graphql_node_id: pr.node_id,
         })
     }
+
+    async fn enable_auto_merge(&self, pr_node_id: &str, method: AutoMergeMethod) -> Result<()> {
+        const MUTATION: &str = include_str!("./enable_auto_merge.gql");
+
+        let payload = json!({
+            "query": MUTATION,
+            "variables": {
+                "pr_id": pr_node_id,
+                "method": method.as_graphql(),
+            },
+        });
+        self.octo
+            .graphql::<serde_json::Value>(&payload)
+            .await
+            .map_err(humanize)
+            .context("enabling auto-merge")?;
+        Ok(())
+    }
+
+    async fn local_pulls(
+        &self,
+        owner: &str,
+        repo: &str,
+        branches: &[String],
+    ) -> Result<Vec<PrWithCiStatus>> {
+        const QUERY: &str = include_str!("./prs_with_ci_status.gql");
+
+        if branches.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut out: Vec<PrWithCiStatus> = Vec::new();
+        let mut seen: std::collections::HashSet<u64> = std::collections::HashSet::new();
+        for search_query in build_search_queries(owner, repo, branches) {
+            let payload = json!({
+                "query": QUERY,
+                "variables": { "query": search_query },
+            });
+            let batch: Vec<PrWithCiStatus> = self
+                .octo
+                .graphql::<PrsWithCiStatusInternal>(&payload)
+                .await
+                .map_err(humanize)
+                .context("fetching local PRs")?
+                .into();
+            for pr in batch {
+                if seen.insert(pr.number) {
+                    out.push(pr);
+                }
+            }
+        }
+        Ok(out)
+    }
+}
+
+/// GitHub's search query string limit is documented as 256 chars for some
+/// endpoints but issue/PR search tolerates more in practice. We cap well
+/// below the worst-case so a single oversized branch name can't break a
+/// whole batch.
+const MAX_SEARCH_QUERY_LEN: usize = 900;
+
+/// Split `branches` into one or more search query strings of the form
+/// `repo:owner/repo is:pr is:open head:b1 head:b2 ...`, each under
+/// [`MAX_SEARCH_QUERY_LEN`].
+fn build_search_queries(owner: &str, repo: &str, branches: &[String]) -> Vec<String> {
+    let prefix = format!("repo:{owner}/{repo} is:pr is:open");
+    let mut queries = Vec::new();
+    let mut current = prefix.clone();
+    for branch in branches {
+        let addition = format!(" head:{branch}");
+        if current.len() + addition.len() > MAX_SEARCH_QUERY_LEN && current != prefix {
+            queries.push(std::mem::replace(&mut current, prefix.clone()));
+        }
+        current.push_str(&addition);
+    }
+    if current != prefix {
+        queries.push(current);
+    }
+    queries
 }
 
 fn is_not_found(e: &octocrab::Error) -> bool {
@@ -173,5 +237,33 @@ fn humanize(e: octocrab::Error) -> anyhow::Error {
             "GitHub rejected the request (422): {message}. Common causes: the head branch is not pushed, there are no commits between head and base, or a PR already exists."
         ),
         _ => anyhow!("GitHub error ({status}): {message}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_branches_produces_no_queries() {
+        assert!(build_search_queries("o", "r", &[]).is_empty());
+    }
+
+    #[test]
+    fn single_query_when_under_limit() {
+        let qs = build_search_queries("o", "r", &["a".into(), "b".into()]);
+        assert_eq!(qs, vec!["repo:o/r is:pr is:open head:a head:b".to_string()]);
+    }
+
+    #[test]
+    fn splits_into_batches_when_over_limit() {
+        let long = "x".repeat(200);
+        let branches: Vec<String> = (0..10).map(|i| format!("{long}-{i}")).collect();
+        let qs = build_search_queries("o", "r", &branches);
+        assert!(qs.len() >= 2, "expected multiple batches, got {qs:?}");
+        for q in &qs {
+            assert!(q.len() <= MAX_SEARCH_QUERY_LEN, "batch too long: {q}");
+            assert!(q.starts_with("repo:o/r is:pr is:open"));
+        }
     }
 }

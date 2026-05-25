@@ -36,6 +36,7 @@ pub struct Config {
     pub auto_merge_method: AutoMergeMethod,
     pub editor: Option<Vec<String>>,
     pub pr_fetch_bookmark_template: Option<String>,
+    pub nerdfonts: bool,
 }
 
 impl Default for Config {
@@ -51,6 +52,7 @@ impl Default for Config {
             auto_merge_method: AutoMergeMethod::default(),
             editor: None,
             pr_fetch_bookmark_template: None,
+            nerdfonts: true,
         }
     }
 }
@@ -96,7 +98,7 @@ pub fn load_figment() -> Figment {
 ///
 /// Returns an error if any layer is malformed or fails serde extraction, or if
 /// `pr_fetch_bookmark_template` references an unknown placeholder.
-pub fn load() -> Result<Config> {
+pub fn debug_load() -> Result<Config> {
     let config: Config = extract(&load_figment())?;
     validate(&config)?;
     Ok(config)
@@ -280,17 +282,31 @@ struct DefaultsOverlay {
     draft: bool,
     auto_merge: bool,
     auto_merge_method: AutoMergeMethod,
+    nerdfonts: bool,
 }
 
 impl DefaultsOverlay {
     fn from_defaults() -> Self {
-        let d = Config::default();
+        let Config {
+            askpass_timeout_secs,
+            auto_merge,
+            auto_merge_method,
+            default_base_branch,
+            draft,
+            nerdfonts,
+            editor: _,
+            gh_askpass: _,
+            gh_token: _,
+            pr_fetch_bookmark_template: _,
+            template_path: _,
+        } = Config::default();
         Self {
-            askpass_timeout_secs: d.askpass_timeout_secs,
-            default_base_branch: d.default_base_branch,
-            draft: d.draft,
-            auto_merge: d.auto_merge,
-            auto_merge_method: d.auto_merge_method,
+            askpass_timeout_secs,
+            default_base_branch,
+            draft,
+            auto_merge,
+            auto_merge_method,
+            nerdfonts,
         }
     }
 }

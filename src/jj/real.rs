@@ -166,6 +166,28 @@ impl Jj for JjCli {
         }
         Ok(())
     }
+
+    async fn pushed_bookmarks(&self) -> Result<Vec<String>> {
+        let stdout = run_jj(&[
+            "log",
+            "--no-graph",
+            "-r",
+            r#"bookmarks() & remote_bookmarks(remote=exact:"origin")"#,
+            "-T",
+            r#"bookmarks.map(|b| b.name() ++ "\n")"#,
+        ])
+        .await?;
+        let mut names: Vec<String> = std::str::from_utf8(&stdout)
+            .context("jj log output is not UTF-8")?
+            .lines()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect();
+        names.sort();
+        names.dedup();
+        Ok(names)
+    }
 }
 
 async fn workspace_root() -> Result<PathBuf> {

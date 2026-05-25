@@ -3,6 +3,7 @@
 mod editor;
 pub mod fetch;
 mod frontmatter;
+pub mod pr_log;
 mod template;
 mod validation;
 
@@ -45,6 +46,48 @@ pub enum PrAction {
     /// repo does not allow auto-merge.
     #[command(visible_alias = "am")]
     AutoMerge(AutoMergeArgs),
+
+    /// Like `jj log`, but injects PR metadata (number, CI status, URL) as
+    /// template aliases keyed by `commit_id` and renders inline PR info in the
+    /// default template. Any arguments after `--` are forwarded to the
+    /// underlying `jj log` invocation, e.g. `jj-gh pr log -- -r 'mine()'`.
+    #[command(visible_alias = "l")]
+    Log(PrLogArgs),
+}
+
+#[derive(Debug, clap::Args, Serialize)]
+pub struct PrLogArgs {
+    /// Arguments forwarded verbatim to the underlying `jj log` invocation.
+    /// Pass after `--`, e.g. `jj-gh pr log -- -r 'mine()' -T builtin_log_compact`.
+    /// If you pass `-T` / `--template`, the default PR-aware template is not
+    /// applied; use the injected aliases (`pr_number`, `pr_url`,
+    /// `pr_ci_status`, `pr_meta`) from your own template. `pr_meta` is the
+    /// pre-formatted hyperlinked PR number + colored CI icon (empty for
+    /// commits without a PR).
+    #[arg(last = true, allow_hyphen_values = true, value_name = "JJ_LOG_ARGS")]
+    #[serde(skip)]
+    pub jj_log_args: Vec<String>,
+
+    #[command(flatten)]
+    #[serde(flatten)]
+    pub auth: AuthArgs,
+
+    /// Force enable the use of nerdfont icons in the default
+    /// `pr log` template. Overrides config.
+    #[arg(
+        long,
+        action = clap::ArgAction::SetTrue,
+        default_value = "true",
+        default_value_if("no_nerdfonts", "true", Some("false")),
+    )]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nerdfonts: Option<bool>,
+
+    /// Force the default `pr log` template not to use nerdfont icons.
+    /// Overrides config. Equivalent to `--nerdfonts=false`
+    #[arg(long = "no-nerdfonts", conflicts_with = "nerdfonts")]
+    #[serde(skip)]
+    pub no_nerdfonts: bool,
 }
 
 #[derive(Debug, clap::Args, Serialize)]
@@ -184,6 +227,7 @@ pub async fn dispatch(action: PrAction) -> Result<()> {
         PrAction::Create(a) => fig.merge(Serialized::defaults(a)),
         PrAction::Fetch(a) => fig.merge(Serialized::defaults(a)),
         PrAction::AutoMerge(a) => fig.merge(Serialized::defaults(a)),
+        PrAction::Log(a) => fig.merge(Serialized::defaults(a)),
     };
     let config = config::extract(&fig)?;
     config::validate(&config)?;
@@ -196,6 +240,7 @@ pub async fn dispatch(action: PrAction) -> Result<()> {
         PrAction::Create(args) => create(&jj, &gh, &editor, &config, &args).await?,
         PrAction::Fetch(args) => fetch::run(&jj, &gh, &config, &args).await?,
         PrAction::AutoMerge(args) => auto_merge(&jj, &gh, &config, &args.number_or_rev).await?,
+        PrAction::Log(args) => pr_log::log(&args, &config, &gh, &jj).await?,
     }
 
     Ok(())

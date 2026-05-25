@@ -86,6 +86,15 @@ pub trait Jj {
     ///
     /// Propagates jj failures.
     async fn git_import(&self) -> Result<()>;
+
+    /// Names of bookmarks that have a tracking branch on the `origin` remote.
+    /// Used to scope GitHub PR lookups to branches the user has actually
+    /// pushed. Sorted, deduped, with empty entries removed.
+    ///
+    /// # Errors
+    ///
+    /// Propagates jj errors.
+    async fn pushed_bookmarks(&self) -> Result<Vec<String>>;
 }
 
 /// Compose the revset used to compute the default PR title.
