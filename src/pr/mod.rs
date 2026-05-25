@@ -11,6 +11,8 @@ pub use editor::{EditorRoundTrip, TempfileEditor, resolve_editor_argv};
 pub use frontmatter::Frontmatter;
 pub use template::{TemplateChoice, load_template_file, resolve_template_path};
 
+#[cfg(test)]
+use crate::config::JjConfProvider;
 use crate::{
     auth,
     cli::AuthArgs,
@@ -73,18 +75,18 @@ pub struct PrLogArgs {
     pub auth: AuthArgs,
 
     /// Force enable the use of nerdfont icons in the default
-    /// `pr log` template. Overrides config.
+    /// `pr log` template. Overrides config. Use `--no-nerdfonts` to disable.
     #[arg(
         long,
-        action = clap::ArgAction::SetTrue,
-        default_value = "true",
-        default_value_if("no_nerdfonts", "true", Some("false")),
+        num_args = 0,
+        default_missing_value = "true",
+        default_value_if("no_nerdfonts", "true", Some("false"))
     )]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub nerdfonts: Option<bool>,
 
     /// Force the default `pr log` template not to use nerdfont icons.
-    /// Overrides config. Equivalent to `--nerdfonts=false`
+    /// Overrides config.
     #[arg(long = "no-nerdfonts", conflicts_with = "nerdfonts")]
     #[serde(skip)]
     pub no_nerdfonts: bool,
@@ -152,33 +154,34 @@ pub struct CreateArgs {
     pub base: Option<String>,
 
     /// Force the PR to be a draft. Overrides config (default: `draft = false`).
-    /// Use `--draft=false` or `--no-draft` to force non-draft.
+    /// Use `--no-draft` to force non-draft.
     #[arg(
         long,
-        action = clap::ArgAction::SetTrue,
-        default_value_if("no_draft", "true", Some("false")),
+        num_args = 0,
+        default_missing_value = "true",
+        default_value_if("no_draft", "true", Some("false"))
     )]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub draft: Option<bool>,
 
-    /// Force the PR to be non-draft. Overrides config. Equivalent to `--draft=false`.
+    /// Force the PR to be non-draft. Overrides config.
     #[arg(long = "no-draft", conflicts_with = "draft")]
     #[serde(skip)]
     pub no_draft: bool,
 
     /// Enable auto-merge on the PR after creation (merges once required checks
     /// pass). Overrides config (default: `auto_merge = false`). Use
-    /// `--no-auto-merge` force no auto merge.
+    /// `--no-auto-merge` to force no auto-merge.
     #[arg(
         long = "auto-merge",
-        action = clap::ArgAction::SetTrue,
-        default_value_if("no_auto_merge", "true", Some("false")),
+        num_args = 0,
+        default_missing_value = "true",
+        default_value_if("no_auto_merge", "true", Some("false"))
     )]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auto_merge: Option<bool>,
 
-    /// Disable auto-merge on the created PR. Overrides config. Equivalent to
-    /// `--auto-merge=false`.
+    /// Disable auto-merge on the created PR. Overrides config.
     #[arg(long = "no-auto-merge", conflicts_with = "auto_merge")]
     #[serde(skip)]
     pub no_auto_merge: bool,
@@ -493,48 +496,52 @@ fn load_template_for<J: Jj>(args: &CreateArgs, config: &Config, _jj: &J) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::Parser;
 
-    fn cli() -> CreateArgs {
-        CreateArgs {
-            rev: "@-".into(),
-            base: None,
-            draft: None,
-            no_draft: false,
-            auto_merge: None,
-            no_auto_merge: false,
-            auto_merge_method: None,
-            template: None,
-            no_template: false,
-            editor: None,
-            auth: crate::cli::AuthArgs {
-                gh_askpass: None,
-                askpass_timeout_secs: None,
-            },
-        }
+    #[derive(clap::Parser, Debug)]
+    #[command(no_binary_name = true)]
+    struct CreateArgsParser {
+        #[command(flatten)]
+        args: CreateArgs,
     }
 
-    fn merge_into_config(
-        config_draft: Option<bool>,
-        config_auto: Option<bool>,
-        config_method: Option<AutoMergeMethod>,
-        args: &CreateArgs,
-    ) -> Config {
-        let mut fig = config::defaults_figment();
-        if let Some(v) = config_draft {
-            fig = fig.merge(Serialized::default("draft", v));
-        }
-        if let Some(v) = config_auto {
-            fig = fig.merge(Serialized::default("auto_merge", v));
-        }
-        if let Some(v) = config_method {
-            fig = fig.merge(Serialized::default("auto_merge_method", v));
-        }
-        fig = fig.merge(Serialized::defaults(args));
+    #[derive(clap::Parser, Debug)]
+    #[command(no_binary_name = true)]
+    struct PrLogArgsParser {
+        #[command(flatten)]
+        args: PrLogArgs,
+    }
+
+    fn parse_create(argv: &[&str]) -> CreateArgs {
+        CreateArgsParser::try_parse_from(argv.iter().copied())
+            .expect("CreateArgs failed to parse")
+            .args
+    }
+
+    fn parse_pr_log(argv: &[&str]) -> PrLogArgs {
+        PrLogArgsParser::try_parse_from(argv.iter().copied())
+            .expect("PrLogArgs failed to parse")
+            .args
+    }
+
+    fn merged_create(argv: &[&str], toml_config: &str) -> Config {
+        let argv = parse_create(argv);
+        let fig = config::defaults_figment()
+            .merge(JjConfProvider::from_memory("test", toml_config))
+            .merge(Serialized::defaults(&argv));
+        config::extract(&fig).unwrap()
+    }
+
+    fn merged_pr_log(argv: &[&str], toml_config: &str) -> Config {
+        let argv = parse_pr_log(argv);
+        let fig = config::defaults_figment()
+            .merge(JjConfProvider::from_memory("test", toml_config))
+            .merge(Serialized::defaults(&argv));
         config::extract(&fig).unwrap()
     }
 
     fn args_with_base(base: Option<&str>) -> CreateArgs {
-        let mut a = cli();
+        let mut a = parse_create(&["@-"]);
         a.base = base.map(str::to_string);
         a
     }
@@ -561,63 +568,120 @@ mod tests {
     }
 
     #[test]
-    fn cli_draft_overrides_config() {
-        let mut a = cli();
-        a.draft = Some(true);
-        let c = merge_into_config(Some(false), None, None, &a);
+    fn create_bare_argv_lets_config_win() {
+        let c = merged_create(
+            &["@-"],
+            r#"
+            [jj-gh]
+            draft = true
+            auto_merge = true
+            auto_merge_method = "squash"
+            "#,
+        );
         assert!(c.draft);
-    }
-
-    #[test]
-    fn cli_no_draft_overrides_config() {
-        let mut a = cli();
-        a.draft = Some(false);
-        let c = merge_into_config(Some(true), None, None, &a);
-        assert!(!c.draft);
-    }
-
-    #[test]
-    fn draft_defaults_to_config_when_cli_unset() {
-        let c1 = merge_into_config(Some(true), None, None, &cli());
-        assert!(c1.draft);
-        let c2 = merge_into_config(Some(false), None, None, &cli());
-        assert!(!c2.draft);
-    }
-
-    #[test]
-    fn cli_auto_merge_overrides_config() {
-        let mut a = cli();
-        a.auto_merge = Some(true);
-        let c = merge_into_config(None, Some(false), None, &a);
         assert!(c.auto_merge);
+        assert_eq!(c.auto_merge_method, AutoMergeMethod::Squash);
+
+        let c = merged_create(
+            &["@-"],
+            r#"
+            [jj-gh]
+            draft = false
+            auto_merge = false
+            auto_merge_method = "rebase"
+            "#,
+        );
+        assert!(!c.draft);
+        assert!(!c.auto_merge);
+        assert_eq!(c.auto_merge_method, AutoMergeMethod::Rebase);
     }
 
     #[test]
-    fn cli_no_auto_merge_overrides_config() {
-        let mut a = cli();
-        a.auto_merge = Some(false);
-        let c = merge_into_config(None, Some(true), None, &a);
+    fn create_positive_flags_override_config() {
+        let c = merged_create(
+            &[
+                "@-",
+                "--draft",
+                "--auto-merge",
+                "--auto-merge-method",
+                "rebase",
+            ],
+            r#"
+            [jj-gh]
+            draft = false
+            auto_merge = false
+            auto_merge_method = "merge"
+            "#,
+        );
+        assert!(c.draft);
+        assert!(c.auto_merge);
+        assert_eq!(c.auto_merge_method, AutoMergeMethod::Rebase);
+    }
+
+    #[test]
+    fn create_negative_flags_override_config() {
+        let c = merged_create(
+            &["@-", "--no-draft", "--no-auto-merge"],
+            "\
+            [jj-gh]\n\
+            draft = true\n\
+            auto_merge = true\n\
+            ",
+        );
+        assert!(!c.draft);
         assert!(!c.auto_merge);
     }
 
     #[test]
-    fn auto_merge_defaults_to_config_when_cli_unset() {
-        let c = merge_into_config(None, Some(true), None, &cli());
-        assert!(c.auto_merge);
+    fn create_equals_value_syntax_is_rejected() {
+        let err =
+            CreateArgsParser::try_parse_from(["@-", "--draft=true"]).expect_err("should reject");
+        assert!(
+            err.to_string().contains("unexpected value"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
-    fn cli_auto_merge_method_overrides_config() {
-        let mut a = cli();
-        a.auto_merge_method = Some(AutoMergeMethod::Squash);
-        let c = merge_into_config(None, None, Some(AutoMergeMethod::Rebase), &a);
-        assert_eq!(c.auto_merge_method, AutoMergeMethod::Squash);
+    fn pr_log_bare_argv_lets_config_nerdfonts_win() {
+        let c = merged_pr_log(
+            &[],
+            "\n\
+            [jj-gh]\n\
+            nerdfonts = true\n\
+            ",
+        );
+        assert!(c.nerdfonts);
+
+        let c = merged_pr_log(
+            &[],
+            "\n\
+            [jj-gh]\n\
+            nerdfonts = false\n\
+            ",
+        );
+        assert!(!c.nerdfonts);
     }
 
     #[test]
-    fn auto_merge_method_defaults_to_config_when_cli_unset() {
-        let c = merge_into_config(None, None, Some(AutoMergeMethod::Rebase), &cli());
-        assert_eq!(c.auto_merge_method, AutoMergeMethod::Rebase);
+    fn pr_log_nerdfonts_flags_override_config() {
+        let c = merged_pr_log(
+            &["--nerdfonts"],
+            "\n\
+            [jj-gh]\n\
+            nerdfonts = false\n\
+            ",
+        );
+        assert!(c.nerdfonts);
+
+        let c = merged_pr_log(
+            &["--no-nerdfonts"],
+            "\n\
+            [jj-gh]\n\
+            nerdfonts = true\n\
+            ",
+        );
+        assert!(!c.nerdfonts);
     }
 
     fn empty_auth() -> crate::cli::AuthArgs {
