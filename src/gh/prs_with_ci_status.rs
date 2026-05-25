@@ -1,43 +1,20 @@
-use serde::Deserialize;
+use crate::logging::ResultExt;
+use anyhow::Context;
 
-#[derive(Deserialize)]
-#[allow(non_camel_case_types, clippy::upper_case_acronyms)]
-enum StatusState {
-    ERROR,
-    EXPECTED,
-    FAILURE,
-    PENDING,
-    SUCCESS,
-}
+// required to satisfy GraphQL interfaces for the `PullRequest` type
+type GitObjectID = String;
+#[expect(clippy::upper_case_acronyms)]
+type URI = String;
 
-#[derive(Deserialize)]
-struct StatusCheckRollup {
-    state: StatusState,
-}
+#[derive(graphql_client::GraphQLQuery)]
+#[graphql(
+    schema_path = "src/gh/github.graphql",
+    query_path = "src/gh/prs_with_ci_status.gql"
+)]
+#[expect(dead_code, reason = "never used directly")]
+struct PrsWithCiStatusInternal;
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PullRequest {
-    id: String,
-    number: u64,
-    url: String,
-    title: String,
-    merged: bool,
-    head_ref_oid: String,
-    is_draft: bool,
-    is_in_merge_queue: bool,
-    status_check_rollup: Option<StatusCheckRollup>,
-}
-
-#[derive(Deserialize)]
-struct SearchResults {
-    nodes: Vec<PullRequest>,
-}
-
-#[derive(Deserialize)]
-pub struct PrsWithCiStatusInternal {
-    search: SearchResults,
-}
+pub use prs_with_ci_status_internal::ResponseData as PrsWithCiStatusResponseData;
 
 /// Status of CI checks for a pull request.
 #[derive(Debug, Clone, Copy)]
@@ -52,14 +29,20 @@ pub enum CiStatus {
     None,
 }
 
-impl From<Option<StatusCheckRollup>> for CiStatus {
-    fn from(value: Option<StatusCheckRollup>) -> Self {
+impl From<Option<prs_with_ci_status_internal::PrsWithCiStatusInternalSearchNodesOnPullRequestStatusCheckRollup>>
+    for CiStatus
+{
+    fn from(
+        value: Option<prs_with_ci_status_internal::PrsWithCiStatusInternalSearchNodesOnPullRequestStatusCheckRollup>,
+    ) -> Self {
+        use prs_with_ci_status_internal::StatusState;
         match value {
             None => Self::None,
             Some(rollup) => match rollup.state {
                 StatusState::ERROR | StatusState::FAILURE => Self::Failed,
                 StatusState::EXPECTED | StatusState::PENDING => Self::Pending,
                 StatusState::SUCCESS => Self::Success,
+                StatusState::Other(_) => Self::None,
             },
         }
     }
@@ -90,26 +73,40 @@ pub struct PrWithCiStatus {
     pub ci_status: CiStatus,
 }
 
-impl From<PrsWithCiStatusInternal> for Vec<PrWithCiStatus> {
-    fn from(value: PrsWithCiStatusInternal) -> Self {
-        value
-            .search
-            .nodes
+impl From<prs_with_ci_status_internal::ResponseData> for Vec<PrWithCiStatus> {
+    fn from(value: prs_with_ci_status_internal::ResponseData) -> Self {
+        let Some(nodes) = value.search.nodes else {
+            return vec![];
+        };
+        nodes
             .into_iter()
+            .filter_map(|n| match n {
+                Some(
+                    prs_with_ci_status_internal::PrsWithCiStatusInternalSearchNodes::PullRequest(
+                        pr,
+                    ),
+                ) => Some(pr),
+                _ => None,
+            })
             .map(
-                |PullRequest {
+                |prs_with_ci_status_internal::PrsWithCiStatusInternalSearchNodesOnPullRequest {
                      id,
                      number,
                      url,
                      title,
-                     merged,
                      head_ref_oid,
                      is_draft,
+                     merged,
                      is_in_merge_queue,
                      status_check_rollup,
                  }| PrWithCiStatus {
                     id,
-                    number,
+                    // PR numbers will always fit in a u64, this is fine.
+                    number: number
+                        .try_into()
+                        .context("Encountered invalid PR number")
+                        .log_err()
+                        .unwrap(),
                     url,
                     title,
                     merged,

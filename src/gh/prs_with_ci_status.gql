@@ -1,6 +1,7 @@
-query PrsWithCiStatus($query: String!) {
+query PrsWithCiStatusInternal($query: String!) {
   search(query: $query, type: ISSUE, first: 100) {
     nodes {
+      __typename # required for the type generator
       ... on PullRequest {
         id
         number
