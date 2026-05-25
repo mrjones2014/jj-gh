@@ -5,6 +5,15 @@ license = "MIT"
 name = "jj-gh"
 repository = "https://github.com/mrjones2014/jj-gh"
 version = "0.1.0"
+include = [
+  "/src/**/*.rs",
+  "/src/**/*.gql",
+  "/src/gh/github.graphql",
+  "/Cargo.toml",
+  "/Cargo.lock",
+  "/README.md",
+  "/LICENSE",
+]
 
 [workspace]
 members = ["tools/gen-docs"]

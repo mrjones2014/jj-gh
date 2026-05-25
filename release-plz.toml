@@ -1,0 +1,6 @@
+[workspace]
+semver_check = true
+
+[[package]]
+name = "jj-gh"
+changelog_update = true
