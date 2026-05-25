@@ -77,17 +77,31 @@ You can either use the overlay directly, or use the `home-manager` module.
 
 <details>
 
+  <summary>From crates.io</summary>
+
+Requires a Rust toolchain.
+
+```sh
+cargo install jj-gh
+```
+
+</details>
+
+<details>
+
   <summary>From source</summary>
 
-Requires Rust toolchain. Will publish to `crates.io` in the future.
+Requires a Rust toolchain. Clone this repository, then from the repo root:
 
 ```sh
 cargo install --path .
 ```
 
+</details>
+
 ### Setup a `jj` alias
 
-Set up `pr` as a built-in `jj` subcommand so you can write `jj pr create <rev>`:
+Set up `pr` as a built-in `jj` subcommand so you can write `jj pr create <rev>`. If you use the `home-manager` module this is already done for you.
 
 ```toml
 # ~/.config/jj/config.toml
@@ -95,11 +109,8 @@ Set up `pr` as a built-in `jj` subcommand so you can write `jj pr create <rev>`:
 pr = ["util", "exec", "--", "jj-gh", "pr"]
 ```
 
-Now `jj pr create <rev>` (and the alias `jj pr c <rev>`) and
-`jj pr fetch <pr-num>` (alias `jj pr f <pr-num>`) work like any other `jj`
+Now `jj pr create <rev>` (and the alias `jj pr c <rev>`) and `jj pr fetch <pr-num>` (alias `jj pr f <pr-num>`) work like any other `jj`
 subcommand.
-
-</details>
 
 ## Config
 

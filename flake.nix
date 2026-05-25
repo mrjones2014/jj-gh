@@ -95,22 +95,44 @@
             treefmt --no-cache DOCS.md
           '';
         };
+        release-app = pkgs.writeShellApplication {
+          name = "release";
+          runtimeInputs = [
+            rustToolchain
+            pkgs.release-plz
+            pkgs.cargo-semver-checks
+            pkgs.git
+          ];
+          text = ''
+            ln -sfn ${github-graphql-schema} src/gh/github.graphql
+            release-plz release-pr
+            release-plz release
+          '';
+        };
       in
       {
         packages.default = jj-gh;
         packages.gen-docs = gen-docs;
-        apps.default = flake-utils.lib.mkApp { drv = jj-gh; };
-        apps.docs = flake-utils.lib.mkApp {
-          drv = gen-docs-app;
-          name = "gen-docs";
+        apps = {
+          default = flake-utils.lib.mkApp { drv = jj-gh; };
+          docs = flake-utils.lib.mkApp {
+            drv = gen-docs-app;
+            name = "gen-docs";
+          };
+          release = flake-utils.lib.mkApp {
+            drv = release-app;
+            name = "release";
+          };
         };
         formatter = treefmtEval.config.build.wrapper;
         devShells.default = craneLib.devShell {
           inputsFrom = [ jj-gh ];
           packages = [
             pkgs.cargo-nextest
+            pkgs.cargo-semver-checks
             pkgs.cargo-udeps
             pkgs.jujutsu
+            pkgs.release-plz
             pkgs.rust-analyzer
             treefmtEval.config.build.wrapper
           ];
