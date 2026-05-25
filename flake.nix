@@ -105,8 +105,8 @@
           ];
           text = ''
             ln -sfn ${github-graphql-schema} src/gh/github.graphql
-            release-plz release-pr
-            release-plz release
+            release-plz release-pr --git-token "$GITHUB_TOKEN" "$@"
+            release-plz release --git-token "$GITHUB_TOKEN" "$@"
           '';
         };
       in
