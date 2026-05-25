@@ -13,6 +13,10 @@ Works great when combined with the [jj megamerge](https://isaaccorbrey.com/notes
 
 See [DOCS.md](./DOCS.md) for all commands, flags, and features. PRs welcome and encouraged!
 
+| Writing up a PR in Neovim                                                                                  | PR number and GitHub Actions status in commit log graph                                                                   |
+| ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| ![writing a PR in Neovim](https://github.com/user-attachments/assets/41efbe41-6b68-4a92-b0c2-776ac129dca8) | ![PR number and CI status in commit log](https://github.com/user-attachments/assets/e52826cf-2924-460c-a608-b2ccd0e7a2a7) |
+
 ## Requirements
 
 `jj` must be on `PATH`. `pr fetch` additionally requires a colocated git repo
