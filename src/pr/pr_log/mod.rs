@@ -109,9 +109,10 @@ if(root,
 '''
 
 [colors]
-ci-success = "green"
-ci-failed = "red"
-ci-pending = "yellow"
+gh-ci-success = "green"
+gh-ci-failed = "red"
+gh-ci-pending = "yellow"
+gh-pr-merge-status = "bright black"
 "#
     )
 }
@@ -121,23 +122,41 @@ ci-pending = "yellow"
 fn render_pr_meta_body(pr: &PrWithCiStatus, config: &Config) -> String {
     let github_icon = if config.nerdfonts { " " } else { "" };
     let url = escape_toml_dq(&pr.url);
-    let link = format!(
+    let mut template = format!(
         r##""{github_icon}" ++ hyperlink("{url}", "#{n}")"##,
         n = pr.number
     );
-    match icon_label(pr.ci_status) {
-        Some(icon) => format!(r#"{link} ++ " " ++ {icon}"#),
-        None => link,
+
+    template = match ci_status_icon_label(pr) {
+        Some(icon) => format!(r#"{template} ++ " " ++ {icon}"#),
+        None => template,
+    };
+
+    template = match merge_metadata(pr) {
+        Some(metadata) => format!(r#"{template} ++ " " ++ {metadata}"#),
+        None => template,
+    };
+
+    template
+}
+
+fn merge_metadata(pr: &PrWithCiStatus) -> Option<&'static str> {
+    if pr.merged {
+        Some(r#"label("gh-pr-merge-status", "( merged)")"#)
+    } else if pr.is_in_merge_queue {
+        Some(r#"label("gh-pr-merge-status", "( in merge queue)")"#)
+    } else {
+        None
     }
 }
 
-fn icon_label(status: CiStatus) -> Option<&'static str> {
-    match status {
-        CiStatus::Success => Some(r#"label("ci-success", "✓")"#),
-        CiStatus::Failed => Some(r#"label("ci-failed", "✗")"#),
-        CiStatus::Pending => Some(r#"label("ci-pending", "●")"#),
-        CiStatus::None => None,
-    }
+fn ci_status_icon_label(pr: &PrWithCiStatus) -> Option<&'static str> {
+    Some(match pr.ci_status {
+        CiStatus::Success => r#"label("gh-ci-success", "✓")"#,
+        CiStatus::Failed => r#"label("gh-ci-failed", "✗")"#,
+        CiStatus::Pending => r#"label("gh-ci-pending", "●")"#,
+        CiStatus::None => return None,
+    })
 }
 
 /// Build a nested `if(commit_id.short(40) == "<sha>", <body>, ...)` chain that
@@ -187,6 +206,21 @@ mod tests {
             is_draft: false,
             is_in_merge_queue: false,
             ci_status: status,
+            merged: false,
+        }
+    }
+
+    fn pr_merge_status(number: u64, merged: bool, is_in_merge_queue: bool) -> PrWithCiStatus {
+        PrWithCiStatus {
+            id: format!("ID{number}"),
+            number,
+            url: format!("https://github.com/o/r/pull/{number}"),
+            title: format!("PR {number}"),
+            head_sha: number.to_string(),
+            is_draft: false,
+            ci_status: CiStatus::Success,
+            is_in_merge_queue,
+            merged,
         }
     }
 
@@ -247,8 +281,19 @@ mod tests {
         );
         assert!(cfg.contains(r#""42""#));
         assert!(cfg.contains(r#""SUCCESS""#));
-        assert!(cfg.contains(r#"label("ci-success", "✓")"#));
+        assert!(cfg.contains(r#"label("gh-ci-success", "✓")"#));
         assert!(cfg.contains(r#"hyperlink(""#));
+    }
+
+    #[test]
+    fn default_template_shows_merge_metadata() {
+        let prs = vec![
+            pr_merge_status(1, true, false),
+            pr_merge_status(2, false, true),
+        ];
+        let cfg = render_config(&prs, &Config::default());
+        assert!(cfg.contains("( in merge queue)"));
+        assert!(cfg.contains("( merged)"));
     }
 
     #[test]
