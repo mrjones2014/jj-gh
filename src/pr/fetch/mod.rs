@@ -6,13 +6,14 @@
 //! Requires a colocated git repository: jj cannot yet fetch arbitrary refs
 //! (only `refs/heads/*`), so we shell to git for the special pull ref.
 
-use crate::{config::Config, gh::Gh, git::url::parse_owner_repo, jj::Jj, pr::FetchArgs};
+use crate::{cli::AuthArgs, config::Config, gh::Gh, git::url::parse_owner_repo, jj::Jj};
 use anyhow::{Result, anyhow};
 use std::path::{Path, PathBuf};
 
 pub mod bookmark_template;
 
 pub use bookmark_template::{DEFAULT_FETCH_TEMPLATE, Fields};
+use serde::Serialize;
 
 /// Operations shelled out to `git`. Abstracted so tests can supply a fake.
 pub trait GitOps {
@@ -102,6 +103,35 @@ fn resolve_template(config: &Config) -> &str {
 /// import, template render).
 pub async fn run<J: Jj, G: Gh>(jj: &J, gh: &G, config: &Config, args: &FetchArgs) -> Result<()> {
     run_with(jj, gh, &RealGit, config, args).await
+}
+
+#[derive(Debug, clap::Args, Serialize)]
+pub struct FetchArgs {
+    /// PR number to fetch.
+    #[arg(value_name = "PR_NUM")]
+    #[serde(skip)]
+    pub pr: u64,
+
+    /// Override the bookmark template. Default: `pr_fetch_bookmark_template`
+    /// in config, else `pr-{number}/{branch}`. Placeholders: `{number}`,
+    /// `{branch}` (head.ref), `{user}`
+    /// (head.user.login), `{repo}` (head.repo.name). `{{` / `}}` are literal
+    /// braces.
+    #[arg(short = 't', long, value_name = "STR")]
+    #[serde(
+        rename = "pr_fetch_bookmark_template",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub template: Option<String>,
+
+    /// Replace an existing local bookmark of the same name.
+    #[arg(short = 'f', long)]
+    #[serde(skip)]
+    pub force: bool,
+
+    #[command(flatten)]
+    #[serde(flatten)]
+    pub auth: AuthArgs,
 }
 
 /// Inner runner parameterized over [`GitOps`] for tests.

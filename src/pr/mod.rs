@@ -1,30 +1,28 @@
 //! End-to-end orchestrator for `jj-gh pr create` / `jj-gh pr fetch` / `jj-gh pr auto-merge`.
 
+mod auto_merge;
+mod create;
 mod editor;
 pub mod fetch;
 mod frontmatter;
-pub mod pr_log;
+mod pr_log;
 mod template;
 mod validation;
 
-pub use editor::{EditorRoundTrip, TempfileEditor, resolve_editor_argv};
-pub use frontmatter::Frontmatter;
-pub use template::{TemplateChoice, load_template_file, resolve_template_path};
-
-#[cfg(test)]
-use crate::config::JjConfProvider;
 use crate::{
     auth,
-    cli::AuthArgs,
-    config::{self, AutoMergeMethod, Config},
+    config::{self, Config},
     fs::RealFs,
-    gh::{self, CreatePrRequest, Gh, PrSummary, remote},
+    gh::{self, Gh, PrSummary, remote},
     jj::{self, Jj},
+    pr::{
+        auto_merge::AutoMergeArgs, create::CreateArgs, editor::TempfileEditor, fetch::FetchArgs,
+        pr_log::PrLogArgs, template::TemplateChoice,
+    },
 };
 use anyhow::{Context, Result, anyhow};
 use clap::Subcommand;
 use figment::providers::Serialized;
-use serde::Serialize;
 
 #[derive(Debug, Subcommand)]
 pub enum PrAction {
@@ -57,166 +55,6 @@ pub enum PrAction {
     Log(PrLogArgs),
 }
 
-#[derive(Debug, clap::Args, Serialize)]
-pub struct PrLogArgs {
-    /// Arguments forwarded verbatim to the underlying `jj log` invocation.
-    /// Pass after `--`, e.g. `jj-gh pr log -- -r 'mine()' -T builtin_log_compact`.
-    /// If you pass `-T` / `--template`, the default PR-aware template is not
-    /// applied; use the injected aliases (`pr_number`, `pr_url`,
-    /// `pr_ci_status`, `pr_meta`) from your own template. `pr_meta` is the
-    /// pre-formatted hyperlinked PR number + colored CI icon (empty for
-    /// commits without a PR).
-    #[arg(last = true, allow_hyphen_values = true, value_name = "JJ_LOG_ARGS")]
-    #[serde(skip)]
-    pub jj_log_args: Vec<String>,
-
-    #[command(flatten)]
-    #[serde(flatten)]
-    pub auth: AuthArgs,
-
-    /// Force enable the use of nerdfont icons in the default
-    /// `pr log` template. Overrides config. Use `--no-nerdfonts` to disable.
-    #[arg(
-        long,
-        num_args = 0,
-        default_missing_value = "true",
-        default_value_if("no_nerdfonts", "true", Some("false"))
-    )]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub nerdfonts: Option<bool>,
-
-    /// Force the default `pr log` template not to use nerdfont icons.
-    /// Overrides config.
-    #[arg(long = "no-nerdfonts", conflicts_with = "nerdfonts")]
-    #[serde(skip)]
-    pub no_nerdfonts: bool,
-}
-
-#[derive(Debug, clap::Args, Serialize)]
-pub struct AutoMergeArgs {
-    /// PR number, or revision ID to look up a PR from.
-    #[arg(value_name = "PR_NUM|REV")]
-    #[serde(skip)]
-    pub number_or_rev: String,
-
-    /// Merge method used when enabling auto-merge. Overrides config
-    /// `auto_merge_method` (default `merge`).
-    #[arg(long = "method", short = 'm', value_name = "METHOD", value_enum)]
-    #[serde(rename = "auto_merge_method", skip_serializing_if = "Option::is_none")]
-    pub method: Option<AutoMergeMethod>,
-
-    #[command(flatten)]
-    #[serde(flatten)]
-    pub auth: AuthArgs,
-}
-
-#[derive(Debug, clap::Args, Serialize)]
-pub struct FetchArgs {
-    /// PR number to fetch.
-    #[arg(value_name = "PR_NUM")]
-    #[serde(skip)]
-    pub pr: u64,
-
-    /// Override the bookmark template. Default: `pr_fetch_bookmark_template`
-    /// in config, else `pr-{number}/{branch}`. Placeholders: `{number}`,
-    /// `{branch}` (head.ref), `{user}`
-    /// (head.user.login), `{repo}` (head.repo.name). `{{` / `}}` are literal
-    /// braces.
-    #[arg(short = 't', long, value_name = "STR")]
-    #[serde(
-        rename = "pr_fetch_bookmark_template",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub template: Option<String>,
-
-    /// Replace an existing local bookmark of the same name.
-    #[arg(short = 'f', long)]
-    #[serde(skip)]
-    pub force: bool,
-
-    #[command(flatten)]
-    #[serde(flatten)]
-    pub auth: AuthArgs,
-}
-
-#[derive(Debug, clap::Args, Serialize)]
-pub struct CreateArgs {
-    /// Revision to create the PR from.
-    #[arg(value_name = "REV")]
-    #[serde(skip)]
-    pub rev: String,
-
-    /// Override the base bookmark. Default: closest ancestor bookmark on the
-    /// stack, falling back to the remote's `main` / `master` / configured
-    /// `default_base_branch`.
-    #[arg(long, value_name = "BRANCH")]
-    #[serde(skip)]
-    pub base: Option<String>,
-
-    /// Force the PR to be a draft. Overrides config (default: `draft = false`).
-    /// Use `--no-draft` to force non-draft.
-    #[arg(
-        long,
-        num_args = 0,
-        default_missing_value = "true",
-        default_value_if("no_draft", "true", Some("false"))
-    )]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub draft: Option<bool>,
-
-    /// Force the PR to be non-draft. Overrides config.
-    #[arg(long = "no-draft", conflicts_with = "draft")]
-    #[serde(skip)]
-    pub no_draft: bool,
-
-    /// Enable auto-merge on the PR after creation (merges once required checks
-    /// pass). Overrides config (default: `auto_merge = false`). Use
-    /// `--no-auto-merge` to force no auto-merge.
-    #[arg(
-        long = "auto-merge",
-        num_args = 0,
-        default_missing_value = "true",
-        default_value_if("no_auto_merge", "true", Some("false"))
-    )]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub auto_merge: Option<bool>,
-
-    /// Disable auto-merge on the created PR. Overrides config.
-    #[arg(long = "no-auto-merge", conflicts_with = "auto_merge")]
-    #[serde(skip)]
-    pub no_auto_merge: bool,
-
-    /// Merge method used when auto-merge is enabled. Overrides config
-    /// `auto_merge_method` (default `merge`).
-    #[arg(long = "auto-merge-method", value_name = "METHOD", value_enum)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub auto_merge_method: Option<AutoMergeMethod>,
-
-    /// Template path or name under `.github/PULL_REQUEST_TEMPLATE/`. Default:
-    /// `template_path` in config, else auto-detect
-    /// `.github/PULL_REQUEST_TEMPLATE.md`. CLI path resolution needs the repo
-    /// root, so this stays out of figment merging and is handled by
-    /// `resolve_template_path` at handler time.
-    #[arg(long, value_name = "PATH_OR_NAME")]
-    #[serde(skip)]
-    pub template: Option<String>,
-
-    /// Skip template selection entirely.
-    #[arg(long = "no-template", conflicts_with = "template")]
-    #[serde(skip)]
-    pub no_template: bool,
-
-    /// Editor command; shell-words split, e.g. `--editor "nvim +7"`. Default:
-    /// `editor` in config, then `$VISUAL`, then `$EDITOR`.
-    #[arg(short = 'e', long, value_name = "CMD", value_parser = shell_words::split)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub editor: Option<Vec<String>>,
-
-    #[command(flatten)]
-    #[serde(flatten)]
-    pub auth: AuthArgs,
-}
-
 /// Dispatch the `pr` subcommand to the matching handler.
 ///
 /// # Errors
@@ -240,9 +78,9 @@ pub async fn dispatch(action: PrAction) -> Result<()> {
     let gh = gh::real::OctocrabGh::new(&token)?;
     let editor = TempfileEditor;
     match action {
-        PrAction::Create(args) => create(&jj, &gh, &editor, &config, &args).await?,
+        PrAction::Create(args) => create::run(&jj, &gh, &editor, &config, &args).await?,
         PrAction::Fetch(args) => fetch::run(&jj, &gh, &config, &args).await?,
-        PrAction::AutoMerge(args) => auto_merge(&jj, &gh, &config, &args.number_or_rev).await?,
+        PrAction::AutoMerge(args) => auto_merge::run(&jj, &gh, &config, &args).await?,
         PrAction::Log(args) => pr_log::log(&args, &config, &gh, &jj).await?,
     }
 
@@ -304,179 +142,6 @@ pub async fn resolve_pr<J: Jj, G: Gh>(jj: &J, gh: &G, rev: &str) -> Result<PrLoo
     })
 }
 
-async fn auto_merge<J, G>(jj: &J, gh: &G, config: &Config, number_or_rev: &str) -> Result<()>
-where
-    J: Jj,
-    G: Gh,
-{
-    let pr = if let Ok(num) = number_or_rev.parse::<u64>() {
-        let origin_url = jj
-            .remote_url("origin")
-            .await?
-            .ok_or_else(|| anyhow!("origin remote is not configured"))?;
-        let upstream_url = jj.remote_url("upstream").await?;
-        let target = remote::target(&origin_url, upstream_url.as_deref())?;
-        gh.get_pr(&target.owner, &target.repo, num).await?
-    } else {
-        let lookup = resolve_pr(jj, gh, number_or_rev).await?;
-        let summary = lookup.summary.ok_or_else(|| {
-            anyhow!(
-                "no open PR for revision `{number_or_rev}` (head `{}`)",
-                lookup.head_spec,
-            )
-        })?;
-        gh.get_pr(&lookup.target.owner, &lookup.target.repo, summary.number)
-            .await?
-    };
-
-    gh.enable_auto_merge(&pr.graphql_node_id, config.auto_merge_method)
-        .await
-        .with_context(|| format!("enabling auto-merge on #{}", pr.number))?;
-
-    log::info!("Enabled auto-merge for PR");
-    println!("{}", pr.html_url);
-    Ok(())
-}
-
-/// Run the full pr-create flow.
-///
-/// # Errors
-///
-/// Returns an error from any step (rev resolution, GH API, push, editor, etc.).
-#[expect(clippy::too_many_lines)]
-async fn create<J, G, E>(
-    jj: &J,
-    gh: &G,
-    editor: &E,
-    config: &Config,
-    args: &CreateArgs,
-) -> Result<()>
-where
-    J: Jj,
-    G: Gh,
-    E: EditorRoundTrip,
-{
-    let info = jj.resolve_rev(&args.rev).await?;
-    let existing_branch = info.bookmarks.first().cloned();
-
-    let origin_url = jj
-        .remote_url("origin")
-        .await?
-        .ok_or_else(|| anyhow!("origin remote is not configured"))?;
-    let upstream_url = jj.remote_url("upstream").await?;
-    let target = remote::target(&origin_url, upstream_url.as_deref())?;
-
-    // Pre-flight only when we already have a bookmark; an unpushed rev can't have
-    // a matching open PR.
-    if let Some(branch) = &existing_branch {
-        let head_spec = target.head_spec(branch);
-        if let Some(existing) = gh
-            .find_open_pr(&target.owner, &target.repo, &head_spec)
-            .await?
-        {
-            log::info!(
-                "PR #{} is already {} for `{}`: {}",
-                existing.number,
-                existing.state,
-                head_spec,
-                existing.title,
-            );
-            println!("{}", existing.html_url);
-            return Ok(());
-        }
-    }
-
-    let ancestor = jj.stacked_ancestor_bookmark(&args.rev).await?;
-    let detected_base = jj
-        .trunk_branch()
-        .await?
-        .unwrap_or_else(|| config.default_base_branch.clone());
-    let base = resolve_base(args, ancestor.as_deref(), &detected_base);
-
-    if !gh.branch_exists(&target.owner, &target.repo, &base).await? {
-        return Err(anyhow!(
-            "base branch `{base}` does not exist on {}/{}",
-            target.owner,
-            target.repo,
-        ));
-    }
-
-    let title_revset = jj::title_base_revset(&args.rev, ancestor.as_deref());
-    let default_title = jj.first_commit_description(&title_revset).await?;
-
-    let raw_template = load_template_for(args, config, jj)?;
-    let initial_fm = Frontmatter {
-        title: default_title,
-        base: base.clone(),
-        labels: vec![],
-        draft: config.draft,
-        auto_merge: config.auto_merge,
-        auto_merge_method: config.auto_merge_method,
-    };
-    let initial_buffer = initial_fm.render(raw_template.as_deref().unwrap_or(""))?;
-    let raw_template_body = raw_template.unwrap_or_default();
-
-    let visual = std::env::var("VISUAL").ok();
-    let editor_env = std::env::var("EDITOR").ok();
-    let editor_argv = resolve_editor_argv(config, visual.as_deref(), editor_env.as_deref())?;
-    let edited = editor.edit(&editor_argv, &initial_buffer).await?;
-    let (final_fm, body) = Frontmatter::parse(&edited)?;
-    validation::validate(&final_fm, &body, &raw_template_body)?;
-
-    jj.push(&args.rev).await?;
-
-    let branch = if let Some(b) = existing_branch {
-        b
-    } else {
-        let refreshed = jj.resolve_rev(&args.rev).await?;
-        refreshed
-            .bookmarks
-            .into_iter()
-            .next()
-            .ok_or_else(|| anyhow!("`jj git push -c {}` did not create a bookmark", args.rev))?
-    };
-    let head_spec = target.head_spec(&branch);
-    let final_base = final_fm.base.clone();
-
-    let created = gh
-        .create_pr(CreatePrRequest {
-            owner: target.owner.clone(),
-            repo: target.repo.clone(),
-            title: final_fm.title,
-            body,
-            head: head_spec,
-            base: final_base,
-            draft: final_fm.draft,
-        })
-        .await?;
-
-    if !final_fm.labels.is_empty() {
-        gh.add_labels(
-            &target.owner,
-            &target.repo,
-            created.number,
-            &final_fm.labels,
-        )
-        .await
-        .context(format!(
-            "PR created ({}), but adding labels failed",
-            created.html_url
-        ))?;
-    }
-
-    if final_fm.auto_merge {
-        gh.enable_auto_merge(&created.node_id, final_fm.auto_merge_method)
-            .await
-            .context(format!(
-                "PR created ({}), but enabling auto-merge failed",
-                created.html_url
-            ))?;
-    }
-
-    println!("{}", created.html_url);
-    Ok(())
-}
-
 fn resolve_base(args: &CreateArgs, ancestor: Option<&str>, detected: &str) -> String {
     args.base
         .clone()
@@ -487,15 +152,19 @@ fn resolve_base(args: &CreateArgs, ancestor: Option<&str>, detected: &str) -> St
 fn load_template_for<J: Jj>(args: &CreateArgs, config: &Config, _jj: &J) -> Result<Option<String>> {
     let repo_root = std::env::current_dir().context("could not read cwd")?;
     let fs = RealFs;
-    match resolve_template_path(args, config, &repo_root, &fs) {
+    match template::resolve_template_path(args, config, &repo_root, &fs) {
         TemplateChoice::None => Ok(None),
-        TemplateChoice::Path(p) => load_template_file(&p, &fs),
+        TemplateChoice::Path(p) => template::load_template_file(&p, &fs),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        config::AutoMergeMethod,
+        pr::{auto_merge::AutoMergeArgs, fetch::FetchArgs},
+    };
     use clap::Parser;
 
     #[derive(clap::Parser, Debug)]
@@ -527,7 +196,7 @@ mod tests {
     fn merged_create(argv: &[&str], toml_config: &str) -> Config {
         let argv = parse_create(argv);
         let fig = config::defaults_figment()
-            .merge(JjConfProvider::from_memory("test", toml_config))
+            .merge(config::JjConfProvider::from_memory("test", toml_config))
             .merge(Serialized::defaults(&argv));
         config::extract(&fig).unwrap()
     }
@@ -535,7 +204,7 @@ mod tests {
     fn merged_pr_log(argv: &[&str], toml_config: &str) -> Config {
         let argv = parse_pr_log(argv);
         let fig = config::defaults_figment()
-            .merge(JjConfProvider::from_memory("test", toml_config))
+            .merge(config::JjConfProvider::from_memory("test", toml_config))
             .merge(Serialized::defaults(&argv));
         config::extract(&fig).unwrap()
     }
