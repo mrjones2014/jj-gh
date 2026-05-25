@@ -11,6 +11,7 @@ This document contains the help content for the `jj-gh` command-line program.
 - [`jj-gh pr create`↴](#jj-gh-pr-create)
 - [`jj-gh pr fetch`↴](#jj-gh-pr-fetch)
 - [`jj-gh pr auto-merge`↴](#jj-gh-pr-auto-merge)
+- [`jj-gh pr log`↴](#jj-gh-pr-log)
 - [`jj-gh debug`↴](#jj-gh-debug)
 - [`jj-gh debug config`↴](#jj-gh-debug-config)
 - [`jj-gh debug auth`↴](#jj-gh-debug-auth)
@@ -45,6 +46,7 @@ Commands to work with PRs
 - `create` — Open your preferred editor to create a PR from a revision. Opens your editor to a markdown file where you can write the PR description, and set PR metadata like title, labels, auto-merge, etc. via the markdown frontmatter. This supports stacked PRs; by default the base branch is set to the closest ancestor bookmark if one exists, otherwise `trunk()`
 - `fetch` — Fetch a pull request into a local bookmark. This command accepts either a revision ID or a PR number. If given a revision ID, the PR number will be looked up via the API. Requires a colocated git repository; the special `refs/pull/123/head` ref is fetched via `git` because `jj` cannot yet fetch arbitrary refs
 - `auto-merge` — Enable auto-merge on a PR. Accepts either a PR number or a revision; with a revision, the PR is looked up by the rev's local bookmark. Fails if the repo does not allow auto-merge
+- `log` — Like `jj log`, but injects PR metadata (number, CI status, URL) as template aliases keyed by `commit_id` and renders inline PR info in the default template. Any arguments after `--` are forwarded to the underlying `jj log` invocation, e.g. `jj-gh pr log -- -r 'mine()'`
 
 ## `jj-gh pr create`
 
@@ -113,6 +115,23 @@ Enable auto-merge on a PR. Accepts either a PR number or a revision; with a revi
 - `-m`, `--method <METHOD>` — Merge method used when enabling auto-merge. Overrides config `auto_merge_method` (default `merge`)
 
   Possible values: `merge`, `squash`, `rebase`
+
+- `--gh-askpass <CMD>` — Askpass helper command that prints a GitHub token on stdout; shell-words split, e.g. `--gh-askpass "op read op://Vault/gh/token"`. Default: `gh_askpass` in config, then `$GH_ASKPASS`
+- `--askpass-timeout <SECS>` — Timeout in seconds for the askpass helper. Default: 20
+
+## `jj-gh pr log`
+
+Like `jj log`, but injects PR metadata (number, CI status, URL) as template aliases keyed by `commit_id` and renders inline PR info in the default template. Any arguments after `--` are forwarded to the underlying `jj log` invocation, e.g. `jj-gh pr log -- -r 'mine()'`
+
+**Usage:** `jj-gh pr log [OPTIONS] [-- <JJ_LOG_ARGS>...]`
+
+**Command Alias:** `l`
+
+###### **Arguments:**
+
+- `<JJ_LOG_ARGS>` — Arguments forwarded verbatim to the underlying `jj log` invocation. Pass after `--`, e.g. `jj-gh pr log -- -r 'mine()' -T builtin_log_compact`. If you pass `-T` / `--template`, the default PR-aware template is not applied; use the injected aliases (`pr_number`, `pr_url`, `pr_ci_status`, `pr_meta`) from your own template. `pr_meta` is the pre-formatted hyperlinked PR number + colored CI icon (empty for commits without a PR)
+
+###### **Options:**
 
 - `--gh-askpass <CMD>` — Askpass helper command that prints a GitHub token on stdout; shell-words split, e.g. `--gh-askpass "op read op://Vault/gh/token"`. Default: `gh_askpass` in config, then `$GH_ASKPASS`
 - `--askpass-timeout <SECS>` — Timeout in seconds for the askpass helper. Default: 20

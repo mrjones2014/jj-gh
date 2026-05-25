@@ -1,7 +1,10 @@
 //! `octocrab`-backed [`Gh`] implementation.
 
 use super::{CreatePrRequest, Gh, PrCreated, PrDetails, PrSummary};
-use crate::config::AutoMergeMethod;
+use crate::{
+    config::AutoMergeMethod,
+    gh::prs_with_ci_status::{PrWithCiStatus, PrsWithCiStatusInternal},
+};
 use anyhow::{Context, Result, anyhow};
 use octocrab::{Octocrab, params};
 use secrecy::{ExposeSecret, SecretString};
@@ -105,24 +108,6 @@ impl Gh for OctocrabGh {
         Ok(())
     }
 
-    async fn enable_auto_merge(&self, pr_node_id: &str, method: AutoMergeMethod) -> Result<()> {
-        const MUTATION: &str = include_str!("./enable_auto_merge.gql");
-
-        let payload = json!({
-            "query": MUTATION,
-            "variables": {
-                "prId": pr_node_id,
-                "method": method.as_graphql(),
-            },
-        });
-        self.octo
-            .graphql::<serde_json::Value>(&payload)
-            .await
-            .map_err(humanize)
-            .context("enabling auto-merge")?;
-        Ok(())
-    }
-
     async fn get_pr(&self, owner: &str, repo: &str, number: u64) -> Result<PrDetails> {
         let pr = match self.octo.pulls(owner, repo).get(number).await {
             Ok(pr) => pr,
@@ -144,6 +129,43 @@ impl Gh for OctocrabGh {
             head_repo_name: pr.head.repo.as_ref().map(|r| r.name.clone()),
             graphql_node_id: pr.node_id,
         })
+    }
+
+    async fn enable_auto_merge(&self, pr_node_id: &str, method: AutoMergeMethod) -> Result<()> {
+        const MUTATION: &str = include_str!("./enable_auto_merge.gql");
+
+        let payload = json!({
+            "query": MUTATION,
+            "variables": {
+                "pr_id": pr_node_id,
+                "method": method.as_graphql(),
+            },
+        });
+        self.octo
+            .graphql::<serde_json::Value>(&payload)
+            .await
+            .map_err(humanize)
+            .context("enabling auto-merge")?;
+        Ok(())
+    }
+
+    async fn local_pulls(&self, owner: &str, repo: &str) -> Result<Vec<PrWithCiStatus>> {
+        const QUERY: &str = include_str!("./prs_with_ci_status.gql");
+
+        let payload = json!({
+            "query": QUERY,
+            "variables": {
+                "owner": owner,
+                "repo": repo,
+            },
+        });
+        Ok(self
+            .octo
+            .graphql::<PrsWithCiStatusInternal>(&payload)
+            .await
+            .map_err(humanize)
+            .context("fetching local PRs")?
+            .into())
     }
 }
 

@@ -243,6 +243,14 @@ mod tests {
             assert_eq!(number, self.expected.2);
             Ok(self.pr.clone())
         }
+
+        async fn local_pulls(
+            &self,
+            _owner: &str,
+            _repo: &str,
+        ) -> Result<Vec<crate::gh::PrWithCiStatus>> {
+            unimplemented!("fetch does not call local_pulls")
+        }
     }
 
     #[derive(Debug, Clone)]
