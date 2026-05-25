@@ -1,0 +1,25 @@
+query PrsWithCiStatus($owner: String!, $repo: String!) {
+  repository(owner: $owner, name: $repo) {
+    # TODO improve the accuracy of this query, can we figure out ahead of time
+    # what filters might get the relevant PRs? Find all revisions in your
+    # direct ancestor tree up to `trunk()`? First 50 is naive.
+    pullRequests(
+      first: 50
+      states: [OPEN]
+      orderBy: { field: UPDATED_AT, direction: DESC }
+    ) {
+      nodes {
+        id
+        number
+        url
+        title
+        headRefOid
+        isDraft
+        isInMergeQueue
+        statusCheckRollup {
+          state
+        }
+      }
+    }
+  }
+}

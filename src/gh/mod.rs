@@ -6,8 +6,11 @@
 use crate::config::AutoMergeMethod;
 use anyhow::Result;
 
+mod prs_with_ci_status;
+
 pub mod real;
 pub mod remote;
+pub use prs_with_ci_status::{CiStatus, PrWithCiStatus};
 
 /// Summary of an existing pull request. Just the fields we render.
 #[derive(Debug, Clone)]
@@ -112,4 +115,12 @@ pub trait Gh {
     /// auto-merge enabled, required branch protections are missing, or the PR
     /// is already mergeable.
     async fn enable_auto_merge(&self, pr_node_id: &str, method: AutoMergeMethod) -> Result<()>;
+
+    /// Fetch open PRs with head commit SHA and CI status. Used by `pr log` to
+    /// build a `commit_id` → PR mapping for jj template aliases.
+    ///
+    /// # Errors
+    ///
+    /// Propagates GraphQL/API errors.
+    async fn local_pulls(&self, owner: &str, repo: &str) -> Result<Vec<PrWithCiStatus>>;
 }
