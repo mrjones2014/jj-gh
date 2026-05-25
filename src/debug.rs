@@ -27,13 +27,13 @@ pub async fn dispatch(action: DebugAction) -> Result<()> {
 }
 
 fn print_config() -> Result<()> {
-    let config = config::load()?;
+    let config = config::debug_load()?;
     println!("{config:#?}");
     Ok(())
 }
 
 async fn check_auth() -> Result<()> {
-    let config = config::load()?;
+    let config = config::debug_load()?;
     auth::resolve_token(&config).await?;
     println!("ok");
     Ok(())
@@ -83,7 +83,7 @@ async fn print_rev(rev: &str) -> Result<()> {
 
 async fn print_pr_lookup(rev: &str) -> Result<()> {
     let jj = JjCli;
-    let config = config::load()?;
+    let config = config::debug_load()?;
     let token = auth::resolve_token(&config).await?;
     let gh = OctocrabGh::new(&token)?;
 

@@ -125,6 +125,10 @@ editor = [
   "nvim",
   "+9",   # +9 jumps your cursor past the frontmatter
 ]
+
+# enable or disable the use of nerdfont icons
+# (e.g. in the `pr log` default template)
+nerdfonts = true
 ```
 
 Precedence (low to high):

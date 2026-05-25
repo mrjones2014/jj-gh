@@ -71,6 +71,23 @@ pub struct PrLogArgs {
     #[command(flatten)]
     #[serde(flatten)]
     pub auth: AuthArgs,
+
+    /// Force enable the use of nerdfont icons in the default
+    /// `pr log` template. Overrides config.
+    #[arg(
+        long,
+        action = clap::ArgAction::SetTrue,
+        default_value = "true",
+        default_value_if("no_nerdfonts", "true", Some("false")),
+    )]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nerdfonts: Option<bool>,
+
+    /// Force the default `pr log` template not to use nerdfont icons.
+    /// Overrides config. Equivalent to `--nerdfonts=false`
+    #[arg(long = "no-nerdfonts", conflicts_with = "nerdfonts")]
+    #[serde(skip)]
+    pub no_nerdfonts: bool,
 }
 
 #[derive(Debug, clap::Args, Serialize)]
@@ -223,7 +240,7 @@ pub async fn dispatch(action: PrAction) -> Result<()> {
         PrAction::Create(args) => create(&jj, &gh, &editor, &config, &args).await?,
         PrAction::Fetch(args) => fetch::run(&jj, &gh, &config, &args).await?,
         PrAction::AutoMerge(args) => auto_merge(&jj, &gh, &config, &args.number_or_rev).await?,
-        PrAction::Log(args) => pr_log::log(&args, &gh, &jj).await?,
+        PrAction::Log(args) => pr_log::log(&args, &config, &gh, &jj).await?,
     }
 
     Ok(())

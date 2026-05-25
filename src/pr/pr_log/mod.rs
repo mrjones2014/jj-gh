@@ -10,6 +10,7 @@
 //! didn't pass their own `-T` / `--template`.
 
 use crate::{
+    config::Config,
     gh::{CiStatus, Gh, PrWithCiStatus},
     git,
     jj::Jj,
@@ -20,7 +21,7 @@ use std::io::Write;
 use tempfile::NamedTempFile;
 use tokio::process::Command;
 
-pub async fn log(args: &PrLogArgs, gh: &impl Gh, jj: &impl Jj) -> Result<()> {
+pub async fn log(args: &PrLogArgs, config: &Config, gh: &impl Gh, jj: &impl Jj) -> Result<()> {
     let origin_url = jj
         .remote_url("origin")
         .await?
@@ -29,7 +30,7 @@ pub async fn log(args: &PrLogArgs, gh: &impl Gh, jj: &impl Jj) -> Result<()> {
     let branches = jj.pushed_bookmarks().await?;
     let prs = gh.local_pulls(&owner, &repo, &branches).await?;
 
-    let config_toml = render_config(&prs);
+    let config_toml = render_config(&prs, config);
     let mut tmp = NamedTempFile::with_suffix(".toml").context("creating temp config file")?;
     tmp.write_all(config_toml.as_bytes())
         .context("writing template-alias config")?;
@@ -72,11 +73,11 @@ fn user_set_template(args: &[String]) -> bool {
 /// `pr_url` / `pr_ci_status` as raw String aliases for users who want to
 /// build custom templates — they work in direct contexts even if they can't
 /// be re-chained through `if()`.
-fn render_config(prs: &[PrWithCiStatus]) -> String {
+fn render_config(prs: &[PrWithCiStatus], config: &Config) -> String {
     let number = if_chain_alias(prs, |pr| format!(r#""{}""#, pr.number));
     let url = if_chain_alias(prs, |pr| format!(r#""{}""#, escape_toml_dq(&pr.url)));
     let status = if_chain_alias(prs, |pr| format!(r#""{}""#, ci_status_str(pr.ci_status)));
-    let meta = if_chain_alias(prs, render_pr_meta_body);
+    let meta = if_chain_alias(prs, |pr| render_pr_meta_body(pr, config));
 
     format!(
         r#"[template-aliases]
@@ -94,7 +95,7 @@ if(root,
       if(conflict, "conflicted"),
     ),
     concat(
-      format_short_commit_header(self) ++ surround(" ", "", pr_meta) ++ "\n",
+      format_short_commit_header(self)  ++ surround(" ", "", pr_meta) ++ "\n",
       separate(" ",
         if(empty, empty_commit_marker),
         if(description,
@@ -117,9 +118,13 @@ ci-pending = "yellow"
 
 /// Render the body of a single `pr_meta` if-chain arm: the full template
 /// fragment for one PR (hyperlinked number plus colored CI-status icon).
-fn render_pr_meta_body(pr: &PrWithCiStatus) -> String {
+fn render_pr_meta_body(pr: &PrWithCiStatus, config: &Config) -> String {
+    let github_icon = if config.nerdfonts { " " } else { "" };
     let url = escape_toml_dq(&pr.url);
-    let link = format!(r##"hyperlink("{url}", "#{n}")"##, n = pr.number);
+    let link = format!(
+        r##""{github_icon}" ++ hyperlink("{url}", "#{n}")"##,
+        n = pr.number
+    );
     match icon_label(pr.ci_status) {
         Some(icon) => format!(r#"{link} ++ " " ++ {icon}"#),
         None => link,
@@ -236,7 +241,7 @@ mod tests {
     #[test]
     fn config_contains_alias_for_each_pr() {
         let prs = vec![pr("a".repeat(40).as_str(), 42, CiStatus::Success)];
-        let cfg = render_config(&prs);
+        let cfg = render_config(&prs, &Config::default());
         assert!(
             cfg.contains(r#"commit_id.short(40) == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa""#)
         );
