@@ -8,7 +8,10 @@
     };
     prettier = {
       enable = true;
-      includes = [ "*.md" ];
+      includes = [
+        "*.md"
+        "*.gql"
+      ];
     };
     taplo.enable = true;
     yamlfmt.enable = true;
