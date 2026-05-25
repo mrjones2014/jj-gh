@@ -1,11 +1,11 @@
 use crate::{
     cli::AuthArgs,
     config::{AutoMergeMethod, Config},
-    gh::{Gh, remote},
+    gh::Gh,
     jj::Jj,
-    pr::resolve_pr,
+    pr::{self},
 };
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result};
 use serde::Serialize;
 
 #[derive(Debug, clap::Args, Serialize)]
@@ -37,25 +37,7 @@ where
         method: _,
         auth: _,
     } = args;
-    let pr = if let Ok(num) = number_or_rev.parse::<u64>() {
-        let origin_url = jj
-            .remote_url("origin")
-            .await?
-            .ok_or_else(|| anyhow!("origin remote is not configured"))?;
-        let upstream_url = jj.remote_url("upstream").await?;
-        let target = remote::target(&origin_url, upstream_url.as_deref())?;
-        gh.get_pr(&target.owner, &target.repo, num).await?
-    } else {
-        let lookup = resolve_pr(jj, gh, number_or_rev).await?;
-        let summary = lookup.summary.ok_or_else(|| {
-            anyhow!(
-                "no open PR for revision `{number_or_rev}` (head `{}`)",
-                lookup.head_spec,
-            )
-        })?;
-        gh.get_pr(&lookup.target.owner, &lookup.target.repo, summary.number)
-            .await?
-    };
+    let pr = pr::get_pr(jj, gh, number_or_rev).await?;
 
     gh.enable_auto_merge(&pr.graphql_node_id, config.auto_merge_method)
         .await

@@ -13,7 +13,7 @@ use crate::{
     auth,
     config::{self, Config},
     fs::RealFs,
-    gh::{self, Gh, PrSummary, remote},
+    gh::{self, Gh, PrDetails, PrSummary, remote},
     jj::{self, Jj},
     pr::{
         auto_merge::AutoMergeArgs, create::CreateArgs, editor::TempfileEditor, fetch::FetchArgs,
@@ -101,6 +101,34 @@ pub struct PrLookup {
     pub summary: Option<PrSummary>,
 }
 
+/// Lookup a PR by either a revision ID or PR number
+///
+/// # Errors
+///
+/// Returns an error if `rev` has no local bookmark, if `origin` is unset, if
+/// `trunk()` is empty, or if any underlying jj/GH call fails.
+pub async fn get_pr<J: Jj, G: Gh>(jj: &J, gh: &G, number_or_rev: &str) -> Result<PrDetails> {
+    if let Ok(num) = number_or_rev.parse::<u64>() {
+        let origin_url = jj
+            .remote_url("origin")
+            .await?
+            .ok_or_else(|| anyhow!("origin remote is not configured"))?;
+        let upstream_url = jj.remote_url("upstream").await?;
+        let target = remote::target(&origin_url, upstream_url.as_deref())?;
+        gh.get_pr(&target.owner, &target.repo, num).await
+    } else {
+        let lookup = resolve_pr_for_rev(jj, gh, number_or_rev).await?;
+        let summary = lookup.summary.ok_or_else(|| {
+            anyhow!(
+                "no open PR for revision `{number_or_rev}` (head `{}`)",
+                lookup.head_spec,
+            )
+        })?;
+        gh.get_pr(&lookup.target.owner, &lookup.target.repo, summary.number)
+            .await
+    }
+}
+
 /// Resolve a revision into its PR-lookup context: bookmark, remote target,
 /// head spec, trunk bookmark, and any existing open PR.
 ///
@@ -108,7 +136,7 @@ pub struct PrLookup {
 ///
 /// Returns an error if `rev` has no local bookmark, if `origin` is unset, if
 /// `trunk()` is empty, or if any underlying jj/GH call fails.
-pub async fn resolve_pr<J: Jj, G: Gh>(jj: &J, gh: &G, rev: &str) -> Result<PrLookup> {
+pub async fn resolve_pr_for_rev<J: Jj, G: Gh>(jj: &J, gh: &G, rev: &str) -> Result<PrLookup> {
     let info = jj.resolve_rev(rev).await?;
     let branch = info
         .bookmarks
