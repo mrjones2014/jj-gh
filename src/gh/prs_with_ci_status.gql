@@ -11,6 +11,9 @@ query PrsWithCiStatusInternal($query: String!) {
         isDraft
         merged
         isInMergeQueue
+        autoMergeRequest {
+          enabledAt
+        }
         statusCheckRollup {
           state
         }

@@ -3,6 +3,7 @@ use anyhow::Context;
 
 // required to satisfy GraphQL interfaces for the `PullRequest` type
 type GitObjectID = String;
+type DateTime = String;
 #[expect(clippy::upper_case_acronyms)]
 type URI = String;
 
@@ -51,6 +52,7 @@ impl From<Option<prs_with_ci_status_internal::PrsWithCiStatusInternalSearchNodes
 /// Open PR with CI status and head commit SHA. Used by `jj-gh pr log` to map
 /// jj revisions to their PR metadata.
 #[derive(Debug)]
+#[expect(clippy::struct_excessive_bools)]
 pub struct PrWithCiStatus {
     /// GraphQL node ID.
     pub id: String,
@@ -71,6 +73,8 @@ pub struct PrWithCiStatus {
     pub is_in_merge_queue: bool,
     /// Rolled-up CI status across all required checks.
     pub ci_status: CiStatus,
+    /// Whether auto-merge enabled for this PR
+    pub auto_merge_enabled: bool,
 }
 
 impl From<prs_with_ci_status_internal::ResponseData> for Vec<PrWithCiStatus> {
@@ -99,6 +103,7 @@ impl From<prs_with_ci_status_internal::ResponseData> for Vec<PrWithCiStatus> {
                      merged,
                      is_in_merge_queue,
                      status_check_rollup,
+                     auto_merge_request,
                  }| PrWithCiStatus {
                     id,
                     // PR numbers will always fit in a u64, this is fine.
@@ -114,6 +119,7 @@ impl From<prs_with_ci_status_internal::ResponseData> for Vec<PrWithCiStatus> {
                     is_in_merge_queue,
                     head_sha: head_ref_oid,
                     ci_status: status_check_rollup.into(),
+                    auto_merge_enabled: auto_merge_request.is_some_and(|r| r.enabled_at.is_some()),
                 },
             )
             .collect()
