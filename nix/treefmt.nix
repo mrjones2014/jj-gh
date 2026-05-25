@@ -12,6 +12,7 @@
         "*.md"
         "*.gql"
       ];
+      excludes = [ "CHANGELOG.md" ];
     };
     taplo.enable = true;
     yamlfmt.enable = true;
