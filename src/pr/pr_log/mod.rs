@@ -57,7 +57,7 @@ pub struct PrLogArgs {
     pub no_nerdfonts: bool,
 }
 
-pub async fn log(args: &PrLogArgs, config: &Config, gh: &impl Gh, jj: &impl Jj) -> Result<()> {
+pub async fn run(args: &PrLogArgs, config: &Config, gh: &impl Gh, jj: &impl Jj) -> Result<()> {
     let origin_url = jj
         .remote_url("origin")
         .await?
@@ -113,6 +113,9 @@ fn render_config(prs: &[PrWithCiStatus], config: &Config) -> String {
     let number = if_chain_alias(prs, |pr| format!(r#""{}""#, pr.number));
     let url = if_chain_alias(prs, |pr| format!(r#""{}""#, escape_toml_dq(&pr.url)));
     let status = if_chain_alias(prs, |pr| format!(r#""{}""#, ci_status_str(pr.ci_status)));
+    let merge_status = if_chain_alias(prs, |pr| {
+        format!(r#""{}""#, merge_status(pr, config).unwrap_or_default())
+    });
     let meta = if_chain_alias(prs, |pr| render_pr_meta_body(pr, config));
 
     format!(
@@ -121,6 +124,7 @@ pr_number = '''{number}'''
 pr_url = '''{url}'''
 pr_ci_status = '''{status}'''
 pr_meta = '''{meta}'''
+pr_merge_status = '''{merge_status}'''
 pr_log = '''
 if(root,
   format_root_commit(self),
@@ -168,19 +172,32 @@ fn render_pr_meta_body(pr: &PrWithCiStatus, config: &Config) -> String {
         None => template,
     };
 
-    template = match merge_metadata(pr) {
-        Some(metadata) => format!(r#"{template} ++ " " ++ {metadata}"#),
+    template = match merge_status(pr, config) {
+        Some(metadata) => {
+            format!(
+                r#"{template} ++ " " ++ label("gh-pr-merge-status", "(") ++ {metadata} ++ label("gh-pr-merge-status", ")")"#
+            )
+        }
         None => template,
     };
 
     template
 }
 
-fn merge_metadata(pr: &PrWithCiStatus) -> Option<&'static str> {
+fn merge_status(pr: &PrWithCiStatus, config: &Config) -> Option<String> {
     if pr.merged {
-        Some(r#"label("gh-pr-merge-status", "( merged)")"#)
+        let icon = if config.nerdfonts { " " } else { "" };
+        Some(format!(r#"label("gh-pr-merge-status", "{icon}merged")"#))
     } else if pr.is_in_merge_queue {
-        Some(r#"label("gh-pr-merge-status", "( in merge queue)")"#)
+        let icon = if config.nerdfonts { " " } else { "" };
+        Some(format!(
+            r#"label("gh-pr-merge-status", "{icon}in merge queue")"#
+        ))
+    } else if pr.auto_merge_enabled {
+        let icon = if config.nerdfonts { "󰾨 " } else { "" };
+        Some(format!(
+            r#"label("gh-pr-merge-status", "{icon}auto-merge enabled")"#
+        ))
     } else {
         None
     }
@@ -243,10 +260,16 @@ mod tests {
             is_in_merge_queue: false,
             ci_status: status,
             merged: false,
+            auto_merge_enabled: false,
         }
     }
 
-    fn pr_merge_status(number: u64, merged: bool, is_in_merge_queue: bool) -> PrWithCiStatus {
+    fn pr_merge_status(
+        number: u64,
+        merged: bool,
+        is_in_merge_queue: bool,
+        auto_merge_enabled: bool,
+    ) -> PrWithCiStatus {
         PrWithCiStatus {
             id: format!("ID{number}"),
             number,
@@ -255,6 +278,7 @@ mod tests {
             head_sha: number.to_string(),
             is_draft: false,
             ci_status: CiStatus::Success,
+            auto_merge_enabled,
             is_in_merge_queue,
             merged,
         }
@@ -323,13 +347,17 @@ mod tests {
 
     #[test]
     fn default_template_shows_merge_metadata() {
-        let prs = vec![
-            pr_merge_status(1, true, false),
-            pr_merge_status(2, false, true),
-        ];
+        let prs = vec![pr_merge_status(1, true, false, false)];
         let cfg = render_config(&prs, &Config::default());
-        assert!(cfg.contains("( in merge queue)"));
-        assert!(cfg.contains("( merged)"));
+        assert!(cfg.contains(" merged"));
+
+        let prs = vec![pr_merge_status(2, false, true, false)];
+        let cfg = render_config(&prs, &Config::default());
+        assert!(cfg.contains(" in merge queue"), "{}", cfg);
+
+        let prs = vec![pr_merge_status(3, false, false, true)];
+        let cfg = render_config(&prs, &Config::default());
+        assert!(cfg.contains("󰾨 auto-merge enabled"));
     }
 
     #[test]

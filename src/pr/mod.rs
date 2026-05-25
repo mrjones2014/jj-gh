@@ -51,6 +51,12 @@ pub enum PrAction {
     /// template aliases keyed by `commit_id` and renders inline PR info in the
     /// default template. Any arguments after `--` are forwarded to the
     /// underlying `jj log` invocation, e.g. `jj-gh pr log -- -r 'mine()'`.
+    ///
+    /// The following template aliases are available for use if you pass your
+    /// own template instead of using the default:
+    ///
+    /// `pr_number`, `pr_url`, `pr_ci_status`, `pr_merge_status`, `pr_meta` (formatted string
+    /// containing all PR information).
     #[command(visible_alias = "l")]
     Log(PrLogArgs),
 }
@@ -81,7 +87,7 @@ pub async fn dispatch(action: PrAction) -> Result<()> {
         PrAction::Create(args) => create::run(&jj, &gh, &editor, &config, &args).await?,
         PrAction::Fetch(args) => fetch::run(&jj, &gh, &config, &args).await?,
         PrAction::AutoMerge(args) => auto_merge::run(&jj, &gh, &config, &args).await?,
-        PrAction::Log(args) => pr_log::log(&args, &config, &gh, &jj).await?,
+        PrAction::Log(args) => pr_log::run(&args, &config, &gh, &jj).await?,
     }
 
     Ok(())

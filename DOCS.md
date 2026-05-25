@@ -121,7 +121,11 @@ Enable auto-merge on a PR. Accepts either a PR number or a revision; with a revi
 
 ## `jj-gh pr log`
 
-Like `jj log`, but injects PR metadata (number, CI status, URL) as template aliases keyed by `commit_id` and renders inline PR info in the default template. Any arguments after `--` are forwarded to the underlying `jj log` invocation, e.g. `jj-gh pr log -- -r 'mine()'`
+Like `jj log`, but injects PR metadata (number, CI status, URL) as template aliases keyed by `commit_id` and renders inline PR info in the default template. Any arguments after `--` are forwarded to the underlying `jj log` invocation, e.g. `jj-gh pr log -- -r 'mine()'`.
+
+The following template aliases are available for use if you pass your own template instead of using the default:
+
+`pr_number`, `pr_url`, `pr_ci_status`, `pr_merge_status`, `pr_meta` (formatted string containing all PR information).
 
 **Usage:** `jj-gh pr log [OPTIONS] [-- <JJ_LOG_ARGS>...]`
 
