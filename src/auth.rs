@@ -2,13 +2,15 @@
 //!
 //! Source precedence:
 //! 1. `gh_askpass` helper, spawned with a configurable timeout.
-//! 2. `gh_token` field in the merged config (plain text, less safe).
+//! 2. `JJ_GH_TOKEN` environment variable.
+//! 3. `GH_TOKEN` environment variable (matches the `gh` CLI convention).
+//! 4. `gh_token` field in the merged config (plain text, less safe).
 //!
-//! If neither source yields a token, [`resolve_token`] returns an error.
+//! If no source yields a token, [`resolve_token`] returns an error.
 //!
-//! Process spawning is abstracted via [`ProcessRunner`] so tests can supply
-//! canned outcomes without having to run an actual subprocess or touch the
-//! filesystem.
+//! Process spawning is abstracted via [`ProcessRunner`] and environment lookup
+//! via [`EnvReader`] so tests can supply canned outcomes without touching the
+//! real process environment or filesystem.
 
 use crate::config::Config;
 use anyhow::{Context, Result, anyhow};
@@ -45,6 +47,21 @@ pub trait ProcessRunner {
     async fn run(&self, argv: &[String], timeout: Duration) -> SpawnOutcome;
 }
 
+/// Environment lookup boundary. Implementations return the value of `key` or
+/// `None` if unset.
+pub trait EnvReader {
+    fn get(&self, key: &str) -> Option<String>;
+}
+
+/// Production reader backed by `std::env::var`.
+pub struct OsEnv;
+
+impl EnvReader for OsEnv {
+    fn get(&self, key: &str) -> Option<String> {
+        std::env::var(key).ok()
+    }
+}
+
 /// Production runner backed by `tokio::process` + `tokio::time::timeout`.
 pub struct TokioProcessRunner;
 
@@ -73,16 +90,20 @@ impl ProcessRunner for TokioProcessRunner {
 ///
 /// See [`resolve_token_with`].
 pub async fn resolve_token(config: &Config) -> Result<SecretString> {
-    resolve_token_with(config, &TokioProcessRunner).await
+    resolve_token_with(config, &TokioProcessRunner, &OsEnv).await
 }
 
-/// Resolve a [`SecretString`] using an explicit runner. Used in tests.
+/// Resolve a [`SecretString`] using an explicit runner and env reader. Used in tests.
 ///
 /// # Errors
 ///
 /// Returns an error if the askpass helper fails (timeout, non-zero exit, empty
-/// or oversize output) or if neither source is configured.
-async fn resolve_token_with<R: ProcessRunner>(config: &Config, runner: &R) -> Result<SecretString> {
+/// or oversize output) or if no source is configured.
+async fn resolve_token_with<R: ProcessRunner, E: EnvReader>(
+    config: &Config,
+    runner: &R,
+    env: &E,
+) -> Result<SecretString> {
     if let Some(argv) = config.gh_askpass.as_deref() {
         if argv.is_empty() {
             return Err(anyhow!("`gh_askpass` is set but empty"));
@@ -93,13 +114,21 @@ async fn resolve_token_with<R: ProcessRunner>(config: &Config, runner: &R) -> Re
             .with_context(|| format!("askpass `{}` failed", shell_words::join(argv)));
     }
 
+    if let Some(token) = env.get("JJ_GH_TOKEN") {
+        return Ok(SecretString::new(token.into()));
+    }
+
+    if let Some(token) = env.get("GH_TOKEN") {
+        return Ok(SecretString::new(token.into()));
+    }
+
     if let Some(token) = &config.gh_token {
         log::info!("using plain token from config; configure `gh_askpass` for a safer setup");
         return Ok(token.clone());
     }
 
     Err(anyhow!(
-        "no GitHub token available: set `gh_askpass` or `gh_token` in jj config under `[jj-gh]`"
+        "no GitHub token available: use `--gh_askpass`, configure `gh_token`, or set `JJ_GH_TOKEN` or `GH_TOKEN` environment variable"
     ))
 }
 
@@ -150,6 +179,7 @@ fn parse_completed(code: Option<i32>, stdout: &[u8], stderr: &[u8]) -> Result<Se
 mod tests {
     use super::*;
     use secrecy::ExposeSecret;
+    use std::collections::HashMap;
 
     struct FakeRunner {
         outcome: SpawnOutcome,
@@ -167,6 +197,30 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct FakeEnv(HashMap<String, String>);
+
+    impl FakeEnv {
+        fn with(pairs: &[(&str, &str)]) -> Self {
+            Self(
+                pairs
+                    .iter()
+                    .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+                    .collect(),
+            )
+        }
+    }
+
+    impl EnvReader for FakeEnv {
+        fn get(&self, key: &str) -> Option<String> {
+            self.0.get(key).cloned()
+        }
+    }
+
+    fn empty_env() -> FakeEnv {
+        FakeEnv::default()
+    }
+
     fn config_with_askpass() -> Config {
         Config {
             gh_askpass: Some(vec!["/fake/askpass".into()]),
@@ -182,7 +236,7 @@ mod tests {
             stdout: b"ghp_from_askpass\n".to_vec(),
             stderr: vec![],
         });
-        let token = resolve_token_with(&config_with_askpass(), &runner)
+        let token = resolve_token_with(&config_with_askpass(), &runner, &empty_env())
             .await
             .unwrap();
         assert_eq!(token.expose_secret(), "ghp_from_askpass");
@@ -195,7 +249,7 @@ mod tests {
             stdout: vec![],
             stderr: b"something went wrong".to_vec(),
         });
-        let err = resolve_token_with(&config_with_askpass(), &runner)
+        let err = resolve_token_with(&config_with_askpass(), &runner, &empty_env())
             .await
             .unwrap_err();
         let msg = format!("{err:#}");
@@ -210,7 +264,7 @@ mod tests {
             stdout: vec![],
             stderr: vec![],
         });
-        let err = resolve_token_with(&config_with_askpass(), &runner)
+        let err = resolve_token_with(&config_with_askpass(), &runner, &empty_env())
             .await
             .unwrap_err();
         let msg = format!("{err:#}");
@@ -224,7 +278,7 @@ mod tests {
             stdout: vec![b'a'; ASKPASS_STDOUT_LIMIT + 1],
             stderr: vec![],
         });
-        let err = resolve_token_with(&config_with_askpass(), &runner)
+        let err = resolve_token_with(&config_with_askpass(), &runner, &empty_env())
             .await
             .unwrap_err();
         let msg = format!("{err:#}");
@@ -234,7 +288,7 @@ mod tests {
     #[tokio::test]
     async fn errors_on_timeout() {
         let runner = FakeRunner::new(SpawnOutcome::TimedOut);
-        let err = resolve_token_with(&config_with_askpass(), &runner)
+        let err = resolve_token_with(&config_with_askpass(), &runner, &empty_env())
             .await
             .unwrap_err();
         let msg = format!("{err:#}");
@@ -246,7 +300,7 @@ mod tests {
         let runner = FakeRunner::new(SpawnOutcome::SpawnFailed(
             "no such file or directory".into(),
         ));
-        let err = resolve_token_with(&config_with_askpass(), &runner)
+        let err = resolve_token_with(&config_with_askpass(), &runner, &empty_env())
             .await
             .unwrap_err();
         let msg = format!("{err:#}");
@@ -260,14 +314,16 @@ mod tests {
             gh_token: Some(SecretString::from("ghp_plain".to_string())),
             ..Config::default()
         };
-        let token = resolve_token_with(&config, &runner).await.unwrap();
+        let token = resolve_token_with(&config, &runner, &empty_env())
+            .await
+            .unwrap();
         assert_eq!(token.expose_secret(), "ghp_plain");
     }
 
     #[tokio::test]
-    async fn errors_when_neither_source_configured() {
+    async fn errors_when_no_source_configured() {
         let runner = FakeRunner::new(SpawnOutcome::TimedOut); // unused
-        let err = resolve_token_with(&Config::default(), &runner)
+        let err = resolve_token_with(&Config::default(), &runner, &empty_env())
             .await
             .unwrap_err();
         let msg = format!("{err:#}");
@@ -281,7 +337,9 @@ mod tests {
             gh_askpass: Some(vec![]),
             ..Config::default()
         };
-        let err = resolve_token_with(&config, &runner).await.unwrap_err();
+        let err = resolve_token_with(&config, &runner, &empty_env())
+            .await
+            .unwrap_err();
         let msg = format!("{err:#}");
         assert!(msg.contains("`gh_askpass` is set but empty"), "msg: {msg}");
     }
@@ -302,7 +360,71 @@ mod tests {
             askpass_timeout_secs: 5,
             ..Config::default()
         };
-        let token = resolve_token_with(&config, &runner).await.unwrap();
+        let token = resolve_token_with(&config, &runner, &empty_env())
+            .await
+            .unwrap();
         assert_eq!(token.expose_secret(), "ghp_from_op");
+    }
+
+    #[tokio::test]
+    async fn resolves_via_jj_gh_token_env() {
+        let runner = FakeRunner::new(SpawnOutcome::TimedOut); // unused
+        let env = FakeEnv::with(&[("JJ_GH_TOKEN", "ghp_from_jj_env")]);
+        let token = resolve_token_with(&Config::default(), &runner, &env)
+            .await
+            .unwrap();
+        assert_eq!(token.expose_secret(), "ghp_from_jj_env");
+    }
+
+    #[tokio::test]
+    async fn resolves_via_gh_token_env() {
+        let runner = FakeRunner::new(SpawnOutcome::TimedOut); // unused
+        let env = FakeEnv::with(&[("GH_TOKEN", "ghp_from_gh_env")]);
+        let token = resolve_token_with(&Config::default(), &runner, &env)
+            .await
+            .unwrap();
+        assert_eq!(token.expose_secret(), "ghp_from_gh_env");
+    }
+
+    #[tokio::test]
+    async fn jj_gh_token_beats_gh_token() {
+        let runner = FakeRunner::new(SpawnOutcome::TimedOut); // unused
+        let env = FakeEnv::with(&[
+            ("JJ_GH_TOKEN", "ghp_from_jj_env"),
+            ("GH_TOKEN", "ghp_from_gh_env"),
+        ]);
+        let token = resolve_token_with(&Config::default(), &runner, &env)
+            .await
+            .unwrap();
+        assert_eq!(token.expose_secret(), "ghp_from_jj_env");
+    }
+
+    #[tokio::test]
+    async fn env_beats_plain_config_token() {
+        let runner = FakeRunner::new(SpawnOutcome::TimedOut); // unused
+        let config = Config {
+            gh_token: Some(SecretString::from("ghp_plain".to_string())),
+            ..Config::default()
+        };
+        let env = FakeEnv::with(&[("GH_TOKEN", "ghp_from_env")]);
+        let token = resolve_token_with(&config, &runner, &env).await.unwrap();
+        assert_eq!(token.expose_secret(), "ghp_from_env");
+    }
+
+    #[tokio::test]
+    async fn askpass_beats_env() {
+        let runner = FakeRunner::new(SpawnOutcome::Completed {
+            code: Some(0),
+            stdout: b"ghp_from_askpass\n".to_vec(),
+            stderr: vec![],
+        });
+        let env = FakeEnv::with(&[
+            ("JJ_GH_TOKEN", "ghp_from_jj_env"),
+            ("GH_TOKEN", "ghp_from_gh_env"),
+        ]);
+        let token = resolve_token_with(&config_with_askpass(), &runner, &env)
+            .await
+            .unwrap();
+        assert_eq!(token.expose_secret(), "ghp_from_askpass");
     }
 }

@@ -119,7 +119,7 @@ Options related to PR metadata may also be overidden via the [markdown frontmatt
 
 ```toml
 [jj-gh]
-# Auth (one of these is required)
+# Auth (one source required; see "Token source precedence" below for env vars and CLI flag)
 gh_askpass = ["op", "read", "op://Personal/github/token"] # preferred
 gh_token = "ghp_..."                                      # plain token, less safe
 askpass_timeout_secs = 20                                 # default 20
@@ -146,7 +146,7 @@ editor = [
 nerdfonts = true
 ```
 
-Precedence (low to high):
+Config precedence (low to high):
 
 1. built-in defaults
 1. `jj` global config file
@@ -154,6 +154,18 @@ Precedence (low to high):
 1. `$JJ_GH_EXTRA_CONFIG` file
 1. env (`GH_ASKPASS`, `JJ_GH_TEMPLATE`)
 1. CLI flags.
+
+Token source precedence (high to low):
+
+1. `--gh-askpass` CLI flag
+1. `gh_askpass` from merged config
+1. `$JJ_GH_TOKEN` environment variable
+1. `$GH_TOKEN` environment variable (matches the `gh` CLI convention)
+1. `gh_token` from merged config (plain text, less safe)
+
+Env vars override `gh_token` from config, but a configured `gh_askpass` still
+wins. Use `$JJ_GH_TOKEN` when you need a different token for `jj-gh` than for
+the `gh` CLI itself.
 
 ## Frontmatter format
 
@@ -169,12 +181,7 @@ auto_merge_method: "merge" # one of "merge", "squash", "rebase"
 
 ## GitHub token permissions
 
-The token supplied via `gh_askpass` or `gh_token` needs different scopes depending on which subcommands you use.
-
-**Classic personal access token:**
-
-- Private repos: `repo` (full control).
-- Public repos only: `public_repo` is sufficient for `pr create` and `pr fetch`.
+The token supplied via `gh_askpass`, `gh_token`, `$JJ_GH_TOKEN`, or `$GH_TOKEN` needs a few permissions to function.
 
 **Fine-grained personal access token** (preferred), with access to the target repositories:
 
@@ -185,7 +192,12 @@ The token supplied via `gh_askpass` or `gh_token` needs different scopes dependi
 | Pull requests | Read and write | `pr create` (list + create, enable auto-merge), `pr fetch` (get)                                |
 | Issues        | Read and write | `pr create` when applying labels (GitHub labels go through the Issues API)                      |
 
-If you don't apply labels, you can drop the Issues permission.
+**Classic personal access token:**
+
+- Private repos: `repo` (full control).
+- Public repos only: `public_repo` is sufficient for `pr create` and `pr fetch`.
+
+If you don't apply labels, you can drop the Issues permission. PRs are treated as Issues for the purposes of applying labels in GitHub's API.
 
 ## Output and logging
 
