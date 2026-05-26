@@ -2,6 +2,7 @@
 
 use crate::pr::PrAction;
 use clap::{Parser, Subcommand};
+use clap_complete::Shell;
 use log::LevelFilter;
 use serde::Serialize;
 use std::io::IsTerminal;
@@ -67,6 +68,8 @@ pub enum Command {
         #[command(subcommand)]
         action: DebugAction,
     },
+    /// Generate completions (on stdout) for the specified shell
+    Completions { shell: Shell },
 }
 
 #[derive(Debug, clap::Args, Serialize)]

@@ -1,3 +1,5 @@
+use clap::CommandFactory as _;
+
 mod auth;
 mod cli;
 mod config;
@@ -17,7 +19,7 @@ pub use cli::{Cli, Command};
 /// # Errors
 ///
 /// Propagates the errors from each subcommand.
-pub async fn dispatch() -> anyhow::Result<()> {
+pub async fn dispatch(bin_name: &str) -> anyhow::Result<()> {
     use clap::Parser;
 
     let args = Cli::parse();
@@ -25,6 +27,9 @@ pub async fn dispatch() -> anyhow::Result<()> {
     match args.command {
         Command::Pr { action } => pr::dispatch(action).await?,
         Command::Debug { action } => debug::dispatch(action).await?,
+        Command::Completions { shell } => {
+            clap_complete::generate(shell, &mut Cli::command(), bin_name, &mut std::io::stdout());
+        }
     }
     Ok(())
 }

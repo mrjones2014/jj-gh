@@ -71,6 +71,21 @@
           // {
             inherit cargoArtifacts;
             cargoExtraArgs = "--package jj-gh";
+
+            nativeBuildInputs = [
+              pkgs.installShellFiles
+            ];
+
+            postInstall =
+              let
+                jj-gh = "${pkgs.stdenv.hostPlatform.emulator pkgs.buildPackages} $out/bin/jj-gh";
+              in
+              pkgs.lib.optionalString (pkgs.stdenv.hostPlatform.emulatorAvailable pkgs.buildPackages) ''
+                installShellCompletion --cmd jj-gh \
+                  --bash <(${jj-gh} completions bash) \
+                  --fish <(${jj-gh} completions fish) \
+                  --zsh <(${jj-gh} completions zsh)
+              '';
           }
         );
         gen-docs = craneLib.buildPackage (
