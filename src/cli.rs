@@ -1,6 +1,6 @@
 //! CLI arg parser
 
-use crate::pr::PrAction;
+use crate::{completions::SubcommandStr, pr::PrAction};
 use clap::{Parser, Subcommand};
 use clap_complete::Shell;
 use log::LevelFilter;
@@ -68,8 +68,25 @@ pub enum Command {
         #[command(subcommand)]
         action: DebugAction,
     },
-    /// Generate completions (on stdout) for the specified shell
-    Completions { shell: Shell },
+    /// Generate completions (on stdout) for the specified shell.
+    ///
+    /// Without flags, emits a standalone completion script for the `jj-gh`
+    /// binary. With `--jj-alias <NAME> --subcommand <NAME>` (both required
+    /// together), emits an overlay that adds completions for
+    /// `jj <jj-alias> <tab>` on top of jj's own completion script (source
+    /// the overlay *after* `jj util completion <shell>`).
+    Completions {
+        shell: Shell,
+        /// Emit an overlay for `jj <NAME> <tab>` instead of the standalone
+        /// `jj-gh` script. Pass the jj alias name (e.g. `pr`). Must be
+        /// paired with `--subcommand`.
+        #[arg(long = "jj-alias", value_name = "NAME", requires = "jj_gh_subcommand")]
+        jj_alias: Option<String>,
+        /// jj-gh top-level subcommand whose tree the overlay describes
+        /// (e.g. `pr`). Must be paired with `--jj-alias`.
+        #[arg(long = "subcommand", value_name = "NAME", requires = "jj_alias")]
+        jj_gh_subcommand: Option<SubcommandStr>,
+    },
 }
 
 #[derive(Debug, clap::Args, Serialize)]
