@@ -17,6 +17,7 @@ This document contains the help content for the `jj-gh` command-line program.
 - [`jj-gh debug auth`↴](#jj-gh-debug-auth)
 - [`jj-gh debug rev`↴](#jj-gh-debug-rev)
 - [`jj-gh debug pr-lookup`↴](#jj-gh-debug-pr-lookup)
+- [`jj-gh completions`↴](#jj-gh-completions)
 
 ## `jj-gh`
 
@@ -28,6 +29,7 @@ Opinionated `jj` tools for working with GitHub from your terminal
 
 - `pr` — Commands to work with PRs
 - `debug` — Diagnostic subcommands. Useful for inspecting the resolved config and pre-flight checks
+- `completions` — Generate completions (on stdout) for the specified shell
 
 ###### **Options:**
 
@@ -186,6 +188,18 @@ Pre-flight lookup for a PR: resolve the target, check if a PR is already open fo
 ###### **Arguments:**
 
 - `<REV>`
+
+## `jj-gh completions`
+
+Generate completions (on stdout) for the specified shell
+
+**Usage:** `jj-gh completions <SHELL>`
+
+###### **Arguments:**
+
+- `<SHELL>`
+
+  Possible values: `bash`, `elvish`, `fish`, `powershell`, `zsh`
 
 <hr/>
 
