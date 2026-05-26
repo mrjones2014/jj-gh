@@ -3,6 +3,7 @@ permissions:
   pull-requests: write
   contents: write
   issues: write
+  id-token: write
 on:
   workflow_run:
     workflows: [ci]
@@ -34,4 +35,3 @@ jobs:
       - run: nix run .#release
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_GITHUB_TOKEN }}
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
