@@ -9,7 +9,7 @@ permissions:
   actions: write
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
 jobs:
   flake-check:
     runs-on: ubuntu-latest
@@ -29,3 +29,32 @@ jobs:
           purge-created: 0
           purge-primary-key: never
       - run: nix flake check --print-build-logs
+  release-plz:
+    needs: flake-check
+    if: ${{ github.repository_owner == 'mrjones2014' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/master')) }}
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: write
+      issues: write
+      id-token: write
+    concurrency:
+      group: release-plz
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PLZ_GITHUB_TOKEN }}
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', '**/*.nix', 'rust-toolchain.toml', 'Cargo.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          save: false
+      - run: nix run .#release
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_GITHUB_TOKEN }}
