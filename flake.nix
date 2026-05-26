@@ -45,22 +45,21 @@
         src =
           let
             root = ./.;
-            baseSrc = pkgs.lib.fileset.toSource {
-              inherit root;
-              fileset = pkgs.lib.fileset.unions [
-                (craneLib.fileset.commonCargoSources root)
-                (pkgs.lib.fileset.fileFilter (f: f.hasExt "gql") root)
-              ];
-            };
           in
-          pkgs.runCommand "jj-gh-src" { } ''
-            cp -r ${baseSrc} $out
-            chmod -R u+w $out
-            cp ${github-graphql-schema} $out/src/gh/github.graphql
-          '';
+          pkgs.lib.fileset.toSource {
+            inherit root;
+            fileset = pkgs.lib.fileset.unions [
+              (craneLib.fileset.commonCargoSources root)
+              (pkgs.lib.fileset.fileFilter (f: f.hasExt "gql") root)
+            ];
+          };
         commonArgs = {
           inherit src;
           strictDeps = true;
+          postPatch = ''
+            mkdir -p src/gh
+            cp ${github-graphql-schema} src/gh/github.graphql
+          '';
           buildInputs = pkgs.lib.optionals pkgs.stdenv.isDarwin [
             pkgs.libiconv
           ];
