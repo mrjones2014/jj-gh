@@ -132,7 +132,6 @@
             pkgs.cargo-semver-checks
             pkgs.cargo-udeps
             pkgs.jujutsu
-            pkgs.release-plz
             pkgs.rust-analyzer
             treefmtEval.config.build.wrapper
           ];
