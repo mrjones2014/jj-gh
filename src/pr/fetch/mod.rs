@@ -6,72 +6,20 @@
 //! Requires a colocated git repository: jj cannot yet fetch arbitrary refs
 //! (only `refs/heads/*`), so we shell to git for the special pull ref.
 
-use crate::{cli::AuthArgs, config::Config, gh::Gh, git::url::parse_owner_repo, jj::Jj};
+use crate::{
+    cli::AuthArgs,
+    config::Config,
+    gh::Gh,
+    git::{real::GitOps, url::parse_owner_repo},
+    jj::Jj,
+};
 use anyhow::{Result, anyhow};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 pub mod bookmark_template;
 
 pub use bookmark_template::{DEFAULT_FETCH_TEMPLATE, Fields};
 use serde::Serialize;
-
-/// Operations shelled out to `git`. Abstracted so tests can supply a fake.
-pub trait GitOps {
-    /// Whether `refs/heads/<name>` resolves in the workspace's git store.
-    ///
-    /// # Errors
-    ///
-    /// Propagates spawn failures.
-    async fn local_bookmark_exists(&self, workdir: &Path, name: &str) -> Result<bool>;
-
-    /// Fetch `refs/pull/<pr>/head` from `origin` into `refs/heads/<bookmark>`.
-    ///
-    /// # Errors
-    ///
-    /// Propagates non-zero exit or spawn failures.
-    async fn fetch_pr(&self, workdir: &Path, pr: u64, bookmark: &str, force: bool) -> Result<()>;
-}
-
-/// Production [`GitOps`] backed by the system `git` binary.
-pub struct RealGit;
-
-impl GitOps for RealGit {
-    async fn local_bookmark_exists(&self, workdir: &Path, name: &str) -> Result<bool> {
-        let status = tokio::process::Command::new("git")
-            .current_dir(workdir)
-            .args([
-                "rev-parse",
-                "--verify",
-                "--quiet",
-                &format!("refs/heads/{name}"),
-            ])
-            .status()
-            .await
-            .map_err(|e| anyhow!("failed to spawn `git`: {e}"))?;
-        Ok(status.success())
-    }
-
-    async fn fetch_pr(&self, workdir: &Path, pr: u64, bookmark: &str, force: bool) -> Result<()> {
-        let refspec = format!("refs/pull/{pr}/head:refs/heads/{bookmark}");
-        let mut cmd = tokio::process::Command::new("git");
-        cmd.current_dir(workdir).args(["fetch", "origin", &refspec]);
-        if force {
-            cmd.arg("--force");
-        }
-        let out = cmd
-            .output()
-            .await
-            .map_err(|e| anyhow!("failed to spawn `git`: {e}"))?;
-        if !out.status.success() {
-            let stderr = String::from_utf8_lossy(&out.stderr);
-            return Err(anyhow!(
-                "git fetch origin {refspec} failed: {}",
-                stderr.trim()
-            ));
-        }
-        Ok(())
-    }
-}
 
 /// Verify the workspace is a colocated git repo. Returns an explanatory error
 /// otherwise.
@@ -93,16 +41,6 @@ fn resolve_template(config: &Config) -> &str {
         .pr_fetch_bookmark_template
         .as_deref()
         .unwrap_or(DEFAULT_FETCH_TEMPLATE)
-}
-
-/// Run `pr fetch` end-to-end using the production [`RealGit`].
-///
-/// # Errors
-///
-/// Propagates errors from any step (auth, GH API, colocation, git fetch, jj
-/// import, template render).
-pub async fn run<J: Jj, G: Gh>(jj: &J, gh: &G, config: &Config, args: &FetchArgs) -> Result<()> {
-    run_with(jj, gh, &RealGit, config, args).await
 }
 
 #[derive(Debug, clap::Args, Serialize)]
@@ -134,11 +72,13 @@ pub struct FetchArgs {
     pub auth: AuthArgs,
 }
 
-/// Inner runner parameterized over [`GitOps`] for tests.
+/// Run `pr fetch` end-to-end. Parameterized over [`GitOps`] so tests can
+/// swap in a fake; production callers pass [`crate::git::real::RealGit`].
 ///
 /// # Errors
 ///
-/// See [`run`].
+/// Propagates errors from any step (auth, GH API, colocation, git fetch, jj
+/// import, template render).
 pub async fn run_with<J: Jj, G: Gh, GO: GitOps>(
     jj: &J,
     gh: &G,
@@ -146,8 +86,8 @@ pub async fn run_with<J: Jj, G: Gh, GO: GitOps>(
     config: &Config,
     args: &FetchArgs,
 ) -> Result<()> {
-    let workspace_root: PathBuf = jj.workspace_root().await?;
-    ensure_colocated(&workspace_root)?;
+    let workspace_root = jj.workspace_root().await?;
+    ensure_colocated(workspace_root)?;
 
     let origin_url = jj
         .remote_url("origin")
@@ -168,18 +108,13 @@ pub async fn run_with<J: Jj, G: Gh, GO: GitOps>(
         },
     )?;
 
-    if git
-        .local_bookmark_exists(&workspace_root, &bookmark)
-        .await?
-        && !args.force
-    {
+    if git.local_bookmark_exists(&bookmark).await? && !args.force {
         return Err(anyhow!(
             "local bookmark `{bookmark}` already exists; pass --force to overwrite"
         ));
     }
 
-    git.fetch_pr(&workspace_root, args.pr, &bookmark, args.force)
-        .await?;
+    git.fetch_pr(args.pr, &bookmark, args.force).await?;
     jj.git_import().await?;
 
     log::info!("PR #{}: {}", pr.number, pr.title);
@@ -196,6 +131,7 @@ mod tests {
     use crate::gh::{CreatePrRequest, PrCreated, PrDetails, PrSummary};
     use crate::jj::CommitInfo;
     use std::cell::RefCell;
+    use std::path::PathBuf;
     use std::sync::Mutex;
     use tempfile::TempDir;
 
@@ -228,8 +164,8 @@ mod tests {
         async fn trunk_branch(&self) -> Result<Option<String>> {
             unimplemented!("fetch does not call trunk_branch")
         }
-        async fn workspace_root(&self) -> Result<PathBuf> {
-            Ok(self.workspace_root.clone())
+        async fn workspace_root(&self) -> Result<&PathBuf> {
+            Ok(&self.workspace_root)
         }
         async fn git_import(&self) -> Result<()> {
             *self.import_calls.lock().unwrap() += 1;
@@ -310,16 +246,10 @@ mod tests {
     }
 
     impl GitOps for FakeGit {
-        async fn local_bookmark_exists(&self, _workdir: &Path, _name: &str) -> Result<bool> {
+        async fn local_bookmark_exists(&self, _name: &str) -> Result<bool> {
             Ok(self.exists)
         }
-        async fn fetch_pr(
-            &self,
-            _workdir: &Path,
-            pr: u64,
-            bookmark: &str,
-            force: bool,
-        ) -> Result<()> {
+        async fn fetch_pr(&self, pr: u64, bookmark: &str, force: bool) -> Result<()> {
             self.fetches.borrow_mut().push(FetchCall {
                 pr,
                 bookmark: bookmark.to_string(),

@@ -14,6 +14,7 @@ use crate::{
     config::{self, Config},
     fs::RealFs,
     gh::{self, Gh, PrDetails, PrSummary, remote},
+    git::real::RealGit,
     jj::{self, Jj},
     pr::{
         auto_merge::AutoMergeArgs, create::CreateArgs, editor::TempfileEditor, fetch::FetchArgs,
@@ -80,12 +81,15 @@ pub async fn dispatch(action: PrAction) -> Result<()> {
     config::validate(&config)?;
 
     let token = auth::resolve_token(&config).await?;
-    let jj = jj::real::JjCli;
+    let jj = jj::real::JjCli::new().await?;
     let gh = gh::real::OctocrabGh::new(&token)?;
     let editor = TempfileEditor;
     match action {
         PrAction::Create(args) => create::run(&jj, &gh, &editor, &config, &args).await?,
-        PrAction::Fetch(args) => fetch::run(&jj, &gh, &config, &args).await?,
+        PrAction::Fetch(args) => {
+            let git = RealGit::new(jj.repo().clone());
+            fetch::run_with(&jj, &gh, &git, &config, &args).await?;
+        }
         PrAction::AutoMerge(args) => auto_merge::run(&jj, &gh, &config, &args).await?,
         PrAction::Log(args) => pr_log::run(&args, &config, &gh, &jj).await?,
     }

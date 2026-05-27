@@ -1,8 +1,8 @@
 //! `jj` CLI-backed [`Jj`] implementation.
 //!
-//! Remote-URL reads parse jj's embedded git store config directly (via
-//! [`parse_remote_url`]), which works in both colocated and pure-jj repos
-//! without a `git` binary on `PATH`.
+//! Remote-URL reads go through `gix` against the colocated git store
+//! discovered at the workspace root. The repository is discovered once at
+//! [`JjCli::new`] and reused for every subsequent gix operation.
 
 use super::{CommitInfo, Jj, PushedBookmark};
 use anyhow::{Context, Result, anyhow};
@@ -21,7 +21,36 @@ fn json_object_template(fields: &[(&str, &str)]) -> String {
 }
 
 /// Production [`Jj`] impl that shells out to the system `jj` binary.
-pub struct JjCli;
+///
+/// Caches the workspace root and a `gix::Repository` discovered at
+/// construction so all gix-backed reads share one handle.
+pub struct JjCli {
+    repo: gix::Repository,
+    workspace_root: PathBuf,
+}
+
+impl JjCli {
+    /// Resolve the workspace root via `jj` and discover its colocated git
+    /// store. Subsequent gix operations reuse the cached [`gix::Repository`].
+    ///
+    /// # Errors
+    ///
+    /// Propagates failures from `jj workspace root` or gix discovery.
+    pub async fn new() -> Result<Self> {
+        let workspace_root = workspace_root().await?;
+        let repo = gix::discover(&workspace_root)?;
+        Ok(Self {
+            repo,
+            workspace_root,
+        })
+    }
+
+    /// Shared handle to the discovered git repository.
+    #[must_use]
+    pub fn repo(&self) -> &gix::Repository {
+        &self.repo
+    }
+}
 
 impl Jj for JjCli {
     async fn resolve_rev(&self, rev: &str) -> Result<CommitInfo> {
@@ -87,16 +116,12 @@ impl Jj for JjCli {
     }
 
     async fn remote_url(&self, name: &str) -> Result<Option<String>> {
-        let config_path = git_backend_dir().await?.join("config");
-        let contents = match std::fs::read_to_string(&config_path) {
-            Ok(s) => s,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(e) => {
-                return Err(e)
-                    .with_context(|| format!("could not read `{}`", config_path.display()));
-            }
-        };
-        Ok(parse_remote_url(&contents, name))
+        let remote = self.repo.find_remote(name).ok();
+        Ok(remote.and_then(|remote| {
+            remote
+                .url(gix::remote::Direction::Fetch)
+                .map(ToString::to_string)
+        }))
     }
 
     async fn push(&self, rev: &str) -> Result<()> {
@@ -151,8 +176,8 @@ impl Jj for JjCli {
         Ok(Some(sha).filter(|s| !s.is_empty()))
     }
 
-    async fn workspace_root(&self) -> Result<PathBuf> {
-        workspace_root().await
+    async fn workspace_root(&self) -> Result<&PathBuf> {
+        Ok(&self.workspace_root)
     }
 
     async fn git_import(&self) -> Result<()> {
@@ -217,70 +242,6 @@ async fn workspace_root() -> Result<PathBuf> {
     Ok(PathBuf::from(path))
 }
 
-/// Resolve the git directory that jj uses as its store.
-///
-/// jj writes the path to its git backend in `.jj/repo/store/git_target` as a
-/// path relative to `.jj/repo/store/`. Colocated repos point at `../../../.git`;
-/// pure-jj repos point to a git dir embedded under `.jj/`.
-async fn git_backend_dir() -> Result<PathBuf> {
-    let store_dir = workspace_root()
-        .await?
-        .join(".jj")
-        .join("repo")
-        .join("store");
-    let target = std::fs::read_to_string(store_dir.join("git_target"))
-        .context("could not read `.jj/repo/store/git_target`")?;
-    let target = target.trim();
-    Ok(store_dir.join(target))
-}
-
-/// Extract a `[remote "NAME"] url = ...` value from a git-config-format string.
-///
-/// Supports comments (`#`, `;`), whitespace, and optionally-quoted values. Returns
-/// the last `url` value in the matching section.
-fn parse_remote_url(contents: &str, remote: &str) -> Option<String> {
-    let target_header = format!(r#"[remote "{remote}"]"#);
-    contents
-        .lines()
-        .map(strip_comment)
-        .map(str::trim)
-        .filter(|l| !l.is_empty())
-        .fold((false, None), |(in_section, url), line| {
-            if is_section_header(line) {
-                (line == target_header, url)
-            } else if in_section {
-                (in_section, parse_key_value(line, "url").or(url))
-            } else {
-                (in_section, url)
-            }
-        })
-        .1
-}
-
-fn is_section_header(line: &str) -> bool {
-    line.starts_with('[') && line.ends_with(']')
-}
-
-fn strip_comment(line: &str) -> &str {
-    let cut = line.find(['#', ';']).unwrap_or(line.len());
-    &line[..cut]
-}
-
-fn parse_key_value(line: &str, key: &str) -> Option<String> {
-    let rest = line.strip_prefix(key)?;
-    let rest = rest.trim_start();
-    let value = rest.strip_prefix('=')?.trim();
-    let unquoted = value
-        .strip_prefix('"')
-        .and_then(|s| s.strip_suffix('"'))
-        .unwrap_or(value);
-    if unquoted.is_empty() {
-        None
-    } else {
-        Some(unquoted.to_string())
-    }
-}
-
 async fn run_jj(args: &[&str]) -> Result<Vec<u8>> {
     let output = Command::new("jj")
         .arg("--ignore-working-copy")
@@ -293,106 +254,4 @@ async fn run_jj(args: &[&str]) -> Result<Vec<u8>> {
         return Err(anyhow!("`jj {}` failed: {}", args.join(" "), stderr.trim()));
     }
     Ok(output.stdout)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn reads_url_from_simple_remote_section() {
-        let cfg = r#"
-[remote "origin"]
-	url = git@github.com:o/r.git
-	fetch = +refs/heads/*:refs/remotes/origin/*
-"#;
-        assert_eq!(
-            parse_remote_url(cfg, "origin"),
-            Some("git@github.com:o/r.git".into())
-        );
-    }
-
-    #[test]
-    fn picks_correct_remote_when_multiple_present() {
-        let cfg = r#"
-[remote "origin"]
-	url = git@github.com:fork/r.git
-[remote "upstream"]
-	url = git@github.com:org/r.git
-"#;
-        assert_eq!(
-            parse_remote_url(cfg, "upstream"),
-            Some("git@github.com:org/r.git".into())
-        );
-    }
-
-    #[test]
-    fn returns_none_when_remote_missing() {
-        let cfg = r#"
-[remote "origin"]
-	url = git@github.com:o/r.git
-"#;
-        assert!(parse_remote_url(cfg, "upstream").is_none());
-    }
-
-    #[test]
-    fn returns_none_when_section_has_no_url() {
-        let cfg = r#"
-[remote "origin"]
-	fetch = +refs/heads/*:refs/remotes/origin/*
-"#;
-        assert!(parse_remote_url(cfg, "origin").is_none());
-    }
-
-    #[test]
-    fn ignores_comments() {
-        let cfg = r#"
-# leading comment
-[remote "origin"]
-	# inline comment
-	url = git@github.com:o/r.git ; trailing
-"#;
-        assert_eq!(
-            parse_remote_url(cfg, "origin"),
-            Some("git@github.com:o/r.git".into())
-        );
-    }
-
-    #[test]
-    fn handles_quoted_url() {
-        let cfg = r#"
-[remote "origin"]
-	url = "https://github.com/o/r.git"
-"#;
-        assert_eq!(
-            parse_remote_url(cfg, "origin"),
-            Some("https://github.com/o/r.git".into())
-        );
-    }
-
-    #[test]
-    fn last_url_wins_within_section() {
-        let cfg = r#"
-[remote "origin"]
-	url = git@github.com:o/old.git
-	url = git@github.com:o/new.git
-"#;
-        assert_eq!(
-            parse_remote_url(cfg, "origin"),
-            Some("git@github.com:o/new.git".into())
-        );
-    }
-
-    #[test]
-    fn ignores_other_keys_in_section() {
-        let cfg = r#"
-[remote "origin"]
-	pushurl = git@github.com:o/wrong.git
-	url = git@github.com:o/r.git
-"#;
-        assert_eq!(
-            parse_remote_url(cfg, "origin"),
-            Some("git@github.com:o/r.git".into())
-        );
-    }
 }

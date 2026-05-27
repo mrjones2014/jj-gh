@@ -60,9 +60,14 @@
             mkdir -p src/gh
             cp ${github-graphql-schema} src/gh/github.graphql
           '';
-          buildInputs = pkgs.lib.optionals pkgs.stdenv.isDarwin [
-            pkgs.libiconv
-          ];
+          buildInputs =
+            (pkgs.lib.optionals pkgs.stdenv.isDarwin [
+              pkgs.libiconv
+            ])
+            ++ (pkgs.lib.optionals pkgs.stdenv.isLinux [
+              pkgs.openssl
+            ]);
+          nativeBuildInputs = pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.pkg-config ];
         };
         cargoArtifacts = craneLib.buildDepsOnly commonArgs;
         cargoArtifactsNightly = craneLibNightly.buildDepsOnly commonArgs;
@@ -72,7 +77,7 @@
             inherit cargoArtifacts;
             cargoExtraArgs = "--package jj-gh";
 
-            nativeBuildInputs = [
+            nativeBuildInputs = commonArgs.nativeBuildInputs ++ [
               pkgs.installShellFiles
             ];
 
@@ -177,14 +182,16 @@
               cargoArtifacts = cargoArtifactsNightly;
               pnameSuffix = "-udeps";
               buildPhaseCargoCommand = "cargo udeps --workspace --all-targets --locked";
-              nativeBuildInputs = [ pkgs.cargo-udeps ];
+              nativeBuildInputs = commonArgs.nativeBuildInputs ++ [ pkgs.cargo-udeps ];
             }
           );
           treefmt = treefmtEval.config.build.check self;
           graphql-validate =
             pkgs.runCommand "graphql-validate"
               {
-                nativeBuildInputs = [ (pkgs.python3.withPackages (ps: [ ps.graphql-core ])) ];
+                nativeBuildInputs = commonArgs.nativeBuildInputs ++ [
+                  (pkgs.python3.withPackages (ps: [ ps.graphql-core ]))
+                ];
               }
               ''
                 shopt -s nullglob
@@ -199,7 +206,7 @@
           docs =
             pkgs.runCommand "docs-check"
               {
-                nativeBuildInputs = [ pkgs.diffutils ];
+                nativeBuildInputs = commonArgs.nativeBuildInputs ++ [ pkgs.diffutils ];
               }
               ''
                 mkdir -p $out

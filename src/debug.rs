@@ -40,7 +40,7 @@ async fn check_auth() -> Result<()> {
 }
 
 async fn print_rev(rev: &str) -> Result<()> {
-    let jj = JjCli;
+    let jj = JjCli::new().await?;
 
     let CommitInfo {
         change_id,
@@ -82,7 +82,7 @@ async fn print_rev(rev: &str) -> Result<()> {
 }
 
 async fn print_pr_lookup(rev: &str) -> Result<()> {
-    let jj = JjCli;
+    let jj = JjCli::new().await?;
     let config = config::debug_load()?;
     let token = auth::resolve_token(&config).await?;
     let gh = OctocrabGh::new(&token)?;
