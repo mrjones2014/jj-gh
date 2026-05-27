@@ -26,6 +26,15 @@ figment = { version = "0.10", features = ["toml"] }
 flexi_logger = { version = "0.31", default-features = false, features = [
   "colors",
 ] }
+gix = { version = "0.84", default-features = false, features = [
+  "max-performance-safe",
+  "comfort",
+  "basic",
+  "blocking-network-client",
+  "blocking-http-transport-reqwest-native-tls",
+  "credentials",
+  "sha1",
+] }
 graphql_client = "0.16"
 http = "1"
 log = "0.4"

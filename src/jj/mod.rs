@@ -88,7 +88,7 @@ pub trait Jj {
     /// # Errors
     ///
     /// Propagates jj errors.
-    async fn workspace_root(&self) -> Result<PathBuf>;
+    async fn workspace_root(&self) -> Result<&PathBuf>;
 
     /// Run `jj git import` to re-read refs from the underlying git store.
     ///
