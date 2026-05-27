@@ -27,6 +27,8 @@ pub struct Frontmatter {
     #[serde(default)]
     pub labels: Vec<String>,
     #[serde(default)]
+    pub reviewers: Vec<String>,
+    #[serde(default)]
     pub draft: bool,
     #[serde(default)]
     pub auto_merge: bool,
@@ -77,6 +79,7 @@ mod tests {
             title: title.into(),
             base: "main".into(),
             labels: vec!["bug".into(), "p1".into()],
+            reviewers: vec!["@john-carmack".into()],
             draft: false,
             auto_merge: false,
             auto_merge_method: AutoMergeMethod::Merge,

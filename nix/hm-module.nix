@@ -127,7 +127,7 @@ in
         default = null;
         example = [
           "nvim"
-          "+9"
+          "+10"
         ];
         description = "Editor argv used for the PR frontmatter buffer.";
       };

@@ -161,6 +161,7 @@ where
         title: default_title,
         base: base.clone(),
         labels: vec![],
+        reviewers: vec![],
         draft: config.draft,
         auto_merge: config.auto_merge,
         auto_merge_method: config.auto_merge_method,
@@ -175,6 +176,16 @@ where
     let (final_fm, body) = Frontmatter::parse(&edited)?;
     validation::validate(&final_fm, &body, &raw_template_body)?;
 
+    let Frontmatter {
+        title,
+        base,
+        labels,
+        reviewers,
+        draft,
+        auto_merge,
+        auto_merge_method,
+    } = final_fm;
+
     jj.push(&args.rev).await?;
 
     let branch = if let Some(b) = existing_branch {
@@ -188,36 +199,40 @@ where
             .ok_or_else(|| anyhow!("`jj git push -c {}` did not create a bookmark", args.rev))?
     };
     let head_spec = target.head_spec(&branch);
-    let final_base = final_fm.base.clone();
+    let final_base = base.clone();
 
     let created = gh
         .create_pr(CreatePrRequest {
+            title,
+            body,
+            draft,
             owner: target.owner.clone(),
             repo: target.repo.clone(),
-            title: final_fm.title,
-            body,
             head: head_spec,
             base: final_base,
-            draft: final_fm.draft,
         })
         .await?;
 
-    if !final_fm.labels.is_empty() {
-        gh.add_labels(
-            &target.owner,
-            &target.repo,
-            created.number,
-            &final_fm.labels,
-        )
-        .await
-        .context(format!(
-            "PR created ({}), but adding labels failed",
-            created.html_url
-        ))?;
+    if !labels.is_empty() {
+        gh.add_labels(&target.owner, &target.repo, created.number, &labels)
+            .await
+            .context(format!(
+                "PR created ({}), but adding labels failed",
+                created.html_url
+            ))?;
     }
 
-    if final_fm.auto_merge {
-        gh.enable_auto_merge(&created.node_id, final_fm.auto_merge_method)
+    if !reviewers.is_empty() {
+        gh.add_reviewers(&target.owner, &target.repo, created.number, reviewers)
+            .await
+            .context(format!(
+                "PR created ({}), but adding reviewers failed",
+                created.html_url
+            ))?;
+    }
+
+    if auto_merge {
+        gh.enable_auto_merge(&created.node_id, auto_merge_method)
             .await
             .context(format!(
                 "PR created ({}), but enabling auto-merge failed",

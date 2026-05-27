@@ -92,6 +92,40 @@ impl Gh for OctocrabGh {
         })
     }
 
+    async fn add_reviewers(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr: u64,
+        reviewers: Vec<String>,
+    ) -> Result<()> {
+        if reviewers.is_empty() {
+            return Ok(());
+        }
+
+        // You may add user or team reviewers, teams are in the form `your-org/team-name`, and they
+        // are submitted to the API as separate fields.
+        let (teams, users): (Vec<String>, Vec<String>) = reviewers
+            .into_iter()
+            // trim leading `@` for API
+            .map(|r| r.trim_start_matches('@').to_string())
+            // separate team reviewers from user reviewers
+            .partition(|r| r.contains('/'));
+
+        // The API expects just the team names, not the full org/team slug.
+        let team_slugs: Vec<String> = teams
+            .into_iter()
+            .map(|t| t.split_once('/').map(|(_, s)| s.to_string()).unwrap_or(t))
+            .collect();
+
+        self.octo
+            .pulls(owner, repo)
+            .request_reviews(pr, users, team_slugs)
+            .await?;
+
+        Ok(())
+    }
+
     async fn add_labels(
         &self,
         owner: &str,
