@@ -36,13 +36,18 @@
     "github-graphql-schema": {
       "flake": false,
       "locked": {
-        "narHash": "sha256-2Y2dOK1r6xdJ14oZ7b1VcIwthxf1tpXfmGhvELVB33E=",
-        "type": "file",
-        "url": "https://docs.github.com/public/fpt/schema.docs.graphql"
+        "lastModified": 1763995306,
+        "narHash": "sha256-3T5Rv7N+0lPqsRomSaf+GphP1A6Ft+Lu8gOYvZGxaD8=",
+        "owner": "octokit",
+        "repo": "graphql-schema",
+        "rev": "5f014c99da1fe346ac8d69fd20d8ddb84277d65b",
+        "type": "github"
       },
       "original": {
-        "type": "file",
-        "url": "https://docs.github.com/public/fpt/schema.docs.graphql"
+        "owner": "octokit",
+        "ref": "v15.26.1",
+        "repo": "graphql-schema",
+        "type": "github"
       }
     },
     "nixpkgs": {

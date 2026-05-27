@@ -15,7 +15,7 @@ def main() -> int:
         print("usage: graphql-validate.py <schema> <doc>...", file=sys.stderr)
         return 2
 
-    schema = build_schema(pathlib.Path(sys.argv[1]).read_text())
+    schema = build_schema(pathlib.Path(sys.argv[1]).read_text(), assume_valid_sdl=True)
 
     errors = []
     for doc_path in sys.argv[2:]:
