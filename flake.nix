@@ -14,8 +14,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     github-graphql-schema = {
-      url = "https://docs.github.com/public/fpt/schema.docs.graphql";
-      type = "file";
+      url = "github:octokit/graphql-schema/v15.26.1";
       flake = false;
     };
   };
@@ -58,7 +57,7 @@
           strictDeps = true;
           postPatch = ''
             mkdir -p src/gh
-            cp ${github-graphql-schema} src/gh/github.graphql
+            cp ${github-graphql-schema}/schema.graphql src/gh/github.graphql
           '';
           buildInputs =
             (pkgs.lib.optionals pkgs.stdenv.isDarwin [
@@ -123,7 +122,7 @@
             pkgs.git
           ];
           text = ''
-            ln -sfn ${github-graphql-schema} src/gh/github.graphql
+            ln -sfn ${github-graphql-schema}/schema.graphql src/gh/github.graphql
             release-plz release-pr --git-token "$GITHUB_TOKEN" "$@"
             release-plz release --git-token "$GITHUB_TOKEN" "$@"
           '';
@@ -154,8 +153,9 @@
             pkgs.rust-analyzer
             treefmtEval.config.build.wrapper
           ];
+          # this is so rust-analyzer sees it while developing; its included properly in the actual nix derivations as well
           shellHook = ''
-            ln -sfn ${github-graphql-schema} src/gh/github.graphql
+            ln -sfn ${github-graphql-schema}/schema.graphql src/gh/github.graphql
           '';
         };
         checks = {
@@ -200,7 +200,7 @@
                   echo "no .gql files found under src/gh" >&2
                   exit 1
                 fi
-                python3 ${./graphql-validate.py} ${github-graphql-schema} "''${docs[@]}"
+                python3 ${./graphql-validate.py} ${github-graphql-schema}/schema.graphql "''${docs[@]}"
                 touch $out
               '';
           docs =
