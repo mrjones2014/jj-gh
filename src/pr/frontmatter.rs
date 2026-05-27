@@ -43,7 +43,8 @@ impl Frontmatter {
     pub fn render(&self, body: &str) -> Result<String> {
         let yaml = serde_yml::to_string(self).context("could not serialize frontmatter")?;
         let body = body.trim_start_matches('\n');
-        Ok(format!("---\n{yaml}---\n\n\n{body}"))
+        let body = if body.is_empty() { "\n" } else { body };
+        Ok(format!("---\n{yaml}---\n\n{body}"))
     }
 
     /// Parse a frontmatter-prefixed markdown buffer back into `(meta, body)`.
@@ -148,6 +149,13 @@ mod tests {
     fn rendered_block_starts_with_delimiter_and_has_blank_line_before_body() {
         let rendered = fm("t").render("body").unwrap();
         assert!(rendered.starts_with("---\n"));
-        assert!(rendered.contains("\n---\n\n"));
+        assert!(rendered.ends_with("\n---\n\nbody"));
+        assert!(!rendered.contains("\n---\n\n\n"));
+    }
+
+    #[test]
+    fn non_empty_body_has_exactly_one_blank_line_after_frontmatter() {
+        let rendered = fm("t").render("body here\n").unwrap();
+        assert!(rendered.ends_with("\n---\n\nbody here\n"));
     }
 }
