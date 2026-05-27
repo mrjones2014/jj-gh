@@ -29,6 +29,22 @@ let
       pr_fetch_bookmark_template
       ;
   };
+
+  mkJjAliasArgv = subcmd: [
+    "util"
+    "exec"
+    "--"
+    "${cfg.package}/bin/jj-gh"
+    subcmd
+  ];
+
+  mkOverlay =
+    shell: aliasName: subcmd:
+    pkgs.runCommand "jj-gh-${shell}-${aliasName}-overlay" { } ''
+      ${cfg.package}/bin/jj-gh completions ${shell} \
+        --jj-alias ${aliasName} \
+        --subcommand ${subcmd} > $out
+    '';
 in
 {
   options.programs.jujutsu.gh = {
@@ -39,6 +55,24 @@ in
       default = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
       defaultText = lib.literalExpression "jj-gh.packages.\${system}.default";
       description = "The jj-gh package to install.";
+    };
+
+    aliases = mkOption {
+      type = types.attrsOf types.str;
+      default = {
+        pr = "pr";
+      };
+      example = {
+        pr = "pr";
+      };
+      description = ''
+        Map of `jj` alias name -> `jj-gh` subcommand. Each entry:
+
+        - Installs `programs.jujutsu.settings.aliases.<name>` dispatching to
+          `jj-gh <subcommand>` (so e.g. `jj pr create` runs `jj-gh pr create`).
+        - Drops a shell completion overlay for `jj <name> <tab>` into each
+          enabled shell (fish/bash/zsh), so completions work out of the box.
+      '';
     };
 
     settings = {
@@ -107,19 +141,47 @@ in
     };
   };
 
-  config = mkIf (cfg.enable && config.programs.jujutsu.enable) {
-    home.packages = [ cfg.package ];
-    programs.jujutsu.settings = mkMerge [
-      {
-        aliases.pr = lib.mkDefault [
-          "util"
-          "exec"
-          "--"
-          "${cfg.package}/bin/jj-gh"
-          "pr"
-        ];
-      }
-      (optionalAttrs (jjGhTable != { }) { "jj-gh" = jjGhTable; })
-    ];
-  };
+  config = mkIf (cfg.enable && config.programs.jujutsu.enable) (mkMerge [
+    {
+      home.packages = [ cfg.package ];
+      programs.jujutsu.settings = mkMerge [
+        {
+          aliases = lib.mapAttrs (_: subcmd: lib.mkDefault (mkJjAliasArgv subcmd)) cfg.aliases;
+        }
+        (optionalAttrs (jjGhTable != { }) { "jj-gh" = jjGhTable; })
+      ];
+    }
+
+    # fish: source overlays from interactiveShellInit. Fish autoloads
+    # completion files by filename match (`<cmd>.fish`), so dropping
+    # `jj-gh-<alias>-overlay.fish` into `completions/` would never fire on
+    # `jj <tab>`. Sourcing from interactive init registers the rules
+    # against `jj` directly; fish then unions them with jj's own.
+    (mkIf (config.programs.fish.enable && cfg.aliases != { }) {
+      programs.fish.interactiveShellInit = lib.concatMapStringsSep "\n" (n: ''
+        source ${mkOverlay "fish" n cfg.aliases.${n}}
+      '') (lib.attrNames cfg.aliases);
+    })
+
+    # bash: source overlays from initExtra. The overlays self-bootstrap —
+    # each one calls bash-completion's dynamic loader to force jj's own
+    # completion to load before snapshotting the prior `complete -F`
+    # handler, so we don't need to `eval "$(jj util completion bash)"`
+    # here.
+    (mkIf (config.programs.bash.enable && cfg.aliases != { }) {
+      programs.bash.initExtra = lib.concatMapStringsSep "\n" (n: ''
+        source ${mkOverlay "bash" n cfg.aliases.${n}}
+      '') (lib.attrNames cfg.aliases);
+    })
+
+    # zsh: source overlays from initExtra. initExtra runs after compinit
+    # in home-manager's .zshrc, so `_comps[jj]` is already populated from
+    # `_jj` in fpath (nixpkgs jujutsu ships it under
+    # share/zsh/site-functions) and the overlays can snapshot it directly.
+    (mkIf (config.programs.zsh.enable && cfg.aliases != { }) {
+      programs.zsh.initExtra = lib.concatMapStringsSep "\n" (n: ''
+        source ${mkOverlay "zsh" n cfg.aliases.${n}}
+      '') (lib.attrNames cfg.aliases);
+    })
+  ]);
 }

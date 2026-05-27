@@ -59,9 +59,11 @@ You can either use the overlay directly, or use the `home-manager` module.
   # home-manager
   imports = [ jj-gh.homeManagerModules.default ];
   programs.jujutsu.gh = {
-    # this will set up some jj aliases like
-    # pr = ["util", "exec", "--", "jj-gh", "pr"]
     enable = true;
+    # Map of `jj` alias name -> `jj-gh` subcommand. Each entry installs the
+    # alias *and* drops a completion overlay for `jj <name> <tab>` into any
+    # shell home-manager has enabled (fish/bash/zsh).
+    # aliases = { pr = "pr"; };
     settings = {
       gh_askpass = [
         "op"
@@ -111,6 +113,28 @@ pr = ["util", "exec", "--", "jj-gh", "pr"]
 
 Now `jj pr create <rev>` (and the alias `jj pr c <rev>`) and `jj pr fetch <pr-num>` (alias `jj pr f <pr-num>`) work like any other `jj`
 subcommand.
+
+### Shell completions
+
+`jj-gh completions <shell>` prints a standard completion script for the `jj-gh` binary. For the more common case where you invoke `jj-gh` through a `jj` alias (e.g. `jj pr <tab>`), pass `--jj-alias <NAME> --subcommand <NAME>` (both required together) to emit an overlay that adds completions for the alias on top of jj's own completion script.
+
+```sh
+# fish
+jj util completion fish | source
+jj-gh completions fish --jj-alias pr --subcommand pr | source
+
+# bash
+eval "$(jj util completion bash)"
+eval "$(jj-gh completions bash --jj-alias pr --subcommand pr)"
+
+# zsh (after compinit)
+source <(jj util completion zsh)
+source <(jj-gh completions zsh --jj-alias pr --subcommand pr)
+```
+
+The overlay must be sourced _after_ `jj util completion <shell>` so it can chain to jj's completer when the alias is not the one being completed.
+
+If you use the `home-manager` module with `programs.fish.enable` / `programs.bash.enable` / `programs.zsh.enable` set, the matching overlay is wired up automatically for every entry in `programs.jujutsu.gh.aliases`. You only need the manual steps above when installing via `cargo install` or from source.
 
 ## Config
 

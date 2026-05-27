@@ -191,15 +191,24 @@ Pre-flight lookup for a PR: resolve the target, check if a PR is already open fo
 
 ## `jj-gh completions`
 
-Generate completions (on stdout) for the specified shell
+Generate completions (on stdout) for the specified shell.
 
-**Usage:** `jj-gh completions <SHELL>`
+Without flags, emits a standalone completion script for the `jj-gh` binary. With `--jj-alias <NAME> --subcommand <NAME>` (both required together), emits an overlay that adds completions for `jj <jj-alias> <tab>` on top of jj's own completion script (source the overlay _after_ `jj util completion <shell>`).
+
+**Usage:** `jj-gh completions [OPTIONS] <SHELL>`
 
 ###### **Arguments:**
 
 - `<SHELL>`
 
   Possible values: `bash`, `elvish`, `fish`, `powershell`, `zsh`
+
+###### **Options:**
+
+- `--jj-alias <NAME>` — Emit an overlay for `jj <NAME> <tab>` instead of the standalone `jj-gh` script. Pass the jj alias name (e.g. `pr`). Must be paired with `--subcommand`
+- `--subcommand <NAME>` — jj-gh top-level subcommand whose tree the overlay describes (e.g. `pr`). Must be paired with `--jj-alias`
+
+  Possible values: `pr`
 
 <hr/>
 

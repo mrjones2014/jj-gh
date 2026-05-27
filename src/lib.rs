@@ -2,6 +2,7 @@ use clap::CommandFactory as _;
 
 mod auth;
 mod cli;
+mod completions;
 mod config;
 mod debug;
 mod fs;
@@ -27,9 +28,23 @@ pub async fn dispatch(bin_name: &str) -> anyhow::Result<()> {
     match args.command {
         Command::Pr { action } => pr::dispatch(action).await?,
         Command::Debug { action } => debug::dispatch(action).await?,
-        Command::Completions { shell } => {
-            clap_complete::generate(shell, &mut Cli::command(), bin_name, &mut std::io::stdout());
-        }
+        Command::Completions {
+            shell,
+            jj_alias,
+            jj_gh_subcommand,
+        } => match (jj_alias, jj_gh_subcommand) {
+            (Some(alias), Some(subcommand)) => {
+                completions::run(shell.into(), &alias, subcommand, &mut std::io::stdout())?;
+            }
+            _ => {
+                clap_complete::generate(
+                    shell,
+                    &mut Cli::command(),
+                    bin_name,
+                    &mut std::io::stdout(),
+                );
+            }
+        },
     }
     Ok(())
 }
