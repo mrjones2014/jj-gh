@@ -4,7 +4,7 @@
 //! [`parse_remote_url`]), which works in both colocated and pure-jj repos
 //! without a `git` binary on `PATH`.
 
-use super::{CommitInfo, Jj};
+use super::{CommitInfo, Jj, PushedBookmark};
 use anyhow::{Context, Result, anyhow};
 use std::path::PathBuf;
 use tokio::process::Command;
@@ -167,26 +167,41 @@ impl Jj for JjCli {
         Ok(())
     }
 
-    async fn pushed_bookmarks(&self) -> Result<Vec<String>> {
+    async fn pushed_bookmarks(&self) -> Result<Vec<PushedBookmark>> {
+        // `jj bookmark list --tracked --remote origin` emits one entry per
+        // local/remote side of each tracked bookmark; filtering on
+        // `if(remote, ...)` keeps only the local-side row, whose
+        // `normal_target.commit_id()` is the local commit (which may diverge
+        // from the remote target — e.g. local rebase without push).
+        //
+        // Emit NDJSON: one `PushedBookmark` per line, parsed via serde so
+        // bookmark names with unusual characters round-trip safely.
+        let record = json_object_template(&[
+            ("name", "name"),
+            ("local_commit_id", "normal_target.commit_id()"),
+        ]);
+        let template = format!(r#"if(remote, "", {record} ++ "\n")"#);
         let stdout = run_jj(&[
-            "log",
-            "--no-graph",
-            "-r",
-            r#"bookmarks() & remote_bookmarks(remote=exact:"origin")"#,
+            "bookmark",
+            "list",
+            "--tracked",
+            "--remote",
+            "origin",
             "-T",
-            r#"bookmarks.map(|b| b.name() ++ "\n")"#,
+            &template,
         ])
         .await?;
-        let mut names: Vec<String> = std::str::from_utf8(&stdout)
-            .context("jj log output is not UTF-8")?
+        let mut bookmarks: Vec<PushedBookmark> = std::str::from_utf8(&stdout)
+            .context("jj bookmark list output is not UTF-8")?
             .lines()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(str::to_string)
-            .collect();
-        names.sort();
-        names.dedup();
-        Ok(names)
+            .filter(|l| !l.trim().is_empty())
+            .map(|l| {
+                serde_json::from_str(l).with_context(|| format!("parsing bookmark record `{l}`"))
+            })
+            .collect::<Result<_>>()?;
+        bookmarks.sort_by(|a, b| a.name.cmp(&b.name));
+        bookmarks.dedup_by(|a, b| a.name == b.name);
+        Ok(bookmarks)
     }
 }
 

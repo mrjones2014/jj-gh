@@ -235,7 +235,7 @@ mod tests {
             *self.import_calls.lock().unwrap() += 1;
             Ok(())
         }
-        async fn pushed_bookmarks(&self) -> Result<Vec<String>> {
+        async fn pushed_bookmarks(&self) -> Result<Vec<crate::jj::PushedBookmark>> {
             unimplemented!("fetch does not call pushed_bookmarks")
         }
     }
