@@ -6,6 +6,11 @@
 use crate::config::AutoMergeMethod;
 use anyhow::Result;
 
+mod create_pr;
+mod enable_auto_merge;
+mod enqueue_pr;
+mod get_pr;
+mod lookup_base;
 mod prs_with_ci_status;
 
 pub mod real;
@@ -34,15 +39,30 @@ pub struct PrDetails {
     pub head_user_login: Option<String>,
     pub head_repo_name: Option<String>,
     pub graphql_node_id: String,
+    /// True when the PR's base branch has a merge queue. Determines whether
+    /// "merge when ready" routes through `enqueuePullRequest` instead of
+    /// `enablePullRequestAutoMerge`.
+    pub has_merge_queue: bool,
 }
 
-/// Inputs to [`Gh::create_pr`].
+/// Result of [`Gh::lookup_base`]: the base repo's GraphQL node ID plus whether
+/// the requested branch exists. Combines the repo-id resolution needed by
+/// [`Gh::create_pr`] with the base-branch precondition check.
+#[derive(Debug, Clone)]
+pub struct BaseLookup {
+    pub repo_node_id: String,
+    pub branch_exists: bool,
+}
+
+/// Inputs to [`Gh::create_pr`]. The base repository is identified by its
+/// GraphQL node ID (resolved via [`Gh::lookup_base`]).
 #[derive(Debug, Clone)]
 pub struct CreatePrRequest {
-    pub owner: String,
-    pub repo: String,
+    pub repo_node_id: String,
     pub title: String,
     pub body: String,
+    /// Head spec. For same-repo PRs this is the branch name; for cross-repo
+    /// (fork) PRs use `owner:branch`.
     pub head: String,
     pub base: String,
     pub draft: bool,
@@ -55,6 +75,9 @@ pub struct PrCreated {
     pub html_url: String,
     /// GraphQL node ID for the PR. Needed to enable auto-merge.
     pub node_id: String,
+    /// True when the PR's base branch has a merge queue. See
+    /// [`PrDetails::has_merge_queue`].
+    pub has_merge_queue: bool,
 }
 
 pub trait Gh {
@@ -71,12 +94,14 @@ pub trait Gh {
         head_spec: &str,
     ) -> Result<Option<PrSummary>>;
 
-    /// Whether `branch` exists on `owner/repo`.
+    /// Resolve the base repo's GraphQL node ID and check that `branch` exists.
+    /// Combines two preconditions for [`Gh::create_pr`] into a single round
+    /// trip so the mutation has the repo ID it needs without a separate probe.
     ///
     /// # Errors
     ///
-    /// Propagates API errors other than 404 (which becomes `Ok(false)`).
-    async fn branch_exists(&self, owner: &str, repo: &str, branch: &str) -> Result<bool>;
+    /// Returns an error if the repo does not exist; propagates other API errors.
+    async fn lookup_base(&self, owner: &str, repo: &str, branch: &str) -> Result<BaseLookup>;
 
     /// Create a pull request.
     ///
@@ -114,16 +139,23 @@ pub trait Gh {
     /// Returns a clear "not found" error on 404; propagates other API errors.
     async fn get_pr(&self, owner: &str, repo: &str, number: u64) -> Result<PrDetails>;
 
-    /// Enable auto-merge on a PR via the GraphQL `enablePullRequestAutoMerge`
-    /// mutation. The PR is identified by its GraphQL node ID (see
-    /// [`PrCreated::node_id`]).
+    /// Enable "merge when ready" on a PR. Dispatches to either
+    /// `enablePullRequestAutoMerge` or `enqueuePullRequest` based on
+    /// `has_merge_queue` (callers get this from [`PrDetails::has_merge_queue`]
+    /// or [`PrCreated::has_merge_queue`]). `method` is ignored when the queue
+    /// path is taken — the queue's own config decides the merge method.
     ///
     /// # Errors
     ///
     /// Propagates API errors. Common failures: the repo does not have
     /// auto-merge enabled, required branch protections are missing, or the PR
     /// is already mergeable.
-    async fn enable_auto_merge(&self, pr_node_id: &str, method: AutoMergeMethod) -> Result<()>;
+    async fn enable_auto_merge(
+        &self,
+        pr_node_id: &str,
+        has_merge_queue: bool,
+        method: AutoMergeMethod,
+    ) -> Result<()>;
 
     /// Fetch open PRs with head commit SHA and CI status, scoped to the given
     /// `branches` (head ref names). Used by `pr log` to build a `commit_id` →

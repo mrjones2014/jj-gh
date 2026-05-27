@@ -1,6 +1,6 @@
-mutation EnableAutoMerge($pr_id: ID!, $method: PullRequestMergeMethod!) {
+mutation EnableAutoMergeInternal($prId: ID!, $method: PullRequestMergeMethod!) {
   enablePullRequestAutoMerge(
-    input: { pullRequestId: $pr_id, mergeMethod: $method }
+    input: { pullRequestId: $prId, mergeMethod: $method }
   ) {
     pullRequest {
       id

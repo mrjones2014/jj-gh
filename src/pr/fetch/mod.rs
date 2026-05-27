@@ -128,7 +128,7 @@ pub async fn run_with<J: Jj, G: Gh, GO: GitOps>(
 mod tests {
     use super::*;
     use crate::cli::AuthArgs;
-    use crate::gh::{CreatePrRequest, PrCreated, PrDetails, PrSummary};
+    use crate::gh::{BaseLookup, CreatePrRequest, PrCreated, PrDetails, PrSummary};
     use crate::jj::CommitInfo;
     use std::cell::RefCell;
     use std::path::PathBuf;
@@ -190,8 +190,8 @@ mod tests {
         ) -> Result<Option<PrSummary>> {
             unimplemented!("fetch does not call find_open_pr")
         }
-        async fn branch_exists(&self, _: &str, _: &str, _: &str) -> Result<bool> {
-            unimplemented!("fetch does not call branch_exists")
+        async fn lookup_base(&self, _: &str, _: &str, _: &str) -> Result<BaseLookup> {
+            unimplemented!("fetch does not call lookup_base")
         }
         async fn create_pr(&self, _req: CreatePrRequest) -> Result<PrCreated> {
             unimplemented!("fetch does not call create_pr")
@@ -218,6 +218,7 @@ mod tests {
         async fn enable_auto_merge(
             &self,
             _node_id: &str,
+            _has_merge_queue: bool,
             _method: crate::config::AutoMergeMethod,
         ) -> Result<()> {
             unimplemented!("fetch does not call enable_auto_merge")
@@ -269,6 +270,7 @@ mod tests {
             head_user_login: Some("octocat".into()),
             head_repo_name: Some("r".into()),
             graphql_node_id: "PR_kwDOABCDEF".into(),
+            has_merge_queue: false,
         }
     }
 

@@ -1,0 +1,28 @@
+mutation CreatePrInternal(
+  $repoId: ID!
+  $title: String!
+  $body: String!
+  $headRefName: String!
+  $baseRefName: String!
+  $draft: Boolean!
+) {
+  createPullRequest(
+    input: {
+      repositoryId: $repoId
+      title: $title
+      body: $body
+      headRefName: $headRefName
+      baseRefName: $baseRefName
+      draft: $draft
+    }
+  ) {
+    pullRequest {
+      id
+      number
+      url
+      mergeQueue {
+        id
+      }
+    }
+  }
+}

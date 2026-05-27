@@ -1,0 +1,7 @@
+mutation EnqueuePrInternal($prId: ID!) {
+  enqueuePullRequest(input: { pullRequestId: $prId }) {
+    mergeQueueEntry {
+      id
+    }
+  }
+}

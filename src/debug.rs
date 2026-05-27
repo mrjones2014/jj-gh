@@ -88,8 +88,8 @@ async fn print_pr_lookup(rev: &str) -> Result<()> {
     let gh = OctocrabGh::new(&token)?;
 
     let lookup = pr::resolve_pr_for_rev(&jj, &gh, rev).await?;
-    let base_exists = gh
-        .branch_exists(
+    let base = gh
+        .lookup_base(
             &lookup.target.owner,
             &lookup.target.repo,
             &lookup.default_base,
@@ -101,7 +101,8 @@ async fn print_pr_lookup(rev: &str) -> Result<()> {
     println!("target: {:#?}", lookup.target);
     println!("head_spec: {}", lookup.head_spec);
     println!("default_base: {}", lookup.default_base);
-    println!("base_branch_exists: {base_exists}");
+    println!("base_branch_exists: {}", base.branch_exists);
+    println!("base_repo_node_id: {}", base.repo_node_id);
     println!("existing_open_pr: {:#?}", lookup.summary);
     Ok(())
 }

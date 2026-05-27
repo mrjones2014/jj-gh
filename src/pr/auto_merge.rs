@@ -39,9 +39,13 @@ where
     } = args;
     let pr = pr::get_pr(jj, gh, number_or_rev).await?;
 
-    gh.enable_auto_merge(&pr.graphql_node_id, config.auto_merge_method)
-        .await
-        .with_context(|| format!("enabling auto-merge on #{}", pr.number))?;
+    gh.enable_auto_merge(
+        &pr.graphql_node_id,
+        pr.has_merge_queue,
+        config.auto_merge_method,
+    )
+    .await
+    .with_context(|| format!("enabling auto-merge on #{}", pr.number))?;
 
     log::info!("Enabled auto-merge for PR");
     println!("{}", pr.html_url);
