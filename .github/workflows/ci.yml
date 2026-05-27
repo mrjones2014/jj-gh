@@ -30,6 +30,7 @@ jobs:
           purge-created: 0
           purge-primary-key: never
       - run: nix flake check --print-build-logs
+      - run: nix build .#udeps --print-build-logs
   release-plz:
     needs: flake-check
     if: ${{ github.repository_owner == 'mrjones2014' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/master')) }}
