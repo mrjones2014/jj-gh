@@ -162,7 +162,7 @@ pr_fetch_bookmark_template = "pr-{number}/{branch}"
 # Editor command, shell-words split. Falls back to $VISUAL, then $EDITOR.
 editor = [
   "nvim",
-  "+9",   # +9 jumps your cursor past the frontmatter
+  "+10",  # +10 jumps your cursor past the frontmatter
 ]
 
 # enable or disable the use of nerdfont icons

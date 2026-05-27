@@ -260,21 +260,31 @@ mod tests {
         async fn create_pr(&self, _req: CreatePrRequest) -> Result<PrCreated> {
             unimplemented!("fetch does not call create_pr")
         }
+        async fn add_reviewers(
+            &self,
+            _owner: &str,
+            _repo: &str,
+            _pr: u64,
+            _reviewers: Vec<String>,
+        ) -> Result<()> {
+            unimplemented!("fetch does not call add_reviewers")
+        }
         async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<()> {
             unimplemented!("fetch does not call add_labels")
-        }
-        async fn enable_auto_merge(
-            &self,
-            _node_id: &str,
-            _method: crate::config::AutoMergeMethod,
-        ) -> Result<()> {
-            unimplemented!("fetch does not call enable_auto_merge")
         }
         async fn get_pr(&self, owner: &str, repo: &str, number: u64) -> Result<PrDetails> {
             assert_eq!(owner, self.expected.0);
             assert_eq!(repo, self.expected.1);
             assert_eq!(number, self.expected.2);
             Ok(self.pr.clone())
+        }
+
+        async fn enable_auto_merge(
+            &self,
+            _node_id: &str,
+            _method: crate::config::AutoMergeMethod,
+        ) -> Result<()> {
+            unimplemented!("fetch does not call enable_auto_merge")
         }
 
         async fn local_pulls(

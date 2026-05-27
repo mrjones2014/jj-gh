@@ -38,6 +38,16 @@ pub fn validate(fm: &Frontmatter, body: &str, raw_template_body: &str) -> Result
         );
     }
 
+    if fm
+        .reviewers
+        .iter()
+        .any(|r| r.chars().filter(|c| c == &'/').count() > 1)
+    {
+        return Err(anyhow!(
+            "Invalid reviewers; team reviewers should be in the form `your-org/team-name` and contain exactly 1 `/`"
+        ));
+    }
+
     Ok(())
 }
 
@@ -50,6 +60,7 @@ mod tests {
             title: title.into(),
             base: "main".into(),
             labels: vec![],
+            reviewers: vec![],
             draft: false,
             auto_merge: false,
             auto_merge_method: crate::config::AutoMergeMethod::Merge,
@@ -61,6 +72,7 @@ mod tests {
             title: title.into(),
             base: base.into(),
             labels: vec![],
+            reviewers: vec![],
             draft: false,
             auto_merge: false,
             auto_merge_method: crate::config::AutoMergeMethod::Merge,

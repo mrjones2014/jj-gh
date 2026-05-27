@@ -85,6 +85,15 @@ pub trait Gh {
     /// Propagates API errors.
     async fn create_pr(&self, req: CreatePrRequest) -> Result<PrCreated>;
 
+    /// Add reviewers to a PR. Will not remove existing reviewers.
+    async fn add_reviewers(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr: u64,
+        reviewers: Vec<String>,
+    ) -> Result<()>;
+
     /// Add labels to a PR.
     ///
     /// # Errors
