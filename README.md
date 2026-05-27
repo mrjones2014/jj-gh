@@ -170,14 +170,14 @@ editor = [
 nerdfonts = true
 ```
 
-Config precedence (low to high):
+Config precedence (high to low):
 
-1. built-in defaults
-1. `jj` global config file
-1. `jj` repo-local config file
-1. `$JJ_GH_EXTRA_CONFIG` file
+1. CLI flags
 1. env (`GH_ASKPASS`, `JJ_GH_TEMPLATE`)
-1. CLI flags.
+1. `$JJ_GH_EXTRA_CONFIG` file
+1. `jj` repo-local config file
+1. `jj` global config file
+1. built-in defaults
 
 Token source precedence (high to low):
 
@@ -186,10 +186,12 @@ Token source precedence (high to low):
 1. `$JJ_GH_TOKEN` environment variable
 1. `$GH_TOKEN` environment variable (matches the `gh` CLI convention)
 1. `gh_token` from merged config (plain text, less safe)
+1. Attempting to run `gh auth token`
 
 Env vars override `gh_token` from config, but a configured `gh_askpass` still
 wins. Use `$JJ_GH_TOKEN` when you need a different token for `jj-gh` than for
-the `gh` CLI itself.
+the `gh` CLI itself. You may also run `gh auth login` before running `jj-gh`
+to use the GitHub CLI's authentication.
 
 ## Frontmatter format
 

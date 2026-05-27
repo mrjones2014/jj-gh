@@ -12,7 +12,7 @@
 //! via [`EnvReader`] so tests can supply canned outcomes without touching the
 //! real process environment or filesystem.
 
-use crate::config::Config;
+use crate::{config::Config, logging::ResultExt};
 use anyhow::{Context, Result, anyhow};
 use secrecy::SecretString;
 use std::time::Duration;
@@ -127,8 +127,27 @@ async fn resolve_token_with<R: ProcessRunner, E: EnvReader>(
         return Ok(token.clone());
     }
 
+    if let Some(token) = Command::new("gh")
+        .args(["auth", "token"])
+        .stdout(std::process::Stdio::piped())
+        .output()
+        .await
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| {
+            String::from_utf8(output.stdout)
+                .context("`gh auth token` returned non-UTF8 output")
+                .log_err()
+                .ok()
+        })
+        .map(|output| output.trim().to_string())
+    {
+        return Ok(token.into());
+    }
+
     Err(anyhow!(
-        "no GitHub token available: use `--gh_askpass`, configure `gh_token`, or set `JJ_GH_TOKEN` or `GH_TOKEN` environment variable"
+        "no GitHub token available: use `--gh_askpass`, configure `gh_token`, set `JJ_GH_TOKEN` or \
+        `GH_TOKEN` environment variable, or run `gh auth login`"
     ))
 }
 
