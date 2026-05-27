@@ -145,7 +145,8 @@ where
         .unwrap_or_else(|| config.default_base_branch.clone());
     let base = resolve_base(args, ancestor.as_deref(), &detected_base);
 
-    if !gh.branch_exists(&target.owner, &target.repo, &base).await? {
+    let base_lookup = gh.lookup_base(&target.owner, &target.repo, &base).await?;
+    if !base_lookup.branch_exists {
         return Err(anyhow!(
             "base branch `{base}` does not exist on {}/{}",
             target.owner,
@@ -206,8 +207,7 @@ where
             title,
             body,
             draft,
-            owner: target.owner.clone(),
-            repo: target.repo.clone(),
+            repo_node_id: base_lookup.repo_node_id,
             head: head_spec,
             base: final_base,
         })
@@ -232,7 +232,7 @@ where
     }
 
     if auto_merge {
-        gh.enable_auto_merge(&created.node_id, auto_merge_method)
+        gh.enable_auto_merge(&created.node_id, created.has_merge_queue, auto_merge_method)
             .await
             .context(format!(
                 "PR created ({}), but enabling auto-merge failed",

@@ -68,18 +68,6 @@ pub enum AutoMergeMethod {
     Rebase,
 }
 
-impl AutoMergeMethod {
-    /// GraphQL `PullRequestMergeMethod` enum literal.
-    #[must_use]
-    pub fn as_graphql(self) -> &'static str {
-        match self {
-            Self::Merge => "MERGE",
-            Self::Squash => "SQUASH",
-            Self::Rebase => "REBASE",
-        }
-    }
-}
-
 /// Build the layered figment without extracting. Callers (e.g. CLI dispatch)
 /// can stack additional providers (like `Serialized::defaults(&args)`) before
 /// calling [`extract`].

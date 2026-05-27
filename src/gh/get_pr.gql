@@ -1,0 +1,22 @@
+query GetPrInternal($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      id
+      number
+      title
+      url
+      headRefName
+      headRefOid
+      mergeQueue {
+        id
+      }
+      headRepository {
+        name
+        owner {
+          __typename
+          login
+        }
+      }
+    }
+  }
+}

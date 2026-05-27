@@ -1,11 +1,21 @@
 //! `octocrab`-backed [`Gh`] implementation.
 
-use super::{CreatePrRequest, Gh, PrCreated, PrDetails, PrSummary};
+use super::{BaseLookup, CreatePrRequest, Gh, PrCreated, PrDetails, PrSummary};
 use crate::{
     config::AutoMergeMethod,
-    gh::prs_with_ci_status::{PrWithCiStatus, PrsWithCiStatusResponseData},
+    gh::{
+        create_pr::{CreatePrInternal, CreatePrVariables},
+        enable_auto_merge::{
+            EnableAutoMergeInternal, EnableAutoMergeVariables, PullRequestMergeMethod,
+        },
+        enqueue_pr::{EnqueuePrInternal, EnqueuePrVariables},
+        get_pr::{GetPrInternal, GetPrVariables},
+        lookup_base::{LookupBaseInternal, LookupBaseVariables},
+        prs_with_ci_status::{PrWithCiStatus, PrsWithCiStatusResponseData},
+    },
 };
 use anyhow::{Context, Result, anyhow};
+use graphql_client::GraphQLQuery;
 use octocrab::{Octocrab, params};
 use secrecy::{ExposeSecret, SecretString};
 use serde_json::json;
@@ -59,36 +69,53 @@ impl Gh for OctocrabGh {
         }))
     }
 
-    async fn branch_exists(&self, owner: &str, repo: &str, branch: &str) -> Result<bool> {
-        match self
+    async fn lookup_base(&self, owner: &str, repo: &str, branch: &str) -> Result<BaseLookup> {
+        let vars = LookupBaseVariables {
+            owner: owner.to_string(),
+            name: repo.to_string(),
+            branch_qualified_name: format!("refs/heads/{branch}"),
+        };
+        let body = LookupBaseInternal::build_query(vars);
+        let data: crate::gh::lookup_base::LookupBaseResponseData = self
             .octo
-            .repos(owner, repo)
-            .get_ref(&params::repos::Reference::Branch(branch.into()))
+            .graphql(&body)
             .await
-        {
-            Ok(_) => Ok(true),
-            Err(e) if is_not_found(&e) => Ok(false),
-            Err(e) => {
-                Err(humanize(e)).with_context(|| format!("checking branch {owner}/{repo}/{branch}"))
-            }
-        }
+            .map_err(humanize)
+            .with_context(|| format!("looking up {owner}/{repo} base={branch}"))?;
+        let repo_data = data
+            .repository
+            .ok_or_else(|| anyhow!("repository {owner}/{repo} not found"))?;
+        Ok(BaseLookup {
+            repo_node_id: repo_data.id,
+            branch_exists: repo_data.ref_.is_some(),
+        })
     }
 
     async fn create_pr(&self, req: CreatePrRequest) -> Result<PrCreated> {
-        let pr = self
+        let vars = CreatePrVariables {
+            repo_id: req.repo_node_id,
+            title: req.title,
+            body: req.body,
+            head_ref_name: req.head,
+            base_ref_name: req.base,
+            draft: req.draft,
+        };
+        let body = CreatePrInternal::build_query(vars);
+        let data: crate::gh::create_pr::CreatePrResponseData = self
             .octo
-            .pulls(&req.owner, &req.repo)
-            .create(&req.title, &req.head, &req.base)
-            .body(&req.body)
-            .draft(req.draft)
-            .send()
+            .graphql(&body)
             .await
             .map_err(humanize)
-            .with_context(|| format!("creating PR on {}/{}", req.owner, req.repo))?;
+            .context("creating PR")?;
+        let pr = data
+            .create_pull_request
+            .and_then(|p| p.pull_request)
+            .ok_or_else(|| anyhow!("createPullRequest returned no pull request"))?;
         Ok(PrCreated {
-            number: pr.number,
-            html_url: pr.html_url.to_string(),
-            node_id: pr.node_id,
+            number: u64::try_from(pr.number).context("PR number out of range")?,
+            html_url: pr.url,
+            node_id: pr.id,
+            has_merge_queue: pr.merge_queue.is_some(),
         })
     }
 
@@ -143,43 +170,67 @@ impl Gh for OctocrabGh {
     }
 
     async fn get_pr(&self, owner: &str, repo: &str, number: u64) -> Result<PrDetails> {
-        let pr = match self.octo.pulls(owner, repo).get(number).await {
-            Ok(pr) => pr,
-            Err(e) if is_not_found(&e) => {
-                return Err(anyhow!("PR #{number} not found on {owner}/{repo}"));
-            }
-            Err(e) => {
-                return Err(humanize(e))
-                    .with_context(|| format!("fetching PR #{number} on {owner}/{repo}"));
-            }
+        let vars = GetPrVariables {
+            owner: owner.to_string(),
+            name: repo.to_string(),
+            number: i64::try_from(number).context("PR number out of range")?,
+        };
+        let body = GetPrInternal::build_query(vars);
+        let data: crate::gh::get_pr::GetPrResponseData = self
+            .octo
+            .graphql(&body)
+            .await
+            .map_err(humanize)
+            .with_context(|| format!("fetching PR #{number} on {owner}/{repo}"))?;
+        let pr = data
+            .repository
+            .and_then(|r| r.pull_request)
+            .ok_or_else(|| anyhow!("PR #{number} not found on {owner}/{repo}"))?;
+        let (head_user_login, head_repo_name) = match pr.head_repository {
+            Some(hr) => (Some(hr.owner.login), Some(hr.name)),
+            None => (None, None),
         };
         Ok(PrDetails {
-            number: pr.number,
+            number: u64::try_from(pr.number).context("PR number out of range")?,
             title: pr.title,
-            html_url: pr.html_url.to_string(),
-            head_ref: pr.head.ref_field.clone(),
-            head_sha: pr.head.sha.clone(),
-            head_user_login: pr.head.user.as_ref().map(|u| u.login.clone()),
-            head_repo_name: pr.head.repo.as_ref().map(|r| r.name.clone()),
-            graphql_node_id: pr.node_id,
+            html_url: pr.url,
+            head_ref: pr.head_ref_name,
+            head_sha: pr.head_ref_oid,
+            head_user_login,
+            head_repo_name,
+            graphql_node_id: pr.id,
+            has_merge_queue: pr.merge_queue.is_some(),
         })
     }
 
-    async fn enable_auto_merge(&self, pr_node_id: &str, method: AutoMergeMethod) -> Result<()> {
-        const MUTATION: &str = include_str!("./enable_auto_merge.gql");
-
-        let payload = json!({
-            "query": MUTATION,
-            "variables": {
-                "pr_id": pr_node_id,
-                "method": method.as_graphql(),
-            },
-        });
-        self.octo
-            .graphql::<serde_json::Value>(&payload)
-            .await
-            .map_err(humanize)
-            .context("enabling auto-merge")?;
+    async fn enable_auto_merge(
+        &self,
+        pr_node_id: &str,
+        has_merge_queue: bool,
+        method: AutoMergeMethod,
+    ) -> Result<()> {
+        if has_merge_queue {
+            let vars = EnqueuePrVariables {
+                pr_id: pr_node_id.to_string(),
+            };
+            let body = EnqueuePrInternal::build_query(vars);
+            self.octo
+                .graphql::<crate::gh::enqueue_pr::EnqueuePrResponseData>(&body)
+                .await
+                .map_err(humanize)
+                .context("enqueuing PR for merge")?;
+        } else {
+            let vars = EnableAutoMergeVariables {
+                pr_id: pr_node_id.to_string(),
+                method: to_graphql_method(method),
+            };
+            let body = EnableAutoMergeInternal::build_query(vars);
+            self.octo
+                .graphql::<crate::gh::enable_auto_merge::EnableAutoMergeResponseData>(&body)
+                .await
+                .map_err(humanize)
+                .context("enabling auto-merge")?;
+        }
         Ok(())
     }
 
@@ -219,6 +270,14 @@ impl Gh for OctocrabGh {
     }
 }
 
+fn to_graphql_method(m: AutoMergeMethod) -> PullRequestMergeMethod {
+    match m {
+        AutoMergeMethod::Merge => PullRequestMergeMethod::MERGE,
+        AutoMergeMethod::Squash => PullRequestMergeMethod::SQUASH,
+        AutoMergeMethod::Rebase => PullRequestMergeMethod::REBASE,
+    }
+}
+
 /// GitHub's search query string limit is documented as 256 chars for some
 /// endpoints but issue/PR search tolerates more in practice. We cap well
 /// below the worst-case so a single oversized branch name can't break a
@@ -243,13 +302,6 @@ fn build_search_queries(owner: &str, repo: &str, branches: &[String]) -> Vec<Str
         queries.push(current);
     }
     queries
-}
-
-fn is_not_found(e: &octocrab::Error) -> bool {
-    matches!(
-        e,
-        octocrab::Error::GitHub { source, .. } if source.status_code.as_u16() == 404
-    )
 }
 
 /// Map an `octocrab::Error` into an `anyhow::Error` with a human-friendly message

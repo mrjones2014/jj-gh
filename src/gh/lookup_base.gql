@@ -1,0 +1,12 @@
+query LookupBaseInternal(
+  $owner: String!
+  $name: String!
+  $branchQualifiedName: String!
+) {
+  repository(owner: $owner, name: $name) {
+    id
+    ref(qualifiedName: $branchQualifiedName) {
+      id
+    }
+  }
+}
