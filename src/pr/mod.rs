@@ -11,6 +11,7 @@ mod validation;
 
 use crate::{
     auth,
+    cli::GlobalOpts,
     config::{self, Config},
     fs::RealFs,
     gh::{self, Gh, PrDetails, PrSummary, remote},
@@ -75,8 +76,8 @@ pub enum PrAction {
 /// Propagates errors from config loading, auth resolution, jj/GitHub API
 /// calls, the editor round-trip, or any sub-handler (`create`, `fetch`,
 /// `auto-merge`).
-pub async fn dispatch(action: PrAction) -> Result<()> {
-    let mut fig = config::load_figment();
+pub async fn dispatch(global: &GlobalOpts, action: PrAction) -> Result<()> {
+    let mut fig = config::load_figment().merge(Serialized::defaults(global));
     fig = match &action {
         PrAction::Create(a) => fig.merge(Serialized::defaults(a)),
         PrAction::Fetch(a) => fig.merge(Serialized::defaults(a)),
@@ -99,7 +100,6 @@ pub async fn dispatch(action: PrAction) -> Result<()> {
         PrAction::AutoMerge(args) => auto_merge::run(&jj, &gh, &config, &args).await?,
         PrAction::Log(args) => pr_log::run(&args, &config, &gh, &jj).await?,
     }
-
     Ok(())
 }
 
@@ -121,19 +121,25 @@ pub struct PrLookup {
 ///
 /// # Errors
 ///
-/// Returns an error if `rev` has no local bookmark, if `origin` is unset, if
-/// `trunk()` is empty, or if any underlying jj/GH call fails.
-pub async fn get_pr<J: Jj, G: Gh>(jj: &J, gh: &G, number_or_rev: &str) -> Result<PrDetails> {
+/// Returns an error if `rev` has no local bookmark, if the configured
+/// `default_remote` is unset, if `trunk()` is empty, or if any underlying
+/// jj/GH call fails.
+pub async fn get_pr<J: Jj, G: Gh>(
+    jj: &J,
+    gh: &G,
+    config: &Config,
+    number_or_rev: &str,
+) -> Result<PrDetails> {
     if let Ok(num) = number_or_rev.parse::<u64>() {
         let origin_url = jj
-            .remote_url("origin")
+            .remote_url(&config.default_remote)
             .await?
-            .ok_or_else(|| anyhow!("origin remote is not configured"))?;
-        let upstream_url = jj.remote_url("upstream").await?;
+            .ok_or_else(|| anyhow!("`{}` remote is not configured", config.default_remote))?;
+        let upstream_url = jj.remote_url(&config.upstream_remote).await?;
         let target = remote::target(&origin_url, upstream_url.as_deref())?;
         gh.get_pr(&target.owner, &target.repo, num).await
     } else {
-        let lookup = resolve_pr_for_rev(jj, gh, number_or_rev).await?;
+        let lookup = resolve_pr_for_rev(jj, gh, config, number_or_rev).await?;
         let summary = lookup.summary.ok_or_else(|| {
             anyhow!(
                 "no open PR for revision `{number_or_rev}` (head `{}`)",
@@ -150,9 +156,15 @@ pub async fn get_pr<J: Jj, G: Gh>(jj: &J, gh: &G, number_or_rev: &str) -> Result
 ///
 /// # Errors
 ///
-/// Returns an error if `rev` has no local bookmark, if `origin` is unset, if
-/// `trunk()` is empty, or if any underlying jj/GH call fails.
-pub async fn resolve_pr_for_rev<J: Jj, G: Gh>(jj: &J, gh: &G, rev: &str) -> Result<PrLookup> {
+/// Returns an error if `rev` has no local bookmark, if the configured
+/// `default_remote` is unset, if `trunk()` is empty, or if any underlying
+/// jj/GH call fails.
+pub async fn resolve_pr_for_rev<J: Jj, G: Gh>(
+    jj: &J,
+    gh: &G,
+    config: &Config,
+    rev: &str,
+) -> Result<PrLookup> {
     let info = jj.resolve_rev(rev).await?;
     let branch = info
         .bookmarks
@@ -161,10 +173,10 @@ pub async fn resolve_pr_for_rev<J: Jj, G: Gh>(jj: &J, gh: &G, rev: &str) -> Resu
         .ok_or_else(|| anyhow!("no local bookmark on `{rev}`; nothing to look up"))?;
 
     let origin_url = jj
-        .remote_url("origin")
+        .remote_url(&config.default_remote)
         .await?
-        .ok_or_else(|| anyhow!("origin remote is not configured"))?;
-    let upstream_url = jj.remote_url("upstream").await?;
+        .ok_or_else(|| anyhow!("`{}` remote is not configured", config.default_remote))?;
+    let upstream_url = jj.remote_url(&config.upstream_remote).await?;
     let target = remote::target(&origin_url, upstream_url.as_deref())?;
     let head_spec = target.head_spec(&branch);
 
@@ -465,5 +477,66 @@ mod tests {
             Some(&["cli-askpass".to_string()][..])
         );
         assert_eq!(c.askpass_timeout_secs, 99);
+    }
+
+    #[test]
+    fn global_remote_overrides_default_remote_config() {
+        use crate::cli::GlobalOpts;
+        use clap::Parser;
+
+        #[derive(clap::Parser, Debug)]
+        #[command(no_binary_name = true)]
+        struct GlobalParser {
+            #[command(flatten)]
+            opts: GlobalOpts,
+        }
+
+        let global =
+            GlobalParser::try_parse_from(["--remote", "fork", "--upstream-remote", "canonical"])
+                .unwrap()
+                .opts;
+        let fig = config::defaults_figment()
+            .merge(config::JjConfProvider::from_memory(
+                "test",
+                r#"
+                [jj-gh]
+                default_remote = "cfg-origin"
+                upstream_remote = "cfg-upstream"
+                "#,
+            ))
+            .merge(Serialized::defaults(&global));
+        let c = config::extract(&fig).unwrap();
+        assert_eq!(c.default_remote, "fork");
+        assert_eq!(c.upstream_remote, "canonical");
+    }
+
+    #[test]
+    fn config_remote_used_when_global_not_set() {
+        use crate::cli::GlobalOpts;
+        use clap::Parser;
+
+        #[derive(clap::Parser, Debug)]
+        #[command(no_binary_name = true)]
+        struct GlobalParser {
+            #[command(flatten)]
+            opts: GlobalOpts,
+        }
+
+        let global = GlobalParser::try_parse_from::<[&str; 0], _>([])
+            .unwrap()
+            .opts;
+        let fig = config::defaults_figment()
+            .merge(config::JjConfProvider::from_memory(
+                "test",
+                r#"
+                [jj-gh]
+                default_remote = "cfg-origin"
+                upstream_remote = "cfg-upstream"
+                "#,
+            ))
+            .merge(Serialized::defaults(&global));
+        let c = config::extract(&fig).unwrap();
+        assert_eq!(c.default_remote, "cfg-origin");
+        assert_eq!(c.upstream_remote, "cfg-upstream");
     }
 }

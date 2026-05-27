@@ -2,14 +2,15 @@
 
 use crate::{
     auth,
-    cli::DebugAction,
-    config,
+    cli::{DebugAction, GlobalOpts},
+    config::{self, Config},
     gh::{Gh, real::OctocrabGh},
     git::url::parse_owner_repo,
     jj::{self, CommitInfo, Jj, real::JjCli},
     pr,
 };
 use anyhow::Result;
+use figment::providers::Serialized;
 
 /// Dispatch a `jj-gh debug` invocation.
 ///
@@ -17,29 +18,37 @@ use anyhow::Result;
 ///
 /// Returns an error from the underlying operation; for `auth` this means token
 /// resolution failed, for `rev`/`pr-lookup` the jj or GH read failed.
-pub async fn dispatch(action: DebugAction) -> Result<()> {
+pub async fn dispatch(global: &GlobalOpts, action: DebugAction) -> Result<()> {
     match action {
-        DebugAction::Config => print_config(),
-        DebugAction::Auth => check_auth().await,
-        DebugAction::Rev { rev } => print_rev(&rev).await,
-        DebugAction::PrLookup { rev } => print_pr_lookup(&rev).await,
+        DebugAction::Config => print_config(global),
+        DebugAction::Auth => check_auth(global).await,
+        DebugAction::Rev { rev } => print_rev(global, &rev).await,
+        DebugAction::PrLookup { rev } => print_pr_lookup(global, &rev).await,
     }
 }
 
-fn print_config() -> Result<()> {
-    let config = config::debug_load()?;
+fn load_config(global: &GlobalOpts) -> Result<Config> {
+    let fig = config::load_figment().merge(Serialized::defaults(global));
+    let config = config::extract(&fig)?;
+    config::validate(&config)?;
+    Ok(config)
+}
+
+fn print_config(global: &GlobalOpts) -> Result<()> {
+    let config = load_config(global)?;
     println!("{config:#?}");
     Ok(())
 }
 
-async fn check_auth() -> Result<()> {
-    let config = config::debug_load()?;
+async fn check_auth(global: &GlobalOpts) -> Result<()> {
+    let config = load_config(global)?;
     auth::resolve_token(&config).await?;
     println!("ok");
     Ok(())
 }
 
-async fn print_rev(rev: &str) -> Result<()> {
+async fn print_rev(global: &GlobalOpts, rev: &str) -> Result<()> {
+    let config = load_config(global)?;
     let jj = JjCli::new().await?;
 
     let CommitInfo {
@@ -52,11 +61,14 @@ async fn print_rev(rev: &str) -> Result<()> {
     let title_revset = jj::title_base_revset(rev, ancestor.as_deref());
     let default_title = jj.first_commit_description(&title_revset).await?;
 
-    let origin_url = jj.remote_url("origin").await?;
-    let upstream_url = jj.remote_url("upstream").await?;
+    let origin_url = jj.remote_url(&config.default_remote).await?;
+    let upstream_url = jj.remote_url(&config.upstream_remote).await?;
     let default_branch = jj.trunk_branch().await?;
     let default_branch_sha = match &default_branch {
-        Some(branch) => jj.remote_bookmark_sha(branch, "origin").await?,
+        Some(branch) => {
+            jj.remote_bookmark_sha(branch, &config.default_remote)
+                .await?
+        }
         None => None,
     };
 
@@ -81,13 +93,13 @@ async fn print_rev(rev: &str) -> Result<()> {
     Ok(())
 }
 
-async fn print_pr_lookup(rev: &str) -> Result<()> {
+async fn print_pr_lookup(global: &GlobalOpts, rev: &str) -> Result<()> {
+    let config = load_config(global)?;
     let jj = JjCli::new().await?;
-    let config = config::debug_load()?;
     let token = auth::resolve_token(&config).await?;
     let gh = OctocrabGh::new(&token)?;
 
-    let lookup = pr::resolve_pr_for_rev(&jj, &gh, rev).await?;
+    let lookup = pr::resolve_pr_for_rev(&jj, &gh, &config, rev).await?;
     let base = gh
         .lookup_base(
             &lookup.target.owner,

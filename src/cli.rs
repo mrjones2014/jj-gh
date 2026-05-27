@@ -17,19 +17,34 @@ pub struct Cli {
     pub command: Command,
 }
 
-#[derive(Debug, clap::Args)]
+#[derive(Debug, clap::Args, Serialize)]
 pub struct GlobalOpts {
     /// Increase log verbosity (repeat for more, e.g. `-vv`).
     #[arg(short = 'v', long = "verbose", action = clap::ArgAction::Count, global = true)]
+    #[serde(skip)]
     pub verbose: u8,
 
     /// Drop log level to `ERROR`.
     #[arg(short = 'q', long = "quiet", global = true, conflicts_with = "verbose")]
+    #[serde(skip)]
     pub quiet: bool,
 
     /// Set log level explicitly, overrides `-v` and `-q`.
     #[arg(long = "log-level", value_name = "LEVEL", global = true)]
+    #[serde(skip)]
     pub log_level: Option<LevelFilter>,
+
+    /// Git remote used for the user's own pushes and PR head lookups.
+    /// Overrides config `default_remote` (default: `origin`).
+    #[arg(long = "remote", value_name = "NAME", global = true)]
+    #[serde(rename = "default_remote", skip_serializing_if = "Option::is_none")]
+    pub remote: Option<String>,
+
+    /// Git remote used as the PR target in fork workflows. Overrides config
+    /// `upstream_remote` (default: `upstream`).
+    #[arg(long = "upstream-remote", value_name = "NAME", global = true)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub upstream_remote: Option<String>,
 }
 
 impl GlobalOpts {

@@ -36,6 +36,8 @@ Opinionated `jj` tools for working with GitHub from your terminal
 - `-v`, `--verbose` — Increase log verbosity (repeat for more, e.g. `-vv`)
 - `-q`, `--quiet` — Drop log level to `ERROR`
 - `--log-level <LEVEL>` — Set log level explicitly, overrides `-v` and `-q`
+- `--remote <NAME>` — Git remote used for the user's own pushes and PR head lookups. Overrides config `default_remote` (default: `origin`)
+- `--upstream-remote <NAME>` — Git remote used as the PR target in fork workflows. Overrides config `upstream_remote` (default: `upstream`)
 
 ## `jj-gh pr`
 

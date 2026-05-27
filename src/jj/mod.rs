@@ -97,17 +97,17 @@ pub trait Jj {
     /// Propagates jj failures.
     async fn git_import(&self) -> Result<()>;
 
-    /// Bookmarks that have a tracking branch on the `origin` remote, paired
-    /// with the commit id the *local* bookmark currently targets. Used to
-    /// scope GitHub PR lookups to branches the user has actually pushed and
-    /// to render PR badges against the local commit (even when the local
-    /// bookmark has diverged from the remote — e.g. local rebase without
-    /// push). Sorted by name, deduped.
+    /// Bookmarks that have a tracking branch on `remote`, paired with the
+    /// commit id the *local* bookmark currently targets. Used to scope GitHub
+    /// PR lookups to branches the user has actually pushed and to render PR
+    /// badges against the local commit (even when the local bookmark has
+    /// diverged from the remote — e.g. local rebase without push). Sorted by
+    /// name, deduped.
     ///
     /// # Errors
     ///
     /// Propagates jj errors.
-    async fn pushed_bookmarks(&self) -> Result<Vec<PushedBookmark>>;
+    async fn pushed_bookmarks(&self, remote: &str) -> Result<Vec<PushedBookmark>>;
 }
 
 /// Compose the revset used to compute the default PR title.

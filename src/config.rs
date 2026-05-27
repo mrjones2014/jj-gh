@@ -30,6 +30,8 @@ pub struct Config {
     pub askpass_timeout_secs: u64,
     pub gh_token: Option<SecretString>,
     pub default_base_branch: String,
+    pub default_remote: String,
+    pub upstream_remote: String,
     pub template_path: Option<PathBuf>,
     pub draft: bool,
     pub auto_merge: bool,
@@ -46,6 +48,8 @@ impl Default for Config {
             askpass_timeout_secs: 20,
             gh_token: None,
             default_base_branch: "master".into(),
+            default_remote: "origin".into(),
+            upstream_remote: "upstream".into(),
             template_path: None,
             draft: false,
             auto_merge: false,
@@ -78,18 +82,6 @@ pub fn load_figment() -> Figment {
         fig = fig.merge(JjConfProvider::from_file(path));
     }
     fig.merge(Serialized::defaults(EnvOverlay::from_env()))
-}
-
-/// Discover config layers and merge them into a [`Config`].
-///
-/// # Errors
-///
-/// Returns an error if any layer is malformed or fails serde extraction, or if
-/// `pr_fetch_bookmark_template` references an unknown placeholder.
-pub fn debug_load() -> Result<Config> {
-    let config: Config = extract(&load_figment())?;
-    validate(&config)?;
-    Ok(config)
 }
 
 /// Validate cross-field invariants on a merged [`Config`].
@@ -267,6 +259,8 @@ fn extract_jj_gh_subtree(contents: &str) -> Result<Option<toml::Table>, SourceEr
 struct DefaultsOverlay {
     askpass_timeout_secs: u64,
     default_base_branch: String,
+    default_remote: String,
+    upstream_remote: String,
     draft: bool,
     auto_merge: bool,
     auto_merge_method: AutoMergeMethod,
@@ -280,6 +274,8 @@ impl DefaultsOverlay {
             auto_merge,
             auto_merge_method,
             default_base_branch,
+            default_remote,
+            upstream_remote,
             draft,
             nerdfonts,
             editor: _,
@@ -291,6 +287,8 @@ impl DefaultsOverlay {
         Self {
             askpass_timeout_secs,
             default_base_branch,
+            default_remote,
+            upstream_remote,
             draft,
             auto_merge,
             auto_merge_method,
