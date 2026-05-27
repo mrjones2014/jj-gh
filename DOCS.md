@@ -45,14 +45,16 @@ Commands to work with PRs
 
 ###### **Subcommands:**
 
-- `create` — Open your preferred editor to create a PR from a revision. Opens your editor to a markdown file where you can write the PR description, and set PR metadata like title, labels, auto-merge, etc. via the markdown frontmatter. This supports stacked PRs; by default the base branch is set to the closest ancestor bookmark if one exists, otherwise `trunk()`
-- `fetch` — Fetch a pull request into a local bookmark. This command accepts either a revision ID or a PR number. If given a revision ID, the PR number will be looked up via the API. Requires a colocated git repository; the special `refs/pull/123/head` ref is fetched via `git` because `jj` cannot yet fetch arbitrary refs
-- `auto-merge` — Enable auto-merge on a PR. Accepts either a PR number or a revision; with a revision, the PR is looked up by the rev's local bookmark. Fails if the repo does not allow auto-merge
-- `log` — Like `jj log`, but injects PR metadata (number, CI status, URL) as template aliases keyed by `commit_id` and renders inline PR info in the default template. Any arguments after `--` are forwarded to the underlying `jj log` invocation, e.g. `jj-gh pr log -- -r 'mine()'`
+- `create` — Open your preferred editor to create a PR from a revision
+- `fetch` — Fetch a pull request into a local bookmark
+- `auto-merge` — Enable auto-merge on a PR
+- `log` — Like `jj log`, but injects PR metadata (e.g. number, CI status, URL)
 
 ## `jj-gh pr create`
 
-Open your preferred editor to create a PR from a revision. Opens your editor to a markdown file where you can write the PR description, and set PR metadata like title, labels, auto-merge, etc. via the markdown frontmatter. This supports stacked PRs; by default the base branch is set to the closest ancestor bookmark if one exists, otherwise `trunk()`
+Open your preferred editor to create a PR from a revision.
+
+Opens your editor to a markdown file where you can write the PR description, and set PR metadata like title, labels, auto-merge, etc. via the markdown frontmatter. This supports stacked PRs; by default the base branch is set to the closest ancestor bookmark if one exists, otherwise `trunk()`.
 
 **Usage:** `jj-gh pr create [OPTIONS] <REV>`
 
@@ -81,7 +83,9 @@ Open your preferred editor to create a PR from a revision. Opens your editor to 
 
 ## `jj-gh pr fetch`
 
-Fetch a pull request into a local bookmark. This command accepts either a revision ID or a PR number. If given a revision ID, the PR number will be looked up via the API. Requires a colocated git repository; the special `refs/pull/123/head` ref is fetched via `git` because `jj` cannot yet fetch arbitrary refs.
+Fetch a pull request into a local bookmark.
+
+This command accepts either a revision ID or a PR number. If given a revision ID, the PR number will be looked up via the API. Requires a colocated git repository; the special `refs/pull/123/head` ref is fetched via `git` because `jj` cannot yet fetch arbitrary refs.
 
 See: <https://github.com/jj-vcs/jj/issues/4388>
 
@@ -102,7 +106,9 @@ See: <https://github.com/jj-vcs/jj/issues/4388>
 
 ## `jj-gh pr auto-merge`
 
-Enable auto-merge on a PR. Accepts either a PR number or a revision; with a revision, the PR is looked up by the rev's local bookmark. Fails if the repo does not allow auto-merge
+Enable auto-merge on a PR.
+
+Accepts either a PR number or a revision; with a revision, the PR is looked up by the rev's local bookmark. Fails if the repo does not allow auto-merge.
 
 **Usage:** `jj-gh pr auto-merge [OPTIONS] <PR_NUM|REV>`
 
@@ -123,7 +129,9 @@ Enable auto-merge on a PR. Accepts either a PR number or a revision; with a revi
 
 ## `jj-gh pr log`
 
-Like `jj log`, but injects PR metadata (number, CI status, URL) as template aliases keyed by `commit_id` and renders inline PR info in the default template. Any arguments after `--` are forwarded to the underlying `jj log` invocation, e.g. `jj-gh pr log -- -r 'mine()'`.
+Like `jj log`, but injects PR metadata (e.g. number, CI status, URL).
+
+This works by injecting template aliases keyed by `commit_id` and renders inline PR info in a temporary config file added via `jj`'s `--config-file` argument. Any arguments after `--` are forwarded to the underlying `jj log` invocation, e.g. `jj-gh pr log -- -r 'mine()'`. A default template that mirror's `jj`'s default template is provided, but you may provide your own with the `-T|--template` argument and use the injected template aliases.
 
 The following template aliases are available for use if you pass your own template instead of using the default:
 
