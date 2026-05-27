@@ -129,8 +129,19 @@
         };
       in
       {
-        packages.default = jj-gh;
-        packages.gen-docs = gen-docs;
+        packages = {
+          default = jj-gh;
+          inherit gen-docs;
+          udeps = craneLibNightly.mkCargoDerivation (
+            commonArgs
+            // {
+              cargoArtifacts = cargoArtifactsNightly;
+              pnameSuffix = "-udeps";
+              buildPhaseCargoCommand = "cargo udeps --workspace --all-targets --locked";
+              nativeBuildInputs = commonArgs.nativeBuildInputs ++ [ pkgs.cargo-udeps ];
+            }
+          );
+        };
         apps = {
           default = flake-utils.lib.mkApp { drv = jj-gh; };
           docs = flake-utils.lib.mkApp {
@@ -174,15 +185,6 @@
               cargoNextestExtraArgs = "--workspace";
               partitions = 1;
               partitionType = "count";
-            }
-          );
-          udeps = craneLibNightly.mkCargoDerivation (
-            commonArgs
-            // {
-              cargoArtifacts = cargoArtifactsNightly;
-              pnameSuffix = "-udeps";
-              buildPhaseCargoCommand = "cargo udeps --workspace --all-targets --locked";
-              nativeBuildInputs = commonArgs.nativeBuildInputs ++ [ pkgs.cargo-udeps ];
             }
           );
           treefmt = treefmtEval.config.build.check self;
