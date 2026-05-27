@@ -36,7 +36,7 @@
     "github-graphql-schema": {
       "flake": false,
       "locked": {
-        "narHash": "sha256-yqeZRMfUZtwGgjJJAPl5h2ZB0D3Ifbjt/saeWoxiZAo=",
+        "narHash": "sha256-CLGRLGtuHRm6lhA+miovovRg+2f3XjOPjGOlB1+4F9E=",
         "type": "file",
         "url": "https://docs.github.com/public/fpt/schema.docs.graphql"
       },
