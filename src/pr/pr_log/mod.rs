@@ -18,6 +18,7 @@ use crate::{
 };
 use anyhow::{Context, Result, anyhow};
 use serde::Serialize;
+use std::collections::HashMap;
 use std::io::Write;
 use tempfile::NamedTempFile;
 use tokio::process::Command;
@@ -63,10 +64,15 @@ pub async fn run(args: &PrLogArgs, config: &Config, gh: &impl Gh, jj: &impl Jj) 
         .await?
         .ok_or_else(|| anyhow!("origin remote is not configured"))?;
     let (owner, repo) = git::url::parse_owner_repo(&origin_url)?;
-    let branches = jj.pushed_bookmarks().await?;
-    let prs = gh.local_pulls(&owner, &repo, &branches).await?;
+    let bookmarks = jj.pushed_bookmarks().await?;
+    let branch_to_local: HashMap<String, String> = bookmarks
+        .iter()
+        .map(|b| (b.name.clone(), b.local_commit_id.clone()))
+        .collect();
+    let names: Vec<String> = bookmarks.into_iter().map(|b| b.name).collect();
+    let prs = gh.local_pulls(&owner, &repo, &names).await?;
 
-    let config_toml = render_config(&prs, config);
+    let config_toml = render_config(&prs, &branch_to_local, config);
     let mut tmp = NamedTempFile::with_suffix(".toml").context("creating temp config file")?;
     tmp.write_all(config_toml.as_bytes())
         .context("writing template-alias config")?;
@@ -109,14 +115,22 @@ fn user_set_template(args: &[String]) -> bool {
 /// `pr_url` / `pr_ci_status` as raw String aliases for users who want to
 /// build custom templates — they work in direct contexts even if they can't
 /// be re-chained through `if()`.
-fn render_config(prs: &[PrWithCiStatus], config: &Config) -> String {
-    let number = if_chain_alias(prs, |pr| format!(r#""{}""#, pr.number));
-    let url = if_chain_alias(prs, |pr| format!(r#""{}""#, escape_toml_dq(&pr.url)));
-    let status = if_chain_alias(prs, |pr| format!(r#""{}""#, ci_status_str(pr.ci_status)));
-    let merge_status = if_chain_alias(prs, |pr| {
+fn render_config(
+    prs: &[PrWithCiStatus],
+    branch_to_local: &HashMap<String, String>,
+    config: &Config,
+) -> String {
+    let number = if_chain_alias(prs, branch_to_local, |pr| format!(r#""{}""#, pr.number));
+    let url = if_chain_alias(prs, branch_to_local, |pr| {
+        format!(r#""{}""#, escape_toml_dq(&pr.url))
+    });
+    let status = if_chain_alias(prs, branch_to_local, |pr| {
+        format!(r#""{}""#, ci_status_str(pr.ci_status))
+    });
+    let merge_status = if_chain_alias(prs, branch_to_local, |pr| {
         format!(r#""{}""#, merge_status(pr, config).unwrap_or_default())
     });
-    let meta = if_chain_alias(prs, |pr| render_pr_meta_body(pr, config));
+    let meta = if_chain_alias(prs, branch_to_local, |pr| render_pr_meta_body(pr, config));
 
     format!(
         r#"[template-aliases]
@@ -214,15 +228,29 @@ fn ci_status_icon_label(pr: &PrWithCiStatus) -> Option<&'static str> {
 
 /// Build a nested `if(commit_id.short(40) == "<sha>", <body>, ...)` chain that
 /// terminates in the empty string. Generated PR SHAs are 40-char hex (SHA-1).
-fn if_chain_alias<F>(prs: &[PrWithCiStatus], render: F) -> String
+///
+/// Each arm keys on the **local** bookmark target (from `branch_to_local`)
+/// rather than `pr.head_sha`, so the badge renders on the commit the user
+/// sees locally, even when they've rebased/squashed/etc. without pushing and the local
+/// commit no longer matches the PR's remote head. Falls back to
+/// `pr.head_sha` when no matching local bookmark is found (defensive: this
+/// shouldn't happen since the PR was returned by a branch-name search
+/// scoped to `branch_to_local`'s keys).
+fn if_chain_alias<F>(
+    prs: &[PrWithCiStatus],
+    branch_to_local: &HashMap<String, String>,
+    render: F,
+) -> String
 where
     F: Fn(&PrWithCiStatus) -> String,
 {
     let mut expr = String::from(r#""""#);
     for pr in prs.iter().rev() {
+        let sha = branch_to_local
+            .get(&pr.head_ref_name)
+            .map_or(pr.head_sha.as_str(), String::as_str);
         expr = format!(
             r#"if(commit_id.short(40) == "{sha}", {body}, {expr})"#,
-            sha = pr.head_sha,
             body = render(pr),
         );
     }
@@ -255,6 +283,7 @@ mod tests {
             number,
             url: format!("https://github.com/o/r/pull/{number}"),
             title: format!("PR {number}"),
+            head_ref_name: format!("branch-{number}"),
             head_sha: sha.into(),
             is_draft: false,
             is_in_merge_queue: false,
@@ -275,6 +304,7 @@ mod tests {
             number,
             url: format!("https://github.com/o/r/pull/{number}"),
             title: format!("PR {number}"),
+            head_ref_name: format!("branch-{number}"),
             head_sha: number.to_string(),
             is_draft: false,
             ci_status: CiStatus::Success,
@@ -286,7 +316,8 @@ mod tests {
 
     #[test]
     fn if_chain_empty_returns_empty_string_literal() {
-        let expr = if_chain_alias::<fn(&PrWithCiStatus) -> String>(&[], |_| String::new());
+        let map = HashMap::new();
+        let expr = if_chain_alias::<fn(&PrWithCiStatus) -> String>(&[], &map, |_| String::new());
         assert_eq!(expr, r#""""#);
     }
 
@@ -304,10 +335,53 @@ mod tests {
                 CiStatus::None,
             ),
         ];
-        let expr = if_chain_alias(&prs, |pr| format!(r#""{}""#, pr.number));
+        let map: HashMap<String, String> = prs
+            .iter()
+            .map(|p| (p.head_ref_name.clone(), p.head_sha.clone()))
+            .collect();
+        let expr = if_chain_alias(&prs, &map, |pr| format!(r#""{}""#, pr.number));
         assert_eq!(
             expr,
             r#"if(commit_id.short(40) == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "1", if(commit_id.short(40) == "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "2", ""))"#
+        );
+    }
+
+    #[test]
+    fn if_chain_uses_local_sha_when_bookmark_diverges() {
+        // Regression for #74: PR's remote head_sha is stale (pre-rebase);
+        // the local bookmark points at a different commit. The arm must key
+        // on the local commit so the badge appears on the user's current
+        // working state.
+        let pr = pr(
+            "remote_remote_remote_remote_remote_remote",
+            42,
+            CiStatus::Success,
+        );
+        let local_sha = "local0_local0_local0_local0_local0_local0";
+        let mut map = HashMap::new();
+        map.insert(pr.head_ref_name.clone(), local_sha.to_string());
+        let expr = if_chain_alias(&[pr], &map, |pr| format!(r#""{}""#, pr.number));
+        assert!(
+            expr.contains(&format!(r#"commit_id.short(40) == "{local_sha}""#)),
+            "if-chain should key on local sha, got: {expr}"
+        );
+        assert!(
+            !expr.contains("remote_remote_remote_remote_remote_remote"),
+            "if-chain should not reference stale remote sha, got: {expr}"
+        );
+    }
+
+    #[test]
+    fn if_chain_falls_back_to_remote_sha_when_no_local_mapping() {
+        let pr = pr(
+            "cccccccccccccccccccccccccccccccccccccccc",
+            7,
+            CiStatus::None,
+        );
+        let map = HashMap::new();
+        let expr = if_chain_alias(&[pr], &map, |pr| format!(r#""{}""#, pr.number));
+        assert!(
+            expr.contains(r#"commit_id.short(40) == "cccccccccccccccccccccccccccccccccccccccc""#)
         );
     }
 
@@ -332,10 +406,17 @@ mod tests {
         assert!(!user_set_template(&["-r".into(), "@-".into()]));
     }
 
+    fn local_map_from(prs: &[PrWithCiStatus]) -> HashMap<String, String> {
+        prs.iter()
+            .map(|p| (p.head_ref_name.clone(), p.head_sha.clone()))
+            .collect()
+    }
+
     #[test]
     fn config_contains_alias_for_each_pr() {
         let prs = vec![pr("a".repeat(40).as_str(), 42, CiStatus::Success)];
-        let cfg = render_config(&prs, &Config::default());
+        let map = local_map_from(&prs);
+        let cfg = render_config(&prs, &map, &Config::default());
         assert!(
             cfg.contains(r#"commit_id.short(40) == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa""#)
         );
@@ -348,15 +429,18 @@ mod tests {
     #[test]
     fn default_template_shows_merge_metadata() {
         let prs = vec![pr_merge_status(1, true, false, false)];
-        let cfg = render_config(&prs, &Config::default());
+        let map = local_map_from(&prs);
+        let cfg = render_config(&prs, &map, &Config::default());
         assert!(cfg.contains(" merged"));
 
         let prs = vec![pr_merge_status(2, false, true, false)];
-        let cfg = render_config(&prs, &Config::default());
+        let map = local_map_from(&prs);
+        let cfg = render_config(&prs, &map, &Config::default());
         assert!(cfg.contains(" in merge queue"), "{}", cfg);
 
         let prs = vec![pr_merge_status(3, false, false, true)];
-        let cfg = render_config(&prs, &Config::default());
+        let map = local_map_from(&prs);
+        let cfg = render_config(&prs, &map, &Config::default());
         assert!(cfg.contains("󰾨 auto-merge enabled"));
     }
 

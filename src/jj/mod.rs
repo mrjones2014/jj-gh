@@ -19,6 +19,16 @@ pub struct CommitInfo {
     pub bookmarks: Vec<String>,
 }
 
+/// A local bookmark tracked on the `origin` remote, paired with the commit
+/// the *local* side currently points at. The local commit may diverge from
+/// the remote target (e.g. user rebased without pushing).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct PushedBookmark {
+    pub name: String,
+    /// 40-char hex commit id of the local bookmark target.
+    pub local_commit_id: String,
+}
+
 pub trait Jj {
     /// Resolve a single revision into commit metadata.
     ///
@@ -87,14 +97,17 @@ pub trait Jj {
     /// Propagates jj failures.
     async fn git_import(&self) -> Result<()>;
 
-    /// Names of bookmarks that have a tracking branch on the `origin` remote.
-    /// Used to scope GitHub PR lookups to branches the user has actually
-    /// pushed. Sorted, deduped, with empty entries removed.
+    /// Bookmarks that have a tracking branch on the `origin` remote, paired
+    /// with the commit id the *local* bookmark currently targets. Used to
+    /// scope GitHub PR lookups to branches the user has actually pushed and
+    /// to render PR badges against the local commit (even when the local
+    /// bookmark has diverged from the remote — e.g. local rebase without
+    /// push). Sorted by name, deduped.
     ///
     /// # Errors
     ///
     /// Propagates jj errors.
-    async fn pushed_bookmarks(&self) -> Result<Vec<String>>;
+    async fn pushed_bookmarks(&self) -> Result<Vec<PushedBookmark>>;
 }
 
 /// Compose the revset used to compute the default PR title.

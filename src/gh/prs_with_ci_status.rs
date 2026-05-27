@@ -62,8 +62,15 @@ pub struct PrWithCiStatus {
     pub url: String,
     /// PR title.
     pub title: String,
-    /// SHA of the commit at the head of the PR's branch. Matches a jj
-    /// `commit_id` in colocated repos.
+    /// Name of the branch the PR is opened from (the head ref). Used to map
+    /// the PR onto the local bookmark with the same name, so the badge
+    /// renders on the local commit even when it has diverged from the remote
+    /// head SHA.
+    pub head_ref_name: String,
+    /// SHA of the commit at the head of the PR's branch on the remote. May
+    /// not match the local bookmark target if the local bookmark has diverged
+    /// from the remote PR head (e.g. if you rebase the PR on `trunk()` but have
+    /// not pushed it to the remote yet).
     pub head_sha: String,
     /// Whether the PR is a draft.
     pub is_draft: bool,
@@ -98,6 +105,7 @@ impl From<prs_with_ci_status_internal::ResponseData> for Vec<PrWithCiStatus> {
                      number,
                      url,
                      title,
+                     head_ref_name,
                      head_ref_oid,
                      is_draft,
                      merged,
@@ -117,6 +125,7 @@ impl From<prs_with_ci_status_internal::ResponseData> for Vec<PrWithCiStatus> {
                     merged,
                     is_draft,
                     is_in_merge_queue,
+                    head_ref_name,
                     head_sha: head_ref_oid,
                     ci_status: status_check_rollup.into(),
                     auto_merge_enabled: auto_merge_request.is_some_and(|r| r.enabled_at.is_some()),
