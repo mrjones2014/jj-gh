@@ -3,6 +3,7 @@
 mod create_pr;
 mod enable_auto_merge;
 mod enqueue_pr;
+mod find_open_pr;
 mod get_pr;
 mod lookup_base;
 mod prs_with_ci_status;
@@ -13,6 +14,9 @@ pub use enable_auto_merge::{
     PullRequestMergeMethod,
 };
 pub use enqueue_pr::{EnqueuePrInternal, EnqueuePrResponseData, EnqueuePrVariables};
+pub use find_open_pr::{
+    FindOpenPrInternal, FindOpenPrResponseData, FindOpenPrVariables, PullRequestState,
+};
 pub use get_pr::{GetPrInternal, GetPrResponseData, GetPrVariables};
 pub use lookup_base::{LookupBaseInternal, LookupBaseResponseData, LookupBaseVariables};
 pub use prs_with_ci_status::{

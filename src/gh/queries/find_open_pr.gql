@@ -1,0 +1,22 @@
+query FindOpenPrInternal(
+  $owner: String!
+  $name: String!
+  $headRefName: String!
+) {
+  repository(owner: $owner, name: $name) {
+    pullRequests(headRefName: $headRefName, states: [OPEN], first: 20) {
+      nodes {
+        number
+        url
+        title
+        state
+        headRepository {
+          owner {
+            __typename
+            login
+          }
+        }
+      }
+    }
+  }
+}
