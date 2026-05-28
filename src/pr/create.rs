@@ -112,10 +112,10 @@ where
     let existing_branch = info.bookmarks.first().cloned();
 
     let origin_url = jj
-        .remote_url("origin")
+        .remote_url(&config.default_remote)
         .await?
-        .ok_or_else(|| anyhow!("origin remote is not configured"))?;
-    let upstream_url = jj.remote_url("upstream").await?;
+        .ok_or_else(|| anyhow!("`{}` remote is not configured", config.default_remote))?;
+    let upstream_url = jj.remote_url(&config.upstream_remote).await?;
     let target = remote::target(&origin_url, upstream_url.as_deref())?;
 
     // Pre-flight only when we already have a bookmark; an unpushed rev can't have

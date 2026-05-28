@@ -90,9 +90,9 @@ pub async fn run_with<J: Jj, G: Gh, GO: GitOps>(
     ensure_colocated(workspace_root)?;
 
     let origin_url = jj
-        .remote_url("origin")
+        .remote_url(&config.default_remote)
         .await?
-        .ok_or_else(|| anyhow!("origin remote is not configured"))?;
+        .ok_or_else(|| anyhow!("`{}` remote is not configured", config.default_remote))?;
     let (owner, repo) = parse_owner_repo(&origin_url)?;
 
     let pr = gh.get_pr(&owner, &repo, args.pr).await?;
@@ -114,7 +114,8 @@ pub async fn run_with<J: Jj, G: Gh, GO: GitOps>(
         ));
     }
 
-    git.fetch_pr(args.pr, &bookmark, args.force).await?;
+    git.fetch_pr(&config.default_remote, args.pr, &bookmark, args.force)
+        .await?;
     jj.git_import().await?;
 
     log::info!("PR #{}: {}", pr.number, pr.title);
@@ -138,6 +139,7 @@ mod tests {
     struct FakeJj {
         workspace_root: PathBuf,
         origin: Option<String>,
+        expected_remote: String,
         import_calls: Mutex<u32>,
     }
 
@@ -152,7 +154,7 @@ mod tests {
             unimplemented!("fetch does not call first_commit_description")
         }
         async fn remote_url(&self, name: &str) -> Result<Option<String>> {
-            assert_eq!(name, "origin");
+            assert_eq!(name, self.expected_remote);
             Ok(self.origin.clone())
         }
         async fn remote_bookmark_sha(&self, _: &str, _: &str) -> Result<Option<String>> {
@@ -171,7 +173,7 @@ mod tests {
             *self.import_calls.lock().unwrap() += 1;
             Ok(())
         }
-        async fn pushed_bookmarks(&self) -> Result<Vec<crate::jj::PushedBookmark>> {
+        async fn pushed_bookmarks(&self, _remote: &str) -> Result<Vec<crate::jj::PushedBookmark>> {
             unimplemented!("fetch does not call pushed_bookmarks")
         }
     }
@@ -236,6 +238,7 @@ mod tests {
 
     #[derive(Debug, Clone)]
     struct FetchCall {
+        remote: String,
         pr: u64,
         bookmark: String,
         force: bool,
@@ -250,8 +253,9 @@ mod tests {
         async fn local_bookmark_exists(&self, _name: &str) -> Result<bool> {
             Ok(self.exists)
         }
-        async fn fetch_pr(&self, pr: u64, bookmark: &str, force: bool) -> Result<()> {
+        async fn fetch_pr(&self, remote: &str, pr: u64, bookmark: &str, force: bool) -> Result<()> {
             self.fetches.borrow_mut().push(FetchCall {
+                remote: remote.to_string(),
                 pr,
                 bookmark: bookmark.to_string(),
                 force,
@@ -296,6 +300,7 @@ mod tests {
         FakeJj {
             workspace_root: dir.path().to_path_buf(),
             origin: origin.map(str::to_string),
+            expected_remote: "origin".into(),
             import_calls: Mutex::new(0),
         }
     }
@@ -322,10 +327,34 @@ mod tests {
 
         let calls = git.fetches.borrow();
         assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].remote, "origin");
         assert_eq!(calls[0].pr, 1234);
         assert_eq!(calls[0].bookmark, "pr-1234/feature/foo");
         assert!(!calls[0].force);
         assert_eq!(*jj.import_calls.lock().unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn config_default_remote_propagates_to_jj_and_git() {
+        let dir = colocated_workspace();
+        let mut jj = jj_for(&dir, Some("git@github.com:o/r.git"));
+        jj.expected_remote = "fork".into();
+        let gh = gh_for(details(), "o", "r");
+        let git = FakeGit {
+            exists: false,
+            fetches: RefCell::new(vec![]),
+        };
+        let config = Config {
+            default_remote: "fork".into(),
+            ..Config::default()
+        };
+
+        run_with(&jj, &gh, &git, &config, &args(1234, None, false))
+            .await
+            .unwrap();
+
+        let calls = git.fetches.borrow();
+        assert_eq!(calls[0].remote, "fork");
     }
 
     #[tokio::test]
@@ -445,7 +474,8 @@ mod tests {
             .await
             .unwrap_err();
         assert!(
-            err.to_string().contains("origin remote is not configured"),
+            err.to_string()
+                .contains("`origin` remote is not configured"),
             "msg: {err}"
         );
     }

@@ -192,8 +192,8 @@ impl Jj for JjCli {
         Ok(())
     }
 
-    async fn pushed_bookmarks(&self) -> Result<Vec<PushedBookmark>> {
-        // `jj bookmark list --tracked --remote origin` emits one entry per
+    async fn pushed_bookmarks(&self, remote: &str) -> Result<Vec<PushedBookmark>> {
+        // `jj bookmark list --tracked --remote <remote>` emits one entry per
         // local/remote side of each tracked bookmark; filtering on
         // `if(remote, ...)` keeps only the local-side row, whose
         // `normal_target.commit_id()` is the local commit (which may diverge
@@ -211,7 +211,7 @@ impl Jj for JjCli {
             "list",
             "--tracked",
             "--remote",
-            "origin",
+            remote,
             "-T",
             &template,
         ])

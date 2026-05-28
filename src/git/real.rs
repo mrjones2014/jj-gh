@@ -10,12 +10,12 @@ pub trait GitOps {
     /// Propagates gix failures.
     async fn local_bookmark_exists(&self, name: &str) -> Result<bool>;
 
-    /// Fetch `refs/pull/<pr>/head` from `origin` into `refs/heads/<bookmark>`.
+    /// Fetch `refs/pull/<pr>/head` from `remote` into `refs/heads/<bookmark>`.
     ///
     /// # Errors
     ///
     /// Propagates gix failures.
-    async fn fetch_pr(&self, pr: u64, bookmark: &str, force: bool) -> Result<()>;
+    async fn fetch_pr(&self, remote: &str, pr: u64, bookmark: &str, force: bool) -> Result<()>;
 }
 
 /// Production [`GitOps`] backed by a shared `gix::Repository` discovered
@@ -37,12 +37,12 @@ impl GitOps for RealGit {
         Ok(self.repo.try_find_reference(full.as_str())?.is_some())
     }
 
-    async fn fetch_pr(&self, pr: u64, bookmark: &str, force: bool) -> Result<()> {
+    async fn fetch_pr(&self, remote: &str, pr: u64, bookmark: &str, force: bool) -> Result<()> {
         let prefix = if force { "+" } else { "" };
         let refspec = format!("{prefix}refs/pull/{pr}/head:refs/heads/{bookmark}");
         let remote = self
             .repo
-            .find_remote("origin")?
+            .find_remote(remote)?
             .with_refspecs([refspec.as_bytes()], gix::remote::Direction::Fetch)?;
         let conn = remote.connect(gix::remote::Direction::Fetch)?;
         let prep = conn.prepare_fetch(

@@ -60,11 +60,11 @@ pub struct PrLogArgs {
 
 pub async fn run(args: &PrLogArgs, config: &Config, gh: &impl Gh, jj: &impl Jj) -> Result<()> {
     let origin_url = jj
-        .remote_url("origin")
+        .remote_url(&config.default_remote)
         .await?
-        .ok_or_else(|| anyhow!("origin remote is not configured"))?;
+        .ok_or_else(|| anyhow!("`{}` remote is not configured", config.default_remote))?;
     let (owner, repo) = git::url::parse_owner_repo(&origin_url)?;
-    let bookmarks = jj.pushed_bookmarks().await?;
+    let bookmarks = jj.pushed_bookmarks(&config.default_remote).await?;
     let branch_to_local: HashMap<String, String> = bookmarks
         .iter()
         .map(|b| (b.name.clone(), b.local_commit_id.clone()))
