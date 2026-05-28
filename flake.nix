@@ -101,6 +101,34 @@
             doCheck = false;
           }
         );
+        schemaArtifacts = craneLib.buildDepsOnly (
+          commonArgs
+          // {
+            pname = "print-config-schema-deps";
+            cargoExtraArgs = "--package print-config-schema";
+          }
+        );
+        print-config-schema = craneLib.buildPackage (
+          commonArgs
+          // {
+            cargoArtifacts = schemaArtifacts;
+            pname = "print-config-schema";
+            cargoExtraArgs = "--package print-config-schema";
+            doCheck = false;
+          }
+        );
+        hmModuleSettingsOptsJson =
+          let
+            mod = (import ./nix/hm-module.nix self) {
+              config = { };
+              inherit (pkgs) lib;
+              inherit pkgs;
+            };
+            names = builtins.attrNames mod.options.programs.jujutsu.gh.settings;
+          in
+          pkgs.writeText "hm-module-settings-opts.json" (
+            builtins.toJSON (builtins.sort builtins.lessThan names)
+          );
         treefmtEval = treefmt-nix.lib.evalModule pkgs (import ./nix/treefmt.nix { inherit rustToolchain; });
         gen-docs-app = pkgs.writeShellApplication {
           name = "gen-docs";
@@ -213,6 +241,30 @@
                   exit 1
                 fi
                 python3 ${./graphql-validate.py} ${github-graphql-schema}/schema.graphql "''${docs[@]}"
+                touch $out
+              '';
+          hm-module-schema =
+            pkgs.runCommand "hm-module-schema"
+              {
+                nativeBuildInputs = [
+                  pkgs.jq
+                  pkgs.delta
+                  pkgs.util-linux
+                ];
+              }
+              ''
+                ${print-config-schema}/bin/print-config-schema > schema.json
+                jq -r '.properties | keys[]' schema.json | sort > rust-fields.txt
+                jq -r '.[]' ${hmModuleSettingsOptsJson} | sort > nix-fields.txt
+                # `script` fakes a TTY so delta emits ANSI colors even though
+                # nix's builder pipes stdout to a log file.
+                if ! script -qec "delta --paging=never rust-fields.txt nix-fields.txt" /dev/null; then
+                  echo "" >&2
+                  echo "ERROR: jj-gh Config struct fields drifted from hm-module.nix settings options." >&2
+                  echo "  left  = Rust Config field names (tools/print-config-schema)" >&2
+                  echo "  right = nix/hm-module.nix settings options" >&2
+                  exit 1
+                fi
                 touch $out
               '';
           docs =
