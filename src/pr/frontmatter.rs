@@ -46,7 +46,7 @@ impl Frontmatter {
         let yaml = serde_yml::to_string(self).context("could not serialize frontmatter")?;
         let body = body.trim_start_matches('\n');
         let body = if body.is_empty() { "\n" } else { body };
-        Ok(format!("---\n{yaml}---\n\n{body}"))
+        Ok(format!("---\n{yaml}\n---\n\n{body}"))
     }
 
     /// Parse a frontmatter-prefixed markdown buffer back into `(meta, body)`.
