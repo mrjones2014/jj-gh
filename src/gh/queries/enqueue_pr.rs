@@ -1,7 +1,7 @@
 #[derive(graphql_client::GraphQLQuery)]
 #[graphql(
     schema_path = "src/gh/github.graphql",
-    query_path = "src/gh/enqueue_pr.gql"
+    query_path = "src/gh/queries/enqueue_pr.gql"
 )]
 pub struct EnqueuePrInternal;
 

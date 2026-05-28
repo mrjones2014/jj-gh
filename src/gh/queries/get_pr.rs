@@ -6,7 +6,7 @@ type URI = String;
 #[derive(graphql_client::GraphQLQuery)]
 #[graphql(
     schema_path = "src/gh/github.graphql",
-    query_path = "src/gh/get_pr.gql"
+    query_path = "src/gh/queries/get_pr.gql"
 )]
 pub struct GetPrInternal;
 

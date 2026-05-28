@@ -3,22 +3,19 @@
 use super::{BaseLookup, CreatePrRequest, Gh, PrCreated, PrDetails, PrSummary};
 use crate::{
     config::AutoMergeMethod,
-    gh::{
-        create_pr::{CreatePrInternal, CreatePrVariables},
-        enable_auto_merge::{
-            EnableAutoMergeInternal, EnableAutoMergeVariables, PullRequestMergeMethod,
-        },
-        enqueue_pr::{EnqueuePrInternal, EnqueuePrVariables},
-        get_pr::{GetPrInternal, GetPrVariables},
-        lookup_base::{LookupBaseInternal, LookupBaseVariables},
-        prs_with_ci_status::{PrWithCiStatus, PrsWithCiStatusResponseData},
+    gh::queries::{
+        CreatePrInternal, CreatePrResponseData, CreatePrVariables, EnableAutoMergeInternal,
+        EnableAutoMergeResponseData, EnableAutoMergeVariables, EnqueuePrInternal,
+        EnqueuePrResponseData, EnqueuePrVariables, GetPrInternal, GetPrResponseData,
+        GetPrVariables, LookupBaseInternal, LookupBaseResponseData, LookupBaseVariables,
+        PrWithCiStatus, PrsWithCiStatusInternal, PrsWithCiStatusResponseData,
+        PrsWithCiStatusVariables, PullRequestMergeMethod,
     },
 };
 use anyhow::{Context, Result, anyhow};
 use graphql_client::GraphQLQuery;
 use octocrab::{Octocrab, params};
 use secrecy::{ExposeSecret, SecretString};
-use serde_json::json;
 
 /// Production [`Gh`] impl wrapping an authenticated `octocrab` client.
 pub struct OctocrabGh {
@@ -76,7 +73,7 @@ impl Gh for OctocrabGh {
             branch_qualified_name: format!("refs/heads/{branch}"),
         };
         let body = LookupBaseInternal::build_query(vars);
-        let data: crate::gh::lookup_base::LookupBaseResponseData = self
+        let data: LookupBaseResponseData = self
             .octo
             .graphql(&body)
             .await
@@ -101,7 +98,7 @@ impl Gh for OctocrabGh {
             draft: req.draft,
         };
         let body = CreatePrInternal::build_query(vars);
-        let data: crate::gh::create_pr::CreatePrResponseData = self
+        let data: CreatePrResponseData = self
             .octo
             .graphql(&body)
             .await
@@ -176,7 +173,7 @@ impl Gh for OctocrabGh {
             number: i64::try_from(number).context("PR number out of range")?,
         };
         let body = GetPrInternal::build_query(vars);
-        let data: crate::gh::get_pr::GetPrResponseData = self
+        let data: GetPrResponseData = self
             .octo
             .graphql(&body)
             .await
@@ -215,7 +212,7 @@ impl Gh for OctocrabGh {
             };
             let body = EnqueuePrInternal::build_query(vars);
             self.octo
-                .graphql::<crate::gh::enqueue_pr::EnqueuePrResponseData>(&body)
+                .graphql::<EnqueuePrResponseData>(&body)
                 .await
                 .map_err(humanize)
                 .context("enqueuing PR for merge")?;
@@ -226,7 +223,7 @@ impl Gh for OctocrabGh {
             };
             let body = EnableAutoMergeInternal::build_query(vars);
             self.octo
-                .graphql::<crate::gh::enable_auto_merge::EnableAutoMergeResponseData>(&body)
+                .graphql::<EnableAutoMergeResponseData>(&body)
                 .await
                 .map_err(humanize)
                 .context("enabling auto-merge")?;
@@ -240,8 +237,6 @@ impl Gh for OctocrabGh {
         repo: &str,
         branches: &[String],
     ) -> Result<Vec<PrWithCiStatus>> {
-        const QUERY: &str = include_str!("./prs_with_ci_status.gql");
-
         if branches.is_empty() {
             return Ok(Vec::new());
         }
@@ -249,13 +244,13 @@ impl Gh for OctocrabGh {
         let mut out: Vec<PrWithCiStatus> = Vec::new();
         let mut seen: std::collections::HashSet<u64> = std::collections::HashSet::new();
         for search_query in build_search_queries(owner, repo, branches) {
-            let payload = json!({
-                "query": QUERY,
-                "variables": { "query": search_query },
-            });
+            let vars = PrsWithCiStatusVariables {
+                query: search_query,
+            };
+            let body = PrsWithCiStatusInternal::build_query(vars);
             let batch: Vec<PrWithCiStatus> = self
                 .octo
-                .graphql::<PrsWithCiStatusResponseData>(&payload)
+                .graphql::<PrsWithCiStatusResponseData>(&body)
                 .await
                 .map_err(humanize)
                 .context("fetching local PRs")?

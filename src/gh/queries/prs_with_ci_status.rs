@@ -10,12 +10,13 @@ type URI = String;
 #[derive(graphql_client::GraphQLQuery)]
 #[graphql(
     schema_path = "src/gh/github.graphql",
-    query_path = "src/gh/prs_with_ci_status.gql"
+    query_path = "src/gh/queries/prs_with_ci_status.gql"
 )]
-#[expect(dead_code, reason = "never used directly")]
-struct PrsWithCiStatusInternal;
+pub struct PrsWithCiStatusInternal;
 
-pub use prs_with_ci_status_internal::ResponseData as PrsWithCiStatusResponseData;
+pub use prs_with_ci_status_internal::{
+    ResponseData as PrsWithCiStatusResponseData, Variables as PrsWithCiStatusVariables,
+};
 
 /// Status of CI checks for a pull request.
 #[derive(Debug, Clone, Copy)]
