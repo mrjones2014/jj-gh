@@ -211,12 +211,13 @@ The token supplied via `gh_askpass`, `gh_token`, `$JJ_GH_TOKEN`, or `$GH_TOKEN` 
 
 **Fine-grained personal access token** (preferred), with access to the target repositories:
 
-| Permission    | Level          | Used by                                                                                         |
-| ------------- | -------------- | ----------------------------------------------------------------------------------------------- |
-| Metadata      | Read           | every API call (always required)                                                                |
-| Contents      | Read           | `pr create` (resolving the base branch ref), `pr fetch` (fetching `refs/pull/<n>/head` via git) |
-| Pull requests | Read and write | `pr create` (list + create, enable auto-merge), `pr fetch` (get)                                |
-| Issues        | Read and write | `pr create` when applying labels (GitHub labels go through the Issues API)                      |
+| Permission      | Level          | Used by                                                                                         |
+| --------------- | -------------- | ----------------------------------------------------------------------------------------------- |
+| Metadata        | Read           | every API call (always required)                                                                |
+| Commit Statuses | Read           | Used to show GitHub Actions status for PRs in `jj pr log`                                       |
+| Contents        | Read           | `pr create` (resolving the base branch ref), `pr fetch` (fetching `refs/pull/<n>/head` via git) |
+| Pull requests   | Read and write | `pr create` (list + create, enable auto-merge), `pr fetch` (get)                                |
+| Issues          | Read and write | `pr create` when applying labels (GitHub labels go through the Issues API)                      |
 
 **Classic personal access token:**
 
