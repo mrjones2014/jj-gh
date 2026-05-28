@@ -11,8 +11,12 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
 jobs:
-  flake-check:
+  check:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [jj-gh, clippy, nextest, treefmt, graphql-validate, docs, release-plz-patched]
     steps:
       - uses: wimpysworld/nothing-but-nix@main
       - uses: actions/checkout@v6
@@ -25,15 +29,40 @@ jobs:
         with:
           primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', '**/*.nix', 'rust-toolchain.toml', 'Cargo.lock') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-
-          save: ${{ github.event_name == 'push' }}
-          purge: ${{ github.event_name == 'push' }}
+          save: ${{ github.event_name == 'push' && matrix.target == 'jj-gh' }}
+          purge: ${{ github.event_name == 'push' && matrix.target == 'jj-gh' }}
           purge-prefixes: nix-${{ runner.os }}-
           purge-created: 0
           purge-primary-key: never
-      - run: nix flake check --print-build-logs
+      - run: nix build .#checks.x86_64-linux.${{ matrix.target }} --print-build-logs
+      - if: matrix.target == 'jj-gh' && github.event_name == 'push'
+        run: nix build .#checks.x86_64-linux.release-plz-patched --print-build-logs
+  flake-check:
+    needs: check
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - if: ${{ contains(needs.check.result, 'failure') || contains(needs.check.result, 'cancelled') }}
+        run: exit 1
+  udeps:
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name != 'pull_request' }}
+    steps:
+      - uses: wimpysworld/nothing-but-nix@main
+      - uses: actions/checkout@v6
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', '**/*.nix', 'rust-toolchain.toml', 'Cargo.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          save: false
       - run: nix build .#udeps --print-build-logs
   release-plz:
-    needs: flake-check
+    needs: [flake-check, udeps]
     if: ${{ github.repository_owner == 'mrjones2014' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/master')) }}
     runs-on: ubuntu-latest
     permissions:
