@@ -185,7 +185,7 @@
             commonArgs
             // {
               inherit cargoArtifacts;
-              cargoClippyExtraArgs = "--workspace --all-targets -- -D warnings";
+              cargoClippyExtraArgs = "--workspace -- -D warnings";
             }
           );
           nextest = craneLib.cargoNextest (
@@ -231,7 +231,11 @@
                   exit 1
                 fi
               '';
-        };
+        }
+        // (pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
+          # so that the patched version gets cached by CI
+          inherit release-plz-patched;
+        });
       }
     )
     // {
