@@ -12,10 +12,10 @@
 //! via [`EnvReader`] so tests can supply canned outcomes without touching the
 //! real process environment or filesystem.
 
-use crate::{config::Config, logging::ResultExt};
+use crate::config::Config;
 use anyhow::{Context, Result, anyhow};
 use secrecy::SecretString;
-use std::time::Duration;
+use std::{ffi::OsStr, time::Duration};
 use tokio::{process::Command, time::timeout};
 
 const ASKPASS_STDOUT_LIMIT: usize = 4 * 1024;
@@ -44,7 +44,7 @@ impl SpawnOutcome {
 /// External process boundary. Implementations spawn `argv[0]` with `argv[1..]`
 /// as arguments and return its outcome, applying any timeout themselves.
 pub trait ProcessRunner {
-    async fn run(&self, argv: &[String], timeout: Duration) -> SpawnOutcome;
+    async fn run(&self, argv: &[impl AsRef<OsStr>], timeout: Duration) -> SpawnOutcome;
 }
 
 /// Environment lookup boundary. Implementations return the value of `key` or
@@ -66,7 +66,7 @@ impl EnvReader for OsEnv {
 pub struct TokioProcessRunner;
 
 impl ProcessRunner for TokioProcessRunner {
-    async fn run(&self, argv: &[String], dur: Duration) -> SpawnOutcome {
+    async fn run(&self, argv: &[impl AsRef<OsStr>], dur: Duration) -> SpawnOutcome {
         let Some((prog, rest)) = argv.split_first() else {
             return SpawnOutcome::SpawnFailed("empty argv".into());
         };
@@ -109,7 +109,7 @@ async fn resolve_token_with<R: ProcessRunner, E: EnvReader>(
             return Err(anyhow!("`gh_askpass` is set but empty"));
         }
         let dur = Duration::from_secs(config.askpass_timeout_secs);
-        return run_askpass(runner, argv, dur)
+        return run_token_command(runner, argv, dur)
             .await
             .with_context(|| format!("askpass `{}` failed", shell_words::join(argv)));
     }
@@ -127,22 +127,14 @@ async fn resolve_token_with<R: ProcessRunner, E: EnvReader>(
         return Ok(token.clone());
     }
 
-    if let Some(token) = Command::new("gh")
-        .args(["auth", "token"])
-        .stdout(std::process::Stdio::piped())
-        .output()
-        .await
-        .ok()
-        .filter(|output| output.status.success())
-        .and_then(|output| {
-            String::from_utf8(output.stdout)
-                .context("`gh auth token` returned non-UTF8 output")
-                .log_err()
-                .ok()
-        })
-        .map(|output| output.trim().to_string())
+    if let Ok(token) = run_token_command(
+        runner,
+        &["gh", "auth", "token"],
+        Duration::from_secs(config.askpass_timeout_secs),
+    )
+    .await
     {
-        return Ok(token.into());
+        return Ok(token);
     }
 
     Err(anyhow!(
@@ -151,14 +143,14 @@ async fn resolve_token_with<R: ProcessRunner, E: EnvReader>(
     ))
 }
 
-async fn run_askpass<R: ProcessRunner>(
+async fn run_token_command<R: ProcessRunner>(
     runner: &R,
-    argv: &[String],
+    argv: &[impl AsRef<OsStr>],
     dur: Duration,
 ) -> Result<SecretString> {
     match runner.run(argv, dur).await {
-        SpawnOutcome::TimedOut => Err(anyhow!("askpass timed out after {}s", dur.as_secs())),
-        SpawnOutcome::SpawnFailed(msg) => Err(anyhow!("failed to spawn askpass: {msg}")),
+        SpawnOutcome::TimedOut => Err(anyhow!("command timed out after {}s", dur.as_secs())),
+        SpawnOutcome::SpawnFailed(msg) => Err(anyhow!("failed to spawn command: {msg}")),
         SpawnOutcome::Completed {
             code,
             stdout,
@@ -173,22 +165,22 @@ fn parse_completed(code: Option<i32>, stdout: &[u8], stderr: &[u8]) -> Result<Se
         let stderr = stderr.trim();
         let status = SpawnOutcome::status_display(code);
         return Err(if stderr.is_empty() {
-            anyhow!("askpass exited with {status}")
+            anyhow!("command exited with {status}")
         } else {
-            anyhow!("askpass exited with {status}: {stderr}")
+            anyhow!("command exited with {status}: {stderr}")
         });
     }
 
     if stdout.len() > ASKPASS_STDOUT_LIMIT {
         return Err(anyhow!(
-            "askpass stdout exceeds {ASKPASS_STDOUT_LIMIT} bytes; refusing to treat as token"
+            "stdout exceeds {ASKPASS_STDOUT_LIMIT} bytes; refusing to treat as token"
         ));
     }
 
-    let raw = std::str::from_utf8(stdout).map_err(|_| anyhow!("askpass stdout is not UTF-8"))?;
+    let raw = std::str::from_utf8(stdout).map_err(|_| anyhow!("stdout is not UTF-8"))?;
     let trimmed = raw.trim_end_matches(['\r', '\n']);
     if trimmed.is_empty() {
-        return Err(anyhow!("askpass produced no token on stdout"));
+        return Err(anyhow!("produced no token on stdout"));
     }
 
     Ok(SecretString::from(trimmed.to_owned()))
@@ -211,7 +203,7 @@ mod tests {
     }
 
     impl ProcessRunner for FakeRunner {
-        async fn run(&self, _: &[String], _: Duration) -> SpawnOutcome {
+        async fn run(&self, _: &[impl AsRef<OsStr>], _: Duration) -> SpawnOutcome {
             self.outcome.clone()
         }
     }
@@ -323,7 +315,7 @@ mod tests {
             .await
             .unwrap_err();
         let msg = format!("{err:#}");
-        assert!(msg.contains("failed to spawn askpass"), "msg: {msg}");
+        assert!(msg.contains("failed to spawn command"), "msg: {msg}");
     }
 
     #[tokio::test]
@@ -341,12 +333,25 @@ mod tests {
 
     #[tokio::test]
     async fn errors_when_no_source_configured() {
-        let runner = FakeRunner::new(SpawnOutcome::TimedOut); // unused
+        let runner = FakeRunner::new(SpawnOutcome::TimedOut);
         let err = resolve_token_with(&Config::default(), &runner, &empty_env())
             .await
             .unwrap_err();
         let msg = format!("{err:#}");
         assert!(msg.contains("no GitHub token"), "msg: {msg}");
+    }
+
+    #[tokio::test]
+    async fn resolves_via_gh_auth_token_fallback() {
+        let runner = FakeRunner::new(SpawnOutcome::Completed {
+            code: Some(0),
+            stdout: b"ghp_from_gh_cli\n".to_vec(),
+            stderr: vec![],
+        });
+        let token = resolve_token_with(&Config::default(), &runner, &empty_env())
+            .await
+            .unwrap();
+        assert_eq!(token.expose_secret(), "ghp_from_gh_cli");
     }
 
     #[tokio::test]
