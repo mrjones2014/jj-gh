@@ -17,6 +17,10 @@ let
 
   cfg = config.programs.jujutsu.gh;
 
+  # if Carapace is enabled, it eats the overlay; use `lib.mkOrder`
+  # to make sure our completions come after Carapace.
+  priority = 3000;
+
   jjGhTable = lib.filterAttrs (_: v: v != null) {
     inherit (cfg.settings)
       gh_askpass
@@ -158,9 +162,11 @@ in
     # `jj <tab>`. Sourcing from interactive init registers the rules
     # against `jj` directly; fish then unions them with jj's own.
     (mkIf (config.programs.fish.enable && cfg.aliases != { }) {
-      programs.fish.interactiveShellInit = lib.concatMapStringsSep "\n" (n: ''
-        source ${mkOverlay "fish" n cfg.aliases.${n}}
-      '') (lib.attrNames cfg.aliases);
+      programs.fish.interactiveShellInit = lib.mkOrder priority (
+        lib.concatMapStringsSep "\n" (n: ''
+          source ${mkOverlay "fish" n cfg.aliases.${n}}
+        '') (lib.attrNames cfg.aliases)
+      );
     })
 
     # bash: source overlays from initExtra. The overlays self-bootstrap —
@@ -169,9 +175,11 @@ in
     # handler, so we don't need to `eval "$(jj util completion bash)"`
     # here.
     (mkIf (config.programs.bash.enable && cfg.aliases != { }) {
-      programs.bash.initExtra = lib.concatMapStringsSep "\n" (n: ''
-        source ${mkOverlay "bash" n cfg.aliases.${n}}
-      '') (lib.attrNames cfg.aliases);
+      programs.bash.initExtra = lib.mkOrder priority (
+        lib.concatMapStringsSep "\n" (n: ''
+          source ${mkOverlay "bash" n cfg.aliases.${n}}
+        '') (lib.attrNames cfg.aliases)
+      );
     })
 
     # zsh: source overlays from initExtra. initExtra runs after compinit
@@ -179,9 +187,11 @@ in
     # `_jj` in fpath (nixpkgs jujutsu ships it under
     # share/zsh/site-functions) and the overlays can snapshot it directly.
     (mkIf (config.programs.zsh.enable && cfg.aliases != { }) {
-      programs.zsh.initExtra = lib.concatMapStringsSep "\n" (n: ''
-        source ${mkOverlay "zsh" n cfg.aliases.${n}}
-      '') (lib.attrNames cfg.aliases);
+      programs.zsh.initExtra = lib.mkOrder priority (
+        lib.concatMapStringsSep "\n" (n: ''
+          source ${mkOverlay "zsh" n cfg.aliases.${n}}
+        '') (lib.attrNames cfg.aliases)
+      );
     })
   ]);
 }
