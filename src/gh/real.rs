@@ -6,15 +6,16 @@ use crate::{
     gh::queries::{
         CreatePrInternal, CreatePrResponseData, CreatePrVariables, EnableAutoMergeInternal,
         EnableAutoMergeResponseData, EnableAutoMergeVariables, EnqueuePrInternal,
-        EnqueuePrResponseData, EnqueuePrVariables, GetPrInternal, GetPrResponseData,
-        GetPrVariables, LookupBaseInternal, LookupBaseResponseData, LookupBaseVariables,
-        PrWithCiStatus, PrsWithCiStatusInternal, PrsWithCiStatusResponseData,
-        PrsWithCiStatusVariables, PullRequestMergeMethod,
+        EnqueuePrResponseData, EnqueuePrVariables, FindOpenPrInternal, FindOpenPrResponseData,
+        FindOpenPrVariables, GetPrInternal, GetPrResponseData, GetPrVariables, LookupBaseInternal,
+        LookupBaseResponseData, LookupBaseVariables, PrWithCiStatus, PrsWithCiStatusInternal,
+        PrsWithCiStatusResponseData, PrsWithCiStatusVariables, PullRequestMergeMethod,
+        PullRequestState,
     },
 };
 use anyhow::{Context, Result, anyhow};
 use graphql_client::GraphQLQuery;
-use octocrab::{Octocrab, params};
+use octocrab::Octocrab;
 use secrecy::{ExposeSecret, SecretString};
 
 /// Production [`Gh`] impl wrapping an authenticated `octocrab` client.
@@ -48,21 +49,43 @@ impl Gh for OctocrabGh {
         repo: &str,
         head_spec: &str,
     ) -> Result<Option<PrSummary>> {
-        let page = self
+        let (head_owner, head_branch) = head_spec
+            .split_once(':')
+            .ok_or_else(|| anyhow!("head_spec `{head_spec}` missing owner:branch"))?;
+        let vars = FindOpenPrVariables {
+            owner: owner.to_string(),
+            name: repo.to_string(),
+            head_ref_name: head_branch.to_string(),
+        };
+        let body = FindOpenPrInternal::build_query(vars);
+        let data: FindOpenPrResponseData = self
             .octo
-            .pulls(owner, repo)
-            .list()
-            .state(params::State::Open)
-            .head(head_spec)
-            .send()
+            .graphql(&body)
             .await
             .map_err(humanize)
             .with_context(|| format!("listing PRs for {owner}/{repo} head={head_spec}"))?;
-        Ok(page.items.into_iter().next().map(|p| PrSummary {
-            number: p.number,
-            html_url: p.html_url.to_string(),
-            title: p.title,
-            state: format!("{:?}", p.state).to_lowercase(),
+        let nodes = data
+            .repository
+            .and_then(|r| r.pull_requests.nodes)
+            .unwrap_or_default();
+        let Some(pr) = nodes.into_iter().flatten().find(|p| {
+            p.head_repository
+                .as_ref()
+                .is_some_and(|hr| hr.owner.login == head_owner)
+        }) else {
+            return Ok(None);
+        };
+        let state = match pr.state {
+            PullRequestState::OPEN => "open",
+            PullRequestState::CLOSED => "closed",
+            PullRequestState::MERGED => "merged",
+            PullRequestState::Other(_) => "unknown",
+        };
+        Ok(Some(PrSummary {
+            number: u64::try_from(pr.number).context("PR number out of range")?,
+            html_url: pr.url,
+            title: pr.title,
+            state: state.to_string(),
         }))
     }
 
