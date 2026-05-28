@@ -20,6 +20,7 @@ jobs:
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
+            access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
       - uses: nix-community/cache-nix-action@v7
         with:
           primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', '**/*.nix', 'rust-toolchain.toml', 'Cargo.lock') }}
@@ -53,6 +54,7 @@ jobs:
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
+            access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
       - uses: nix-community/cache-nix-action@v7
         with:
           primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', '**/*.nix', 'rust-toolchain.toml', 'Cargo.lock') }}
