@@ -13,6 +13,10 @@ include = [
   "/Cargo.lock",
   "/README.md",
   "/LICENSE",
+  # this isn't technically needed for the rust crate,
+  # but I want release-plz to include changes to it
+  # in the CHANGELOG.md
+  "/nix/hm-module.nix",
 ]
 
 [workspace]
