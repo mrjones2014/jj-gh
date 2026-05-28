@@ -24,10 +24,12 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 #[derive(Debug, Deserialize)]
+#[cfg_attr(feature = "schema-validation", derive(schemars::JsonSchema))]
 #[serde(default)]
 pub struct Config {
     pub gh_askpass: Option<Vec<String>>,
     pub askpass_timeout_secs: u64,
+    #[cfg_attr(feature = "schema-validation", schemars(with = "Option<String>"))]
     pub gh_token: Option<SecretString>,
     pub default_base_branch: String,
     pub default_remote: String,
@@ -63,6 +65,7 @@ impl Default for Config {
 
 /// GitHub merge method used when enabling auto-merge on a PR.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
+#[cfg_attr(feature = "schema-validation", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 #[clap(rename_all = "lowercase")]
 pub enum AutoMergeMethod {

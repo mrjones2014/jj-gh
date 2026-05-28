@@ -1,0 +1,10 @@
+[package]
+name = "print-config-schema"
+edition = "2024"
+version = "0.0.0"
+publish = false
+
+[dependencies]
+jj-gh = { path = "../..", features = ["schema-validation"] }
+schemars = "0.8"
+serde_json = "1"

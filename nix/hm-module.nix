@@ -21,18 +21,7 @@ let
   # to make sure our completions come after Carapace.
   priority = 3000;
 
-  jjGhTable = lib.filterAttrs (_: v: v != null) {
-    inherit (cfg.settings)
-      gh_askpass
-      askpass_timeout_secs
-      gh_token
-      default_base_branch
-      template_path
-      draft
-      editor
-      pr_fetch_bookmark_template
-      ;
-  };
+  jj_gh_table = lib.filterAttrs (_: v: v != null) cfg.settings;
 
   mkJjAliasArgv = subcmd: [
     "util"
@@ -114,16 +103,49 @@ in
         description = "Fallback base branch when nothing smarter is detected.";
       };
 
+      default_remote = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        example = "origin";
+        description = "Default git remote used for pushes and PR head lookup.";
+      };
+
+      upstream_remote = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        example = "upstream";
+        description = "Default git remote used for cross-fork PR target.";
+      };
+
       template_path = mkOption {
         type = types.nullOr types.path;
         default = null;
-        description = "PR template path.";
+        description = "Default PR template path.";
       };
 
       draft = mkOption {
         type = types.nullOr types.bool;
         default = null;
         description = "Open PRs as drafts by default.";
+      };
+
+      auto_merge = mkOption {
+        type = types.nullOr types.bool;
+        default = null;
+        description = "Enable auto-merge on PRs after creation by default.";
+      };
+
+      auto_merge_method = mkOption {
+        type = types.nullOr (
+          types.enum [
+            "merge"
+            "squash"
+            "rebase"
+          ]
+        );
+        default = null;
+        example = "squash";
+        description = "Default GitHub merge method to use when auto-merge is enabled.";
       };
 
       editor = mkOption {
@@ -142,6 +164,12 @@ in
         example = "pr-{number}/{branch}";
         description = "Bookmark name template for `jj pr fetch`.";
       };
+
+      nerdfonts = mkOption {
+        type = types.nullOr types.bool;
+        default = null;
+        description = "Use nerdfont icons in `jj pr log` output.";
+      };
     };
   };
 
@@ -152,7 +180,7 @@ in
         {
           aliases = lib.mapAttrs (_: subcmd: lib.mkDefault (mkJjAliasArgv subcmd)) cfg.aliases;
         }
-        (optionalAttrs (jjGhTable != { }) { "jj-gh" = jjGhTable; })
+        (optionalAttrs (jj_gh_table != { }) { "jj-gh" = jj_gh_table; })
       ];
     }
 

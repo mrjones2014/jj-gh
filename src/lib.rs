@@ -3,7 +3,7 @@ use clap::CommandFactory as _;
 mod auth;
 mod cli;
 mod completions;
-mod config;
+pub mod config;
 mod debug;
 mod fs;
 mod gh;
