@@ -6,16 +6,11 @@
 use crate::config::AutoMergeMethod;
 use anyhow::Result;
 
-mod create_pr;
-mod enable_auto_merge;
-mod enqueue_pr;
-mod get_pr;
-mod lookup_base;
-mod prs_with_ci_status;
+mod queries;
 
 pub mod real;
 pub mod remote;
-pub use prs_with_ci_status::{CiStatus, PrWithCiStatus};
+pub use queries::{CiStatus, PrWithCiStatus};
 
 /// Summary of an existing pull request. Just the fields we render.
 #[derive(Debug, Clone)]

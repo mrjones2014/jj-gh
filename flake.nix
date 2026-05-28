@@ -197,7 +197,7 @@
               }
               ''
                 shopt -s nullglob
-                docs=(${./src/gh}/*.gql)
+                docs=(${./src/gh/queries}/*.gql)
                 if (( ''${#docs[@]} == 0 )); then
                   echo "no .gql files found under src/gh" >&2
                   exit 1

@@ -1,7 +1,7 @@
 #[derive(graphql_client::GraphQLQuery)]
 #[graphql(
     schema_path = "src/gh/github.graphql",
-    query_path = "src/gh/enable_auto_merge.gql"
+    query_path = "src/gh/queries/enable_auto_merge.gql"
 )]
 pub struct EnableAutoMergeInternal;
 
