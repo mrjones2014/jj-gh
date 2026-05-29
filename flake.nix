@@ -248,17 +248,14 @@
               {
                 nativeBuildInputs = [
                   pkgs.jq
-                  pkgs.delta
-                  pkgs.util-linux
+                  pkgs.diffutils
                 ];
               }
               ''
                 ${print-config-schema}/bin/print-config-schema > schema.json
                 jq -r '.properties | keys[]' schema.json | sort > rust-fields.txt
                 jq -r '.[]' ${hmModuleSettingsOptsJson} | sort > nix-fields.txt
-                # `script` fakes a TTY so delta emits ANSI colors even though
-                # nix's builder pipes stdout to a log file.
-                if ! script -qec "delta --paging=never rust-fields.txt nix-fields.txt" /dev/null; then
+                if ! diff -u rust-fields.txt nix-fields.txt >&2; then
                   echo "" >&2
                   echo "ERROR: jj-gh Config struct fields drifted from hm-module.nix settings options." >&2
                   echo "  left  = Rust Config field names (tools/print-config-schema)" >&2
