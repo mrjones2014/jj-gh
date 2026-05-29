@@ -75,6 +75,12 @@ You can either use the overlay directly, or use the `home-manager` module.
 }
 ```
 
+Not required, but you may also opt-in to using our Cachix binary cache:
+
+URL: <https://jj-gh.cachix.org>
+
+Public Key: `jj-gh.cachix.org-1:N1uFBMDd9znlhDa68BRqLSXYzXXJ2+WHVuwxpGxCtDo=`
+
 </details>
 
 <details>
