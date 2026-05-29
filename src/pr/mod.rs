@@ -223,10 +223,19 @@ async fn load_template_for<J: Jj>(
         TemplateSource::None => Ok(None),
         TemplateSource::File(p) => template::load_template_file(&p, &fs),
         TemplateSource::JjTemplate(t) => {
+            let oldest_rev_id = jj
+                .eval_template(title_revset, r#"commit_id.short(40) ++ "\n""#, None, true)
+                .await
+                .context("resolving oldest commit id for `pr_oldest_rev_id` alias")?
+                .lines()
+                .next()
+                .unwrap_or("")
+                .to_string();
             let aliases = TemplateAliases::builder()
                 .alias("pr_title", quote_jj(default_title))
                 .alias("pr_base", quote_jj(base))
-                .alias("pr_head_branch", quote_jj(head_branch.unwrap_or("")));
+                .alias("pr_head_branch", quote_jj(head_branch.unwrap_or("")))
+                .alias("pr_oldest_rev_id", quote_jj(&oldest_rev_id));
             let tmp = aliases.write_temp_config()?;
             let body = jj
                 .eval_template(title_revset, &t, Some(tmp.path()), true)
