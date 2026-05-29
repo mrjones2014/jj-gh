@@ -6,6 +6,9 @@ on:
 jobs:
   update-dependencies:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
       - uses: cachix/install-nix-action@v27
@@ -18,7 +21,7 @@ jobs:
       - name: update flake.lock
         run: nix flake update
       - name: Create Pull Request
-        uses: peter-evans/create-pull-request@v6
+        uses: peter-evans/create-pull-request@v8
         with:
           commit-message: "flake: update dependencies"
           title: "[automation] update flake dependencies"
