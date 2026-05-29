@@ -176,6 +176,15 @@ mod tests {
         async fn pushed_bookmarks(&self, _remote: &str) -> Result<Vec<crate::jj::PushedBookmark>> {
             unimplemented!("fetch does not call pushed_bookmarks")
         }
+        async fn eval_template(
+            &self,
+            _revset: &str,
+            _template: &str,
+            _config_file: Option<&std::path::Path>,
+            _reversed: bool,
+        ) -> Result<String> {
+            unimplemented!("fetch does not call eval_template")
+        }
     }
 
     struct FakeGh {

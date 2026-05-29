@@ -6,7 +6,7 @@
 
 use super::{CommitInfo, Jj, PushedBookmark};
 use anyhow::{Context, Result, anyhow};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tokio::process::Command;
 
 /// Build a jj template that emits a JSON object: each `(key, expr)` becomes
@@ -192,6 +192,17 @@ impl Jj for JjCli {
         Ok(())
     }
 
+    async fn eval_template(
+        &self,
+        revset: &str,
+        template: &str,
+        config_file: Option<&Path>,
+        reversed: bool,
+    ) -> Result<String> {
+        let args = eval_template_argv(revset, template, config_file, reversed);
+        String::from_utf8(run_jj_strs(&args).await?).context("jj log output is not UTF-8")
+    }
+
     async fn pushed_bookmarks(&self, remote: &str) -> Result<Vec<PushedBookmark>> {
         // `jj bookmark list --tracked --remote <remote>` emits one entry per
         // local/remote side of each tracked bookmark; filtering on
@@ -254,4 +265,90 @@ async fn run_jj(args: &[&str]) -> Result<Vec<u8>> {
         return Err(anyhow!("`jj {}` failed: {}", args.join(" "), stderr.trim()));
     }
     Ok(output.stdout)
+}
+
+async fn run_jj_strs(args: &[String]) -> Result<Vec<u8>> {
+    let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    run_jj(&refs).await
+}
+
+/// Build the argv passed to `run_jj` for [`Jj::eval_template`]. Pure so it
+/// can be unit tested without spawning.
+fn eval_template_argv(
+    revset: &str,
+    template: &str,
+    config_file: Option<&Path>,
+    reversed: bool,
+) -> Vec<String> {
+    let mut argv: Vec<String> = Vec::with_capacity(10);
+    if let Some(path) = config_file {
+        argv.push("--config-file".into());
+        argv.push(path.to_string_lossy().into_owned());
+    }
+    argv.push("log".into());
+    argv.push("-r".into());
+    argv.push(revset.into());
+    argv.push("--no-graph".into());
+    argv.push("--color=never".into());
+    if reversed {
+        argv.push("--reversed".into());
+    }
+    argv.push("-T".into());
+    argv.push(template.into());
+    argv
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn eval_template_argv_minimal() {
+        let argv = eval_template_argv("@", "description", None, false);
+        assert_eq!(
+            argv,
+            vec![
+                "log",
+                "-r",
+                "@",
+                "--no-graph",
+                "--color=never",
+                "-T",
+                "description"
+            ]
+        );
+    }
+
+    #[test]
+    fn eval_template_argv_with_config_file_and_reversed() {
+        let argv = eval_template_argv(
+            "trunk()..@",
+            "description.first_line()",
+            Some(Path::new("/tmp/x.toml")),
+            true,
+        );
+        assert_eq!(
+            argv,
+            vec![
+                "--config-file",
+                "/tmp/x.toml",
+                "log",
+                "-r",
+                "trunk()..@",
+                "--no-graph",
+                "--color=never",
+                "--reversed",
+                "-T",
+                "description.first_line()",
+            ]
+        );
+    }
+
+    #[test]
+    fn eval_template_argv_config_file_precedes_subcommand() {
+        let argv = eval_template_argv("@", "x", Some(Path::new("/c.toml")), false);
+        let log_idx = argv.iter().position(|s| s == "log").unwrap();
+        let cfg_idx = argv.iter().position(|s| s == "--config-file").unwrap();
+        assert!(cfg_idx < log_idx, "--config-file must precede `log`");
+    }
 }

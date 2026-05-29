@@ -14,14 +14,49 @@ use crate::{
     config::Config,
     gh::{CiStatus, Gh, PrWithCiStatus},
     git,
-    jj::Jj,
+    jj::{
+        Jj,
+        inject::{TemplateAliases, escape_jj_string},
+    },
 };
 use anyhow::{Context, Result, anyhow};
 use serde::Serialize;
 use std::collections::HashMap;
-use std::io::Write;
-use tempfile::NamedTempFile;
 use tokio::process::Command;
+
+/// jj `label(...)` keys for which we ship default colors in the injected
+/// config. Templates reference them by name so users can override the colors
+/// in their own jj config.
+const COLOR_CI_SUCCESS: &str = "gh-ci-success";
+const COLOR_CI_FAILED: &str = "gh-ci-failed";
+const COLOR_CI_PENDING: &str = "gh-ci-pending";
+const COLOR_PR_MERGE_STATUS: &str = "gh-pr-merge-status";
+
+/// Default `pr_log` template applied when the user did not pass their own
+/// `-T` / `--template`. References the `pr_meta` alias so spacing only appears
+/// for commits that actually have a PR.
+const PR_LOG_TEMPLATE: &str = r#"
+if(root,
+  format_root_commit(self),
+  label(
+    separate(" ",
+      if(current_working_copy, "working_copy"),
+      if(immutable, "immutable", "mutable"),
+      if(conflict, "conflicted"),
+    ),
+    concat(
+      format_short_commit_header(self)  ++ surround(" ", "", pr_meta) ++ "\n",
+      separate(" ",
+        if(empty, empty_commit_marker),
+        if(description,
+          description.first_line(),
+          label(if(empty, "empty"), description_placeholder),
+        ),
+      ) ++ "\n",
+    ),
+  )
+)
+"#;
 
 #[derive(Debug, clap::Args, Serialize)]
 pub struct PrLogArgs {
@@ -69,17 +104,14 @@ pub async fn run(args: &PrLogArgs, config: &Config, gh: &impl Gh, jj: &impl Jj) 
         .iter()
         .map(|b| (b.name.clone(), b.local_commit_id.clone()))
         .collect();
-    let names: Vec<String> = bookmarks.into_iter().map(|b| b.name).collect();
+    let names = bookmarks.into_iter().map(|b| b.name).collect::<Vec<_>>();
     let prs = gh.local_pulls(&owner, &repo, &names).await?;
 
-    let config_toml = render_config(&prs, &branch_to_local, config);
-    let mut tmp = NamedTempFile::with_suffix(".toml").context("creating temp config file")?;
-    tmp.write_all(config_toml.as_bytes())
-        .context("writing template-alias config")?;
-    let tmp = tmp.into_temp_path();
+    let aliases = build_aliases(&prs, &branch_to_local, config);
+    let tmp = aliases.write_temp_config()?;
 
     let mut cmd = Command::new("jj");
-    cmd.arg("--config-file").arg(&tmp).arg("log");
+    cmd.arg("--config-file").arg(tmp.path()).arg("log");
     if !user_set_template(&args.jj_log_args) {
         cmd.args(["-T", "pr_log"]);
     }
@@ -102,27 +134,27 @@ fn user_set_template(args: &[String]) -> bool {
     })
 }
 
-/// Build the TOML config that defines our `pr_*` template aliases, default
-/// colors, and the `pr_log` template.
+/// Build the [`TemplateAliases`] that define our `pr_*` aliases, the
+/// `pr_log` default template, and the colors it labels.
 ///
 /// jj template aliases lose static type info when called from another alias
 /// (their return type becomes `Any`), which breaks `if(pr_x, ...)` and
-/// `pr_x == ""` in nested aliases. To sidestep this we render the *entire*
-/// inline PR fragment (hyperlinked number + colored CI icon) as a single
-/// `pr_meta` alias whose body is a per-commit if-chain; the default `pr_log`
-/// template then wraps it with `surround(" ", "", pr_meta)` so spacing only
-/// appears for commits that actually have a PR. We still expose `pr_number` /
-/// `pr_url` / `pr_ci_status` as raw String aliases for users who want to
-/// build custom templates — they work in direct contexts even if they can't
-/// be re-chained through `if()`.
-fn render_config(
+/// `pr_x == ""` in nested aliases. To sidestep this we render the entire
+/// inline PR fragment (hyperlinked number, colored CI icon, merge status) as
+/// a single `pr_meta` alias whose body is a per-commit if-chain; the default
+/// `pr_log` template then wraps it with `surround(" ", "", pr_meta)` so
+/// spacing only appears for commits that actually have a PR. We still expose
+/// `pr_number`, `pr_url`, and `pr_ci_status` as raw `String` aliases for
+/// users who want to build custom templates; they work in direct contexts
+/// even if they cannot be re-chained through `if()`.
+fn build_aliases(
     prs: &[PrWithCiStatus],
     branch_to_local: &HashMap<String, String>,
     config: &Config,
-) -> String {
+) -> TemplateAliases {
     let number = if_chain_alias(prs, branch_to_local, |pr| format!(r#""{}""#, pr.number));
     let url = if_chain_alias(prs, branch_to_local, |pr| {
-        format!(r#""{}""#, escape_toml_dq(&pr.url))
+        format!(r#""{}""#, escape_jj_string(&pr.url))
     });
     let status = if_chain_alias(prs, branch_to_local, |pr| {
         format!(r#""{}""#, ci_status_str(pr.ci_status))
@@ -132,50 +164,24 @@ fn render_config(
     });
     let meta = if_chain_alias(prs, branch_to_local, |pr| render_pr_meta_body(pr, config));
 
-    format!(
-        r#"[template-aliases]
-pr_number = '''{number}'''
-pr_url = '''{url}'''
-pr_ci_status = '''{status}'''
-pr_meta = '''{meta}'''
-pr_merge_status = '''{merge_status}'''
-pr_log = '''
-if(root,
-  format_root_commit(self),
-  label(
-    separate(" ",
-      if(current_working_copy, "working_copy"),
-      if(immutable, "immutable", "mutable"),
-      if(conflict, "conflicted"),
-    ),
-    concat(
-      format_short_commit_header(self)  ++ surround(" ", "", pr_meta) ++ "\n",
-      separate(" ",
-        if(empty, empty_commit_marker),
-        if(description,
-          description.first_line(),
-          label(if(empty, "empty"), description_placeholder),
-        ),
-      ) ++ "\n",
-    ),
-  )
-)
-'''
-
-[colors]
-gh-ci-success = "green"
-gh-ci-failed = "red"
-gh-ci-pending = "yellow"
-gh-pr-merge-status = "bright black"
-"#
-    )
+    TemplateAliases::builder()
+        .alias("pr_number", number)
+        .alias("pr_url", url)
+        .alias("pr_ci_status", status)
+        .alias("pr_meta", meta)
+        .alias("pr_merge_status", merge_status)
+        .alias("pr_log", PR_LOG_TEMPLATE)
+        .color(COLOR_CI_SUCCESS, "green")
+        .color(COLOR_CI_FAILED, "red")
+        .color(COLOR_CI_PENDING, "yellow")
+        .color(COLOR_PR_MERGE_STATUS, "bright black")
 }
 
 /// Render the body of a single `pr_meta` if-chain arm: the full template
 /// fragment for one PR (hyperlinked number plus colored CI-status icon).
 fn render_pr_meta_body(pr: &PrWithCiStatus, config: &Config) -> String {
     let github_icon = if config.nerdfonts { " " } else { "" };
-    let url = escape_toml_dq(&pr.url);
+    let url = escape_jj_string(&pr.url);
     let mut template = format!(
         r##""{github_icon}" ++ hyperlink("{url}", "#{n}")"##,
         n = pr.number
@@ -189,7 +195,7 @@ fn render_pr_meta_body(pr: &PrWithCiStatus, config: &Config) -> String {
     template = match merge_status(pr, config) {
         Some(metadata) => {
             format!(
-                r#"{template} ++ " " ++ label("gh-pr-merge-status", "(") ++ {metadata} ++ label("gh-pr-merge-status", ")")"#
+                r#"{template} ++ " " ++ label("{COLOR_PR_MERGE_STATUS}", "(") ++ {metadata} ++ label("{COLOR_PR_MERGE_STATUS}", ")")"#
             )
         }
         None => template,
@@ -201,27 +207,29 @@ fn render_pr_meta_body(pr: &PrWithCiStatus, config: &Config) -> String {
 fn merge_status(pr: &PrWithCiStatus, config: &Config) -> Option<String> {
     if pr.merged {
         let icon = if config.nerdfonts { " " } else { "" };
-        Some(format!(r#"label("gh-pr-merge-status", "{icon}merged")"#))
+        Some(format!(
+            r#"label("{COLOR_PR_MERGE_STATUS}", "{icon}merged")"#
+        ))
     } else if pr.is_in_merge_queue {
         let icon = if config.nerdfonts { " " } else { "" };
         Some(format!(
-            r#"label("gh-pr-merge-status", "{icon}in merge queue")"#
+            r#"label("{COLOR_PR_MERGE_STATUS}", "{icon}in merge queue")"#
         ))
     } else if pr.auto_merge_enabled {
         let icon = if config.nerdfonts { "󰾨 " } else { "" };
         Some(format!(
-            r#"label("gh-pr-merge-status", "{icon}auto-merge enabled")"#
+            r#"label("{COLOR_PR_MERGE_STATUS}", "{icon}auto-merge enabled")"#
         ))
     } else {
         None
     }
 }
 
-fn ci_status_icon_label(pr: &PrWithCiStatus) -> Option<&'static str> {
+fn ci_status_icon_label(pr: &PrWithCiStatus) -> Option<String> {
     Some(match pr.ci_status {
-        CiStatus::Success => r#"label("gh-ci-success", "✓")"#,
-        CiStatus::Failed => r#"label("gh-ci-failed", "✗")"#,
-        CiStatus::Pending => r#"label("gh-ci-pending", "●")"#,
+        CiStatus::Success => format!(r#"label("{COLOR_CI_SUCCESS}", "✓")"#),
+        CiStatus::Failed => format!(r#"label("{COLOR_CI_FAILED}", "✗")"#),
+        CiStatus::Pending => format!(r#"label("{COLOR_CI_PENDING}", "●")"#),
         CiStatus::None => return None,
     })
 }
@@ -264,13 +272,6 @@ fn ci_status_str(status: CiStatus) -> &'static str {
         CiStatus::Pending => "PENDING",
         CiStatus::None => "",
     }
-}
-
-/// Escape a value for embedding in a TOML double-quoted string. We only ever
-/// embed PR URLs and SHAs (no control chars), so handling `\` and `"` is
-/// sufficient.
-fn escape_toml_dq(s: &str) -> String {
-    s.replace('\\', r"\\").replace('"', "\\\"")
 }
 
 #[cfg(test)]
@@ -416,7 +417,7 @@ mod tests {
     fn config_contains_alias_for_each_pr() {
         let prs = vec![pr("a".repeat(40).as_str(), 42, CiStatus::Success)];
         let map = local_map_from(&prs);
-        let cfg = render_config(&prs, &map, &Config::default());
+        let cfg = build_aliases(&prs, &map, &Config::default()).to_toml();
         assert!(
             cfg.contains(r#"commit_id.short(40) == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa""#)
         );
@@ -430,22 +431,28 @@ mod tests {
     fn default_template_shows_merge_metadata() {
         let prs = vec![pr_merge_status(1, true, false, false)];
         let map = local_map_from(&prs);
-        let cfg = render_config(&prs, &map, &Config::default());
+        let cfg = build_aliases(&prs, &map, &Config::default()).to_toml();
         assert!(cfg.contains(" merged"));
 
         let prs = vec![pr_merge_status(2, false, true, false)];
         let map = local_map_from(&prs);
-        let cfg = render_config(&prs, &map, &Config::default());
+        let cfg = build_aliases(&prs, &map, &Config::default()).to_toml();
         assert!(cfg.contains(" in merge queue"), "{}", cfg);
 
         let prs = vec![pr_merge_status(3, false, false, true)];
         let map = local_map_from(&prs);
-        let cfg = render_config(&prs, &map, &Config::default());
+        let cfg = build_aliases(&prs, &map, &Config::default()).to_toml();
         assert!(cfg.contains("󰾨 auto-merge enabled"));
     }
 
     #[test]
-    fn escape_toml_dq_handles_backslash_and_quote() {
-        assert_eq!(escape_toml_dq(r#"a"b\c"#), r#"a\"b\\c"#);
+    fn merge_status_labels_use_pr_merge_color_const() {
+        let prs = vec![pr_merge_status(1, true, false, false)];
+        let map = local_map_from(&prs);
+        let cfg = build_aliases(&prs, &map, &Config::default()).to_toml();
+        assert!(
+            cfg.contains(r#"label("gh-pr-merge-status""#),
+            "expected gh-pr-merge-status color label, got: {cfg}"
+        );
     }
 }
