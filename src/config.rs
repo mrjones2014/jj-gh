@@ -6,12 +6,17 @@
 //! 3. jj repo config (`jj config path --repo`).
 //! 4. jj workspace config (`jj config path --workspace`).
 //! 5. File pointed to by `$JJ_GH_EXTRA_CONFIG`.
-//! 6. Env overlay (`GH_ASKPASS`, `JJ_GH_TEMPLATE`).
+//! 6. Env overlay (`GH_ASKPASS`, `JJ_GH_TEMPLATE`, `JJ_GH_TEMPLATE_FILE`).
 //!
 //! Layer paths come from `jj config path --<level>` so we track whatever
 //! storage layout jj uses (XDG dirs in 0.41+, legacy `.jj/repo/config.toml`
 //! before that). Each file source reads from its `[jj-gh]` subtree via
 //! [`JjConfProvider`].
+//!
+//! `pr_create_template` / `pr_create_template_file` are also exposed via
+//! per-layer extraction ([`user_layer_template`], [`repo_layer_template`]) so
+//! body resolution can prefer a repo-local `.github/PULL_REQUEST_TEMPLATE.md`
+//! over a globally-configured jj template.
 
 use anyhow::Result;
 use figment::{
@@ -34,7 +39,8 @@ pub struct Config {
     pub default_base_branch: String,
     pub default_remote: String,
     pub upstream_remote: String,
-    pub template_path: Option<PathBuf>,
+    pub pr_create_template_file: Option<PathBuf>,
+    pub pr_create_template: Option<String>,
     pub draft: bool,
     pub auto_merge: bool,
     pub auto_merge_method: AutoMergeMethod,
@@ -52,7 +58,8 @@ impl Default for Config {
             default_base_branch: "master".into(),
             default_remote: "origin".into(),
             upstream_remote: "upstream".into(),
-            template_path: None,
+            pr_create_template_file: None,
+            pr_create_template: None,
             draft: false,
             auto_merge: false,
             auto_merge_method: AutoMergeMethod::default(),
@@ -87,25 +94,53 @@ pub fn load_figment() -> Figment {
     fig.merge(Serialized::defaults(EnvOverlay::from_env()))
 }
 
-/// Validate cross-field invariants on a merged [`Config`].
-///
-/// # Errors
-///
-/// Returns an error if `pr_fetch_bookmark_template` references an unknown
-/// placeholder.
-pub fn validate(config: &Config) -> Result<()> {
-    if let Some(t) = config.pr_fetch_bookmark_template.as_deref() {
-        crate::pr::fetch::bookmark_template::validate(t)
-            .map_err(|e| anyhow::anyhow!("invalid `pr_fetch_bookmark_template`: {e}"))?;
-    }
-    Ok(())
-}
-
 /// A [`Figment`] preloaded with the built-in defaults. Compose [`JjToolsProvider`]s
 /// onto this for hermetic tests, then hand to [`extract`].
 #[must_use]
 pub fn defaults_figment() -> Figment {
     Figment::from(Serialized::defaults(DefaultsOverlay::from_defaults()))
+}
+
+/// PR-body template values resolved against a single jj config layer (or a
+/// bucket of layers). Used by [`user_layer_template`] and
+/// [`repo_layer_template`] so body resolution can prefer a per-repo
+/// `.github/PULL_REQUEST_TEMPLATE.md` over a globally-set jj template while
+/// still honoring repo-local jj-template overrides.
+#[derive(Debug, Default, Deserialize, Serialize)]
+#[serde(default)]
+pub struct LayerTemplate {
+    pub pr_create_template: Option<String>,
+    pub pr_create_template_file: Option<PathBuf>,
+}
+
+/// Extract the PR-body template values defined at the user-level jj config
+/// only (`jj config path --user`). Values set in repo or workspace configs are
+/// ignored.
+///
+/// # Errors
+///
+/// Returns an error if a layer's TOML cannot be parsed.
+pub fn user_layer_template() -> Result<LayerTemplate> {
+    extract_layer_template(&user_layer_paths())
+}
+
+/// Extract the PR-body template values defined in repo, workspace, or
+/// `JJ_GH_EXTRA_CONFIG` layers. Values set in the user-level config are
+/// ignored.
+///
+/// # Errors
+///
+/// Returns an error if a layer's TOML cannot be parsed.
+pub fn repo_layer_template() -> Result<LayerTemplate> {
+    extract_layer_template(&repo_layer_paths())
+}
+
+fn extract_layer_template(paths: &[PathBuf]) -> Result<LayerTemplate> {
+    let mut fig = Figment::from(Serialized::defaults(LayerTemplate::default()));
+    for path in paths {
+        fig = fig.merge(JjConfProvider::from_file(path.clone()));
+    }
+    fig.extract::<LayerTemplate>().map_err(Into::into)
 }
 
 /// Extract a [`Config`] from a fully composed [`Figment`].
@@ -118,17 +153,25 @@ pub fn extract(fig: &Figment) -> Result<Config> {
 }
 
 fn discover_layers() -> Vec<PathBuf> {
+    let mut out = user_layer_paths();
+    out.extend(repo_layer_paths());
+    out
+}
+
+fn user_layer_paths() -> Vec<PathBuf> {
+    jj_config_path("--user").into_iter().collect()
+}
+
+fn repo_layer_paths() -> Vec<PathBuf> {
     let mut out = Vec::new();
-    for level in ["--user", "--repo", "--workspace"] {
+    for level in ["--repo", "--workspace"] {
         if let Some(p) = jj_config_path(level) {
             out.push(p);
         }
     }
-
     if let Some(p) = std::env::var_os("JJ_GH_EXTRA_CONFIG") {
         out.push(PathBuf::from(p));
     }
-
     out
 }
 
@@ -285,7 +328,8 @@ impl DefaultsOverlay {
             gh_askpass: _,
             gh_token: _,
             pr_fetch_bookmark_template: _,
-            template_path: _,
+            pr_create_template: _,
+            pr_create_template_file: _,
         } = Config::default();
         Self {
             askpass_timeout_secs,
@@ -305,14 +349,17 @@ struct EnvOverlay {
     #[serde(skip_serializing_if = "Option::is_none")]
     gh_askpass: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    template_path: Option<PathBuf>,
+    pr_create_template: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pr_create_template_file: Option<PathBuf>,
 }
 
 impl EnvOverlay {
     fn from_env() -> Self {
         Self {
             gh_askpass: read_argv_env("GH_ASKPASS"),
-            template_path: read_path_env("JJ_GH_TEMPLATE"),
+            pr_create_template: read_string_env("JJ_GH_TEMPLATE"),
+            pr_create_template_file: read_path_env("JJ_GH_TEMPLATE_FILE"),
         }
     }
 }
@@ -321,6 +368,10 @@ fn read_path_env(key: &str) -> Option<PathBuf> {
     std::env::var_os(key)
         .filter(|s| !s.is_empty())
         .map(PathBuf::from)
+}
+
+fn read_string_env(key: &str) -> Option<String> {
+    std::env::var(key).ok().filter(|s| !s.is_empty())
 }
 
 fn read_argv_env(key: &str) -> Option<Vec<String>> {
@@ -457,26 +508,36 @@ mod tests {
             "tmpl",
             r#"
             [jj-gh]
-            pr_fetch_bookmark_template = "pr-{number}-{user}"
+            pr_fetch_bookmark_template = '"pr-" ++ pr_number'
             "#,
         )])
         .unwrap();
         assert_eq!(
             config.pr_fetch_bookmark_template.as_deref(),
-            Some("pr-{number}-{user}")
+            Some(r#""pr-" ++ pr_number"#)
         );
-        validate(&config).unwrap();
     }
 
     #[test]
-    fn validate_rejects_unknown_placeholder_in_template() {
-        let config = Config {
-            pr_fetch_bookmark_template: Some("pr-{nope}".into()),
-            ..Config::default()
-        };
-        let err = validate(&config).unwrap_err();
-        let msg = format!("{err:#}");
-        assert!(msg.contains("pr_fetch_bookmark_template"), "msg: {msg}");
-        assert!(msg.contains("{nope}"), "msg: {msg}");
+    fn pr_create_template_fields_round_trip() {
+        let config = from_layers([JjConfProvider::from_memory(
+            "tmpl",
+            r#"
+            [jj-gh]
+            pr_create_template = "description.first_line()"
+            pr_create_template_file = "/repo/.github/PULL_REQUEST_TEMPLATE.md"
+            "#,
+        )])
+        .unwrap();
+        assert_eq!(
+            config.pr_create_template.as_deref(),
+            Some("description.first_line()")
+        );
+        assert_eq!(
+            config.pr_create_template_file.as_deref(),
+            Some(std::path::Path::new(
+                "/repo/.github/PULL_REQUEST_TEMPLATE.md"
+            ))
+        );
     }
 }

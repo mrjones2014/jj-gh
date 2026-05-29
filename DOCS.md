@@ -77,8 +77,15 @@ Opens your editor to a markdown file where you can write the PR description, and
 
   Possible values: `merge`, `squash`, `rebase`
 
-- `--template <PATH_OR_NAME>` — Template path or name under `.github/PULL_REQUEST_TEMPLATE/`. Default: `template_path` in config, else auto-detect `.github/PULL_REQUEST_TEMPLATE.md`. CLI path resolution needs the repo root, so this stays out of figment merging and is handled by `resolve_template_path` at handler time
-- `--no-template` — Skip template selection entirely
+- `-T`, `--template <TEMPLATE>` — jj template string used to render the PR body. Evaluated against the revset being PR'd in chronological order (`--reversed`), so a multi-commit stack renders bottom-up.
+
+  All standard jj template builtins are available (`description`, `commit_id`, `author`, etc.). The following string aliases are also injected:
+  - `pr_title`: default title (first-line description of the oldest commit on the stack). - `pr_base`: resolved base branch. - `pr_head_branch`: existing local bookmark on the rev, or empty if the rev is unpushed.
+
+  Mutually exclusive with `--template-file` and `--no-template`.
+
+- `--template-file <PATH_OR_NAME>` — Path or name (under `.github/PULL_REQUEST_TEMPLATE/`) of a markdown template file to use as the PR body. Mutually exclusive with `-T` and `--no-template`
+- `--no-template` — Skip body templating entirely
 - `-e`, `--editor <CMD>` — Editor command; shell-words split, e.g. `--editor "nvim +7"`. Default: `editor` in config, then `$VISUAL`, then `$EDITOR`
 - `--gh-askpass <CMD>` — Askpass helper command that prints a GitHub token on stdout; shell-words split, e.g. `--gh-askpass "op read op://Vault/gh/token"`. Default: `gh_askpass` in config, then `$GH_ASKPASS`
 - `--askpass-timeout <SECS>` — Timeout in seconds for the askpass helper. Default: 20
@@ -101,7 +108,11 @@ See: <https://github.com/jj-vcs/jj/issues/4388>
 
 ###### **Options:**
 
-- `-t`, `--template <STR>` — Override the bookmark template. Default: `pr_fetch_bookmark_template` in config, else `pr-{number}/{branch}`. Placeholders: `{number}`, `{branch}` (head.ref), `{user}` (head.user.login), `{repo}` (head.repo.name). `{{` / `}}` are literal braces
+- `-T`, `--template <TEMPLATE>` — Override the bookmark template. The argument is a jj template string evaluated once against `root()` (no commit context). Default: `pr_fetch_bookmark_template` in config, else `"pr-" ++ pr_number ++ "/" ++ pr_branch"`.
+
+  Injected string aliases (each is already double-quoted, so use them directly without wrapping in `"..."`):
+  - `pr_number`: PR number as a decimal string. - `pr_title`: PR title. - `pr_branch`: head ref name (the source branch on the PR's fork). - `pr_url`: PR's `html_url`. - `pr_head_sha`: 40-char hex commit SHA of the PR's head. - `pr_head_user`: PR's head fork owner login, or empty if the fork was deleted. - `pr_head_repo`: PR's head fork repository name, or empty if the fork was deleted. - `pr_slug`: sanitized lowercase ASCII slug of the title (max 50 chars), suitable for embedding in a bookmark name.
+
 - `-f`, `--force` — Replace an existing local bookmark of the same name
 - `--gh-askpass <CMD>` — Askpass helper command that prints a GitHub token on stdout; shell-words split, e.g. `--gh-askpass "op read op://Vault/gh/token"`. Default: `gh_askpass` in config, then `$GH_ASKPASS`
 - `--askpass-timeout <SECS>` — Timeout in seconds for the askpass helper. Default: 20
@@ -145,7 +156,8 @@ The following template aliases are available for use if you pass your own templa
 
 ###### **Arguments:**
 
-- `<JJ_LOG_ARGS>` — Arguments forwarded verbatim to the underlying `jj log` invocation. Pass after `--`, e.g. `jj-gh pr log -- -r 'mine()' -T builtin_log_compact`. If you pass `-T` / `--template`, the default PR-aware template is not applied; use the injected aliases (`pr_number`, `pr_url`, `pr_ci_status`, `pr_meta`) from your own template. `pr_meta` is the pre-formatted hyperlinked PR number + colored CI icon (empty for commits without a PR)
+- `<JJ_LOG_ARGS>` — Arguments forwarded verbatim to the underlying `jj log` invocation. Pass after `--`, e.g. `jj-gh pr log -- -r 'mine()' -T builtin_log_compact`. If you pass `-T` / `--template`, the default PR-aware template is not applied; the following per-commit aliases are then available in your own template, each keyed on `commit_id`:
+  - `pr_number`: PR number as a string, or empty for commits without a PR. - `pr_url`: PR URL, or empty. - `pr_ci_status`: `SUCCESS`, `FAILED`, `PENDING`, or empty. - `pr_merge_status`: merged / in-merge-queue / auto-merge label, or empty. - `pr_meta`: pre-formatted hyperlinked PR number plus colored CI icon plus merge status (empty for commits without a PR).
 
 ###### **Options:**
 

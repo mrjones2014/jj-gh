@@ -1,7 +1,9 @@
 //! `jj-gh pr fetch`
 //!
-//! Download a PR's `refs/pull/123/head` into a local
-//! bookmark via git, then import into jj.
+//! Download a PR's `refs/pull/123/head` into a local bookmark via git, then
+//! import into jj. The bookmark name is rendered by evaluating a jj template
+//! against an injected `--config-file` that defines `pr_*` aliases populated
+//! from the PR's GitHub metadata.
 //!
 //! Requires a colocated git repository: jj cannot yet fetch arbitrary refs
 //! (only `refs/heads/*`), so we shell to git for the special pull ref.
@@ -9,17 +11,27 @@
 use crate::{
     cli::AuthArgs,
     config::Config,
-    gh::Gh,
+    gh::{Gh, PrDetails},
     git::{real::GitOps, url::parse_owner_repo},
-    jj::Jj,
+    jj::{
+        Jj,
+        inject::{TemplateAliases, escape_jj_string},
+    },
 };
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
+use serde::Serialize;
 use std::path::Path;
 
-pub mod bookmark_template;
+/// Default jj template used to render the bookmark name when neither the
+/// `pr_fetch_bookmark_template` config nor the `-T|--template` CLI flag is
+/// set. Mirrors the legacy `pr-{number}/{branch}` format.
+pub const DEFAULT_FETCH_TEMPLATE: &str = r#""pr-" ++ pr_number ++ "/" ++ pr_branch"#;
 
-pub use bookmark_template::{DEFAULT_FETCH_TEMPLATE, Fields};
-use serde::Serialize;
+/// Cap length for the auto-generated `pr_slug` alias. Bookmark names are git
+/// refs and many filesystems cap a single ref-component near 255 bytes; 50
+/// characters keeps the slug short while leaving room for surrounding template
+/// text.
+const PR_SLUG_MAX_LEN: usize = 50;
 
 /// Verify the workspace is a colocated git repo. Returns an explanatory error
 /// otherwise.
@@ -36,10 +48,12 @@ fn ensure_colocated(workspace_root: &Path) -> Result<()> {
     ))
 }
 
-fn resolve_template(config: &Config) -> &str {
-    config
-        .pr_fetch_bookmark_template
+/// Pick the jj template string to evaluate for this fetch, honoring CLI then
+/// config then the built-in default.
+fn resolve_template<'a>(args: &'a FetchArgs, config: &'a Config) -> &'a str {
+    args.template
         .as_deref()
+        .or(config.pr_fetch_bookmark_template.as_deref())
         .unwrap_or(DEFAULT_FETCH_TEMPLATE)
 }
 
@@ -50,12 +64,26 @@ pub struct FetchArgs {
     #[serde(skip)]
     pub pr: u64,
 
-    /// Override the bookmark template. Default: `pr_fetch_bookmark_template`
-    /// in config, else `pr-{number}/{branch}`. Placeholders: `{number}`,
-    /// `{branch}` (head.ref), `{user}`
-    /// (head.user.login), `{repo}` (head.repo.name). `{{` / `}}` are literal
-    /// braces.
-    #[arg(short = 't', long, value_name = "STR")]
+    /// Override the bookmark template. The argument is a jj template string
+    /// evaluated once against `root()` (no commit context). Default:
+    /// `pr_fetch_bookmark_template` in config, else
+    /// `"pr-" ++ pr_number ++ "/" ++ pr_branch"`.
+    ///
+    /// Injected string aliases (each is already double-quoted, so use them
+    /// directly without wrapping in `"..."`):
+    ///
+    /// - `pr_number`: PR number as a decimal string.
+    /// - `pr_title`: PR title.
+    /// - `pr_branch`: head ref name (the source branch on the PR's fork).
+    /// - `pr_url`: PR's `html_url`.
+    /// - `pr_head_sha`: 40-char hex commit SHA of the PR's head.
+    /// - `pr_head_user`: PR's head fork owner login, or empty if the fork
+    ///   was deleted.
+    /// - `pr_head_repo`: PR's head fork repository name, or empty if the
+    ///   fork was deleted.
+    /// - `pr_slug`: sanitized lowercase ASCII slug of the title (max 50
+    ///   chars), suitable for embedding in a bookmark name.
+    #[arg(short = 'T', long, value_name = "TEMPLATE")]
     #[serde(
         rename = "pr_fetch_bookmark_template",
         skip_serializing_if = "Option::is_none"
@@ -78,7 +106,7 @@ pub struct FetchArgs {
 /// # Errors
 ///
 /// Propagates errors from any step (auth, GH API, colocation, git fetch, jj
-/// import, template render).
+/// import, template eval).
 pub async fn run_with<J: Jj, G: Gh, GO: GitOps>(
     jj: &J,
     gh: &G,
@@ -96,17 +124,28 @@ pub async fn run_with<J: Jj, G: Gh, GO: GitOps>(
     let (owner, repo) = parse_owner_repo(&origin_url)?;
 
     let pr = gh.get_pr(&owner, &repo, args.pr).await?;
+    if pr.head_user_login.is_none() || pr.head_repo_name.is_none() {
+        log::warn!(
+            "PR #{}: head fork appears deleted; `pr_head_user` / `pr_head_repo` will be empty",
+            pr.number
+        );
+    }
 
-    let template = resolve_template(config);
-    let bookmark = bookmark_template::render(
-        template,
-        &Fields {
-            number: pr.number,
-            branch: &pr.head_ref,
-            user: pr.head_user_login.as_deref(),
-            repo: pr.head_repo_name.as_deref(),
-        },
-    )?;
+    let template = resolve_template(args, config);
+    let aliases = build_fetch_aliases(&pr);
+    let tmp = aliases.write_temp_config()?;
+    let bookmark = jj
+        .eval_template("root()", template, Some(tmp.path()), false)
+        .await
+        .context("evaluating bookmark template")?
+        .trim()
+        .to_string();
+
+    if bookmark.is_empty() {
+        return Err(anyhow!(
+            "bookmark template rendered to an empty string; check `pr_fetch_bookmark_template`"
+        ));
+    }
 
     if git.local_bookmark_exists(&bookmark).await? && !args.force {
         return Err(anyhow!(
@@ -125,22 +164,76 @@ pub async fn run_with<J: Jj, G: Gh, GO: GitOps>(
     Ok(())
 }
 
+/// Build the [`TemplateAliases`] populated from `pr`'s GitHub metadata. Pure
+/// so it can be unit tested without spawning jj.
+fn build_fetch_aliases(pr: &PrDetails) -> TemplateAliases {
+    TemplateAliases::builder()
+        .alias("pr_number", quote_jj(&pr.number.to_string()))
+        .alias("pr_title", quote_jj(&pr.title))
+        .alias("pr_branch", quote_jj(&pr.head_ref))
+        .alias("pr_url", quote_jj(&pr.html_url))
+        .alias("pr_head_sha", quote_jj(&pr.head_sha))
+        .alias(
+            "pr_head_user",
+            quote_jj(pr.head_user_login.as_deref().unwrap_or("")),
+        )
+        .alias(
+            "pr_head_repo",
+            quote_jj(pr.head_repo_name.as_deref().unwrap_or("")),
+        )
+        .alias("pr_slug", quote_jj(&slugify(&pr.title)))
+}
+
+/// Wrap `s` as a jj template double-quoted string literal, escaping `\` and `"`.
+fn quote_jj(s: &str) -> String {
+    format!(r#""{}""#, escape_jj_string(s))
+}
+
+/// Sanitize a string into a bookmark-safe slug: lowercase, runs of
+/// non-alphanumeric ASCII collapsed to a single `-`, trimmed of leading and
+/// trailing `-`, capped at [`PR_SLUG_MAX_LEN`] characters. Non-ASCII input is
+/// dropped (no transliteration).
+fn slugify(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut prev_dash = true;
+    for c in s.chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c.to_ascii_lowercase());
+            prev_dash = false;
+        } else if !prev_dash {
+            out.push('-');
+            prev_dash = true;
+        }
+    }
+    out.truncate(PR_SLUG_MAX_LEN);
+    out.trim_matches('-').to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::cli::AuthArgs;
-    use crate::gh::{BaseLookup, CreatePrRequest, PrCreated, PrDetails, PrSummary};
+    use crate::gh::{BaseLookup, CreatePrRequest, PrCreated, PrSummary};
     use crate::jj::CommitInfo;
     use std::cell::RefCell;
     use std::path::PathBuf;
     use std::sync::Mutex;
     use tempfile::TempDir;
 
+    #[derive(Debug, Clone, Default)]
+    struct EvalCall {
+        revset: String,
+        template: String,
+        reversed: bool,
+    }
+
     struct FakeJj {
         workspace_root: PathBuf,
         origin: Option<String>,
         expected_remote: String,
         import_calls: Mutex<u32>,
+        eval_template_return: String,
+        eval_template_calls: Mutex<Vec<EvalCall>>,
     }
 
     impl Jj for FakeJj {
@@ -178,12 +271,17 @@ mod tests {
         }
         async fn eval_template(
             &self,
-            _revset: &str,
-            _template: &str,
-            _config_file: Option<&std::path::Path>,
-            _reversed: bool,
+            revset: &str,
+            template: &str,
+            _config_file: Option<&Path>,
+            reversed: bool,
         ) -> Result<String> {
-            unimplemented!("fetch does not call eval_template")
+            self.eval_template_calls.lock().unwrap().push(EvalCall {
+                revset: revset.into(),
+                template: template.into(),
+                reversed,
+            });
+            Ok(self.eval_template_return.clone())
         }
     }
 
@@ -225,7 +323,6 @@ mod tests {
             assert_eq!(number, self.expected.2);
             Ok(self.pr.clone())
         }
-
         async fn enable_auto_merge(
             &self,
             _node_id: &str,
@@ -234,7 +331,6 @@ mod tests {
         ) -> Result<()> {
             unimplemented!("fetch does not call enable_auto_merge")
         }
-
         async fn local_pulls(
             &self,
             _owner: &str,
@@ -305,12 +401,14 @@ mod tests {
         dir
     }
 
-    fn jj_for(dir: &TempDir, origin: Option<&str>) -> FakeJj {
+    fn jj_for(dir: &TempDir, origin: Option<&str>, eval_return: &str) -> FakeJj {
         FakeJj {
             workspace_root: dir.path().to_path_buf(),
             origin: origin.map(str::to_string),
             expected_remote: "origin".into(),
             import_calls: Mutex::new(0),
+            eval_template_return: eval_return.into(),
+            eval_template_calls: Mutex::new(Vec::new()),
         }
     }
 
@@ -322,7 +420,7 @@ mod tests {
     #[tokio::test]
     async fn happy_path_prints_bookmark_and_imports() {
         let dir = colocated_workspace();
-        let jj = jj_for(&dir, Some("git@github.com:o/r.git"));
+        let jj = jj_for(&dir, Some("git@github.com:o/r.git"), "pr-1234/feature/foo");
         let gh = gh_for(details(), "o", "r");
         let git = FakeGit {
             exists: false,
@@ -346,7 +444,7 @@ mod tests {
     #[tokio::test]
     async fn config_default_remote_propagates_to_jj_and_git() {
         let dir = colocated_workspace();
-        let mut jj = jj_for(&dir, Some("git@github.com:o/r.git"));
+        let mut jj = jj_for(&dir, Some("git@github.com:o/r.git"), "pr-1234/feature/foo");
         jj.expected_remote = "fork".into();
         let gh = gh_for(details(), "o", "r");
         let git = FakeGit {
@@ -369,7 +467,7 @@ mod tests {
     #[tokio::test]
     async fn existing_bookmark_without_force_errors() {
         let dir = colocated_workspace();
-        let jj = jj_for(&dir, Some("git@github.com:o/r.git"));
+        let jj = jj_for(&dir, Some("git@github.com:o/r.git"), "pr-1234/feature/foo");
         let gh = gh_for(details(), "o", "r");
         let git = FakeGit {
             exists: true,
@@ -388,7 +486,7 @@ mod tests {
     #[tokio::test]
     async fn force_flag_passes_through() {
         let dir = colocated_workspace();
-        let jj = jj_for(&dir, Some("git@github.com:o/r.git"));
+        let jj = jj_for(&dir, Some("git@github.com:o/r.git"), "pr-1234/feature/foo");
         let gh = gh_for(details(), "o", "r");
         let git = FakeGit {
             exists: true,
@@ -408,14 +506,15 @@ mod tests {
     #[tokio::test]
     async fn config_template_is_used() {
         let dir = colocated_workspace();
-        let jj = jj_for(&dir, Some("git@github.com:o/r.git"));
+        let jj = jj_for(&dir, Some("git@github.com:o/r.git"), "cfg-from-template");
         let gh = gh_for(details(), "o", "r");
         let git = FakeGit {
             exists: false,
             fetches: RefCell::new(vec![]),
         };
+        let cfg_template = r#""cfg-" ++ pr_number ++ "-" ++ pr_head_user"#;
         let config = Config {
-            pr_fetch_bookmark_template: Some("cfg-{number}-{user}".into()),
+            pr_fetch_bookmark_template: Some(cfg_template.into()),
             ..Config::default()
         };
 
@@ -423,55 +522,85 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(git.fetches.borrow()[0].bookmark, "cfg-1234-octocat");
+        let evals = jj.eval_template_calls.lock().unwrap();
+        assert_eq!(evals.len(), 1);
+        assert_eq!(evals[0].revset, "root()");
+        assert_eq!(evals[0].template, cfg_template);
+        assert!(!evals[0].reversed);
+        assert_eq!(git.fetches.borrow()[0].bookmark, "cfg-from-template");
     }
 
     #[tokio::test]
-    async fn config_template_used_when_cli_absent() {
+    async fn cli_template_overrides_config() {
         let dir = colocated_workspace();
-        let jj = jj_for(&dir, Some("git@github.com:o/r.git"));
+        let jj = jj_for(&dir, Some("git@github.com:o/r.git"), "from-cli");
         let gh = gh_for(details(), "o", "r");
         let git = FakeGit {
             exists: false,
             fetches: RefCell::new(vec![]),
         };
+        let cli_template = r#""cli-" ++ pr_number"#;
         let config = Config {
-            pr_fetch_bookmark_template: Some("cfg-{number}-{repo}".into()),
+            pr_fetch_bookmark_template: Some(r#""cfg-" ++ pr_number"#.into()),
             ..Config::default()
         };
+
+        run_with(
+            &jj,
+            &gh,
+            &git,
+            &config,
+            &args(1234, Some(cli_template), false),
+        )
+        .await
+        .unwrap();
+
+        let evals = jj.eval_template_calls.lock().unwrap();
+        assert_eq!(evals[0].template, cli_template);
+    }
+
+    #[tokio::test]
+    async fn default_template_used_when_no_override() {
+        let dir = colocated_workspace();
+        let jj = jj_for(&dir, Some("git@github.com:o/r.git"), "pr-1234/feature/foo");
+        let gh = gh_for(details(), "o", "r");
+        let git = FakeGit {
+            exists: false,
+            fetches: RefCell::new(vec![]),
+        };
+        let config = Config::default();
 
         run_with(&jj, &gh, &git, &config, &args(1234, None, false))
             .await
             .unwrap();
-        assert_eq!(git.fetches.borrow()[0].bookmark, "cfg-1234-r");
+
+        let evals = jj.eval_template_calls.lock().unwrap();
+        assert_eq!(evals[0].template, DEFAULT_FETCH_TEMPLATE);
     }
 
     #[tokio::test]
-    async fn unknown_placeholder_errors() {
+    async fn empty_bookmark_rendering_errors() {
         let dir = colocated_workspace();
-        let jj = jj_for(&dir, Some("git@github.com:o/r.git"));
+        let jj = jj_for(&dir, Some("git@github.com:o/r.git"), "   ");
         let gh = gh_for(details(), "o", "r");
         let git = FakeGit {
             exists: false,
             fetches: RefCell::new(vec![]),
         };
-        let config = Config {
-            pr_fetch_bookmark_template: Some("pr-{nope}".into()),
-            ..Config::default()
-        };
+        let config = Config::default();
 
         let err = run_with(&jj, &gh, &git, &config, &args(1234, None, false))
             .await
             .unwrap_err();
         let msg = format!("{err:#}");
-        assert!(msg.contains("unknown placeholder"), "msg: {msg}");
-        assert!(msg.contains("{nope}"), "msg: {msg}");
+        assert!(msg.contains("empty"), "msg: {msg}");
+        assert!(git.fetches.borrow().is_empty());
     }
 
     #[tokio::test]
     async fn missing_origin_errors_clearly() {
         let dir = colocated_workspace();
-        let jj = jj_for(&dir, None);
+        let jj = jj_for(&dir, None, "irrelevant");
         let gh = gh_for(details(), "o", "r");
         let git = FakeGit {
             exists: false,
@@ -491,8 +620,8 @@ mod tests {
 
     #[tokio::test]
     async fn non_colocated_repo_errors_with_explanation() {
-        let dir = TempDir::new().unwrap(); // no .git dir
-        let jj = jj_for(&dir, Some("git@github.com:o/r.git"));
+        let dir = TempDir::new().unwrap();
+        let jj = jj_for(&dir, Some("git@github.com:o/r.git"), "irrelevant");
         let gh = gh_for(details(), "o", "r");
         let git = FakeGit {
             exists: false,
@@ -508,50 +637,65 @@ mod tests {
         assert!(msg.contains("refs/pull/123/head"), "msg: {msg}");
     }
 
-    #[tokio::test]
-    async fn deleted_fork_works_when_template_omits_user_and_repo() {
-        let dir = colocated_workspace();
-        let jj = jj_for(&dir, Some("git@github.com:o/r.git"));
+    #[test]
+    fn slugify_handles_punct_and_case() {
+        assert_eq!(
+            slugify("Fix: Auth bug (issue #42)!"),
+            "fix-auth-bug-issue-42"
+        );
+    }
+
+    #[test]
+    fn slugify_collapses_runs_of_separators() {
+        assert_eq!(slugify("a___b   c"), "a-b-c");
+    }
+
+    #[test]
+    fn slugify_trims_leading_and_trailing_dashes() {
+        assert_eq!(slugify("---hi---"), "hi");
+    }
+
+    #[test]
+    fn slugify_caps_length_and_trims_trailing_dash() {
+        let s = "a".repeat(60);
+        assert_eq!(slugify(&s).len(), PR_SLUG_MAX_LEN);
+        let mixed = format!("{} bbb", "a".repeat(PR_SLUG_MAX_LEN - 1));
+        let out = slugify(&mixed);
+        assert!(!out.ends_with('-'));
+    }
+
+    #[test]
+    fn slugify_drops_non_ascii() {
+        assert_eq!(slugify("café 修复"), "caf");
+    }
+
+    #[test]
+    fn build_fetch_aliases_contains_all_pr_fields() {
+        let cfg = build_fetch_aliases(&details()).to_toml();
+        let parsed: toml::Table = toml::from_str(&cfg).unwrap();
+        let aliases = parsed["template-aliases"].as_table().unwrap();
+        assert_eq!(aliases["pr_number"].as_str(), Some(r#""1234""#));
+        assert_eq!(aliases["pr_title"].as_str(), Some(r#""Add the feature""#));
+        assert_eq!(aliases["pr_branch"].as_str(), Some(r#""feature/foo""#));
+        assert_eq!(
+            aliases["pr_url"].as_str(),
+            Some(r#""https://github.com/o/r/pull/1234""#)
+        );
+        assert_eq!(aliases["pr_head_sha"].as_str(), Some(r#""abc123""#));
+        assert_eq!(aliases["pr_head_user"].as_str(), Some(r#""octocat""#));
+        assert_eq!(aliases["pr_head_repo"].as_str(), Some(r#""r""#));
+        assert_eq!(aliases["pr_slug"].as_str(), Some(r#""add-the-feature""#));
+    }
+
+    #[test]
+    fn build_fetch_aliases_uses_empty_string_for_deleted_fork() {
         let mut d = details();
         d.head_user_login = None;
         d.head_repo_name = None;
-        let gh = gh_for(d, "o", "r");
-        let git = FakeGit {
-            exists: false,
-            fetches: RefCell::new(vec![]),
-        };
-        let config = Config::default();
-
-        run_with(&jj, &gh, &git, &config, &args(1234, None, false))
-            .await
-            .unwrap();
-        assert_eq!(git.fetches.borrow()[0].bookmark, "pr-1234/feature/foo");
-    }
-
-    #[tokio::test]
-    async fn deleted_fork_errors_when_template_references_user() {
-        let dir = colocated_workspace();
-        let jj = jj_for(&dir, Some("git@github.com:o/r.git"));
-        let mut d = details();
-        d.head_user_login = None;
-        let gh = gh_for(d, "o", "r");
-        let git = FakeGit {
-            exists: false,
-            fetches: RefCell::new(vec![]),
-        };
-        let config = Config {
-            pr_fetch_bookmark_template: Some("pr-{number}-{user}".into()),
-            ..Config::default()
-        };
-
-        let err = run_with(&jj, &gh, &git, &config, &args(1234, None, false))
-            .await
-            .unwrap_err();
-        let msg = format!("{err:#}");
-        assert!(msg.contains("{user}"), "msg: {msg}");
-        assert!(
-            msg.contains("unavailable") || msg.contains("null"),
-            "msg: {msg}"
-        );
+        let cfg = build_fetch_aliases(&d).to_toml();
+        let parsed: toml::Table = toml::from_str(&cfg).unwrap();
+        let aliases = parsed["template-aliases"].as_table().unwrap();
+        assert_eq!(aliases["pr_head_user"].as_str(), Some(r#""""#));
+        assert_eq!(aliases["pr_head_repo"].as_str(), Some(r#""""#));
     }
 }

@@ -29,9 +29,7 @@ pub async fn dispatch(global: &GlobalOpts, action: DebugAction) -> Result<()> {
 
 fn load_config(global: &GlobalOpts) -> Result<Config> {
     let fig = config::load_figment().merge(Serialized::defaults(global));
-    let config = config::extract(&fig)?;
-    config::validate(&config)?;
-    Ok(config)
+    config::extract(&fig)
 }
 
 fn print_config(global: &GlobalOpts) -> Result<()> {

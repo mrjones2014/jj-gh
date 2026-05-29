@@ -1,47 +1,72 @@
 //! PR-body template lookup.
 //!
-//! Pure path resolution lives in [`resolve_template_path`]; reading the file at
-//! that path is done by [`load_template_file`]. Both delegate filesystem reads
-//! to a [`FileSystem`] so tests stay hermetic.
+//! [`resolve_template_source`] picks between a jj-template string, a file
+//! path, or nothing based on CLI flags, layered jj config, the repo root, and
+//! the filesystem. [`load_template_file`] reads a chosen file via a
+//! [`FileSystem`] so tests stay hermetic.
 
-use crate::{config::Config, fs::FileSystem, pr::CreateArgs};
+use crate::{config::LayerTemplate, fs::FileSystem, pr::CreateArgs};
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
-/// Result of [`resolve_template_path`]: where to look for the template, or that
-/// no template should be used.
+/// Where the PR body template comes from. `JjTemplate` is a jj template
+/// string the caller evaluates via `jj log -T`; `File` is a markdown file the
+/// caller reads off disk.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TemplateChoice {
-    /// Skip templating entirely (--no-template or no candidates found).
+pub enum TemplateSource {
+    /// Skip templating entirely (`--no-template` or no candidates found).
     None,
-    /// Read the template from this path.
-    Path(PathBuf),
+    /// Evaluate this jj template string for the body.
+    JjTemplate(String),
+    /// Read the body from this path.
+    File(PathBuf),
 }
 
-/// Resolve which template to use based on CLI flags, config, and the repo root.
+/// Resolve the PR body template from CLI args, layered jj config, and the
+/// filesystem.
 ///
-/// Precedence (high to low):
-/// 1. `--no-template` => `None`
-/// 2. `--template <name-or-path>`
-/// 3. `template_path` in config
-/// 4. Auto-detect `<repo>/.github/PULL_REQUEST_TEMPLATE.md`
+/// Precedence, highest first:
+/// 1. `--no-template` flag.
+/// 2. `-T|--template` CLI (jj template string).
+/// 3. `--template-file` CLI (path under `.github/PULL_REQUEST_TEMPLATE/` or
+///    verbatim if absolute / `~`-prefixed / starts with `./` or `../`).
+/// 4. Repo-layer `pr_create_template` (jj template string from `--repo`,
+///    `--workspace`, or `JJ_GH_EXTRA_CONFIG`).
+/// 5. Repo-layer `pr_create_template_file` (path).
+/// 6. Auto-detect `<repo>/.github/PULL_REQUEST_TEMPLATE.md` (and case
+///    variants).
+/// 7. User-layer `pr_create_template` (jj template string from `--user`).
+/// 8. User-layer `pr_create_template_file` (path).
+///
+/// The split between repo and user layers lets a contributor set a global
+/// default jj template while still picking up per-repo
+/// `.github/PULL_REQUEST_TEMPLATE.md` files when contributing to OSS.
 #[must_use]
-pub fn resolve_template_path<F: FileSystem>(
+pub fn resolve_template_source<F: FileSystem>(
     args: &CreateArgs,
-    config: &Config,
+    repo_layer: &LayerTemplate,
+    user_layer: &LayerTemplate,
     repo_root: &Path,
     fs: &F,
-) -> TemplateChoice {
+) -> TemplateSource {
     if args.no_template {
-        return TemplateChoice::None;
+        return TemplateSource::None;
     }
 
-    if let Some(name) = args.template.as_deref() {
-        return TemplateChoice::Path(resolve_cli_template(name, repo_root));
+    if let Some(t) = args.template.as_deref() {
+        return TemplateSource::JjTemplate(t.to_string());
     }
 
-    if let Some(p) = config.template_path.as_deref() {
-        return TemplateChoice::Path(p.to_path_buf());
+    if let Some(name) = args.template_file.as_deref() {
+        return TemplateSource::File(resolve_cli_template_file(name, repo_root));
+    }
+
+    if let Some(t) = repo_layer.pr_create_template.as_deref() {
+        return TemplateSource::JjTemplate(t.to_string());
+    }
+
+    if let Some(p) = repo_layer.pr_create_template_file.as_deref() {
+        return TemplateSource::File(p.to_path_buf());
     }
 
     for candidate in [
@@ -52,14 +77,22 @@ pub fn resolve_template_path<F: FileSystem>(
     ] {
         let path = repo_root.join(candidate);
         if fs.exists(&path) {
-            return TemplateChoice::Path(path);
+            return TemplateSource::File(path);
         }
     }
 
-    TemplateChoice::None
+    if let Some(t) = user_layer.pr_create_template.as_deref() {
+        return TemplateSource::JjTemplate(t.to_string());
+    }
+
+    if let Some(p) = user_layer.pr_create_template_file.as_deref() {
+        return TemplateSource::File(p.to_path_buf());
+    }
+
+    TemplateSource::None
 }
 
-fn resolve_cli_template(name: &str, repo_root: &Path) -> PathBuf {
+fn resolve_cli_template_file(name: &str, repo_root: &Path) -> PathBuf {
     if name.starts_with("./")
         || name.starts_with("../")
         || name.starts_with('/')
@@ -97,9 +130,9 @@ mod tests {
     use super::*;
     use crate::fs::FakeFs;
 
-    fn args(rev: &str) -> CreateArgs {
+    fn args() -> CreateArgs {
         CreateArgs {
-            rev: rev.into(),
+            rev: "@-".into(),
             base: None,
             draft: None,
             no_draft: false,
@@ -107,6 +140,7 @@ mod tests {
             no_auto_merge: false,
             auto_merge_method: None,
             template: None,
+            template_file: None,
             no_template: false,
             editor: None,
             auth: crate::cli::AuthArgs {
@@ -116,116 +150,215 @@ mod tests {
         }
     }
 
-    fn cfg() -> Config {
-        Config::default()
+    fn empty_layer() -> LayerTemplate {
+        LayerTemplate::default()
     }
 
     #[test]
     fn no_template_flag_overrides_everything() {
-        let mut a = args("@-");
+        let mut a = args();
         a.no_template = true;
-        a.template = Some("custom.md".into());
-        let mut c = cfg();
-        c.template_path = Some(PathBuf::from("/cfg.md"));
-        let choice = resolve_template_path(&a, &c, Path::new("/repo"), &FakeFs::new(&[]));
-        assert_eq!(choice, TemplateChoice::None);
+        a.template = Some("description".into());
+        a.template_file = Some("custom.md".into());
+        let mut repo = empty_layer();
+        repo.pr_create_template = Some("description".into());
+        repo.pr_create_template_file = Some(PathBuf::from("/cfg.md"));
+        let mut user = empty_layer();
+        user.pr_create_template = Some("description".into());
+
+        let choice =
+            resolve_template_source(&a, &repo, &user, Path::new("/repo"), &FakeFs::new(&[]));
+        assert_eq!(choice, TemplateSource::None);
     }
 
     #[test]
-    fn cli_name_resolves_under_pull_request_template_dir() {
-        let mut a = args("@-");
-        a.template = Some("bug".into());
-        let choice = resolve_template_path(&a, &cfg(), Path::new("/repo"), &FakeFs::new(&[]));
+    fn cli_jj_template_string_wins_over_cli_file() {
+        let mut a = args();
+        a.template = Some("description".into());
+        a.template_file = Some("bug.md".into());
+
+        let choice = resolve_template_source(
+            &a,
+            &empty_layer(),
+            &empty_layer(),
+            Path::new("/repo"),
+            &FakeFs::new(&[]),
+        );
+        assert_eq!(choice, TemplateSource::JjTemplate("description".into()));
+    }
+
+    #[test]
+    fn cli_template_file_resolves_under_pull_request_template_dir() {
+        let mut a = args();
+        a.template_file = Some("bug".into());
+        let choice = resolve_template_source(
+            &a,
+            &empty_layer(),
+            &empty_layer(),
+            Path::new("/repo"),
+            &FakeFs::new(&[]),
+        );
         assert_eq!(
             choice,
-            TemplateChoice::Path(PathBuf::from("/repo/.github/PULL_REQUEST_TEMPLATE/bug.md"))
+            TemplateSource::File(PathBuf::from("/repo/.github/PULL_REQUEST_TEMPLATE/bug.md"))
         );
     }
 
     #[test]
-    fn cli_name_keeps_md_extension_if_already_present() {
-        let mut a = args("@-");
-        a.template = Some("bug.md".into());
-        let choice = resolve_template_path(&a, &cfg(), Path::new("/repo"), &FakeFs::new(&[]));
+    fn cli_template_file_keeps_md_extension_if_already_present() {
+        let mut a = args();
+        a.template_file = Some("bug.md".into());
+        let choice = resolve_template_source(
+            &a,
+            &empty_layer(),
+            &empty_layer(),
+            Path::new("/repo"),
+            &FakeFs::new(&[]),
+        );
         assert_eq!(
             choice,
-            TemplateChoice::Path(PathBuf::from("/repo/.github/PULL_REQUEST_TEMPLATE/bug.md"))
+            TemplateSource::File(PathBuf::from("/repo/.github/PULL_REQUEST_TEMPLATE/bug.md"))
         );
     }
 
     #[test]
-    fn cli_path_with_dot_is_used_verbatim() {
-        let mut a = args("@-");
-        a.template = Some("./local.md".into());
-        let choice = resolve_template_path(&a, &cfg(), Path::new("/repo"), &FakeFs::new(&[]));
-        assert_eq!(choice, TemplateChoice::Path(PathBuf::from("./local.md")));
+    fn cli_template_file_dot_path_used_verbatim() {
+        let mut a = args();
+        a.template_file = Some("./local.md".into());
+        let choice = resolve_template_source(
+            &a,
+            &empty_layer(),
+            &empty_layer(),
+            Path::new("/repo"),
+            &FakeFs::new(&[]),
+        );
+        assert_eq!(choice, TemplateSource::File(PathBuf::from("./local.md")));
     }
 
     #[test]
-    fn cli_dotfile_name_still_resolves_under_pull_request_template_dir() {
-        let mut a = args("@-");
-        a.template = Some(".secret".into());
-        let choice = resolve_template_path(&a, &cfg(), Path::new("/repo"), &FakeFs::new(&[]));
+    fn cli_template_file_absolute_path_used_verbatim() {
+        let mut a = args();
+        a.template_file = Some("/etc/template.md".into());
+        let choice = resolve_template_source(
+            &a,
+            &empty_layer(),
+            &empty_layer(),
+            Path::new("/repo"),
+            &FakeFs::new(&[]),
+        );
         assert_eq!(
             choice,
-            TemplateChoice::Path(PathBuf::from(
-                "/repo/.github/PULL_REQUEST_TEMPLATE/.secret.md"
-            ))
+            TemplateSource::File(PathBuf::from("/etc/template.md"))
         );
     }
 
     #[test]
-    fn cli_parent_relative_path_is_used_verbatim() {
-        let mut a = args("@-");
-        a.template = Some("../shared.md".into());
-        let choice = resolve_template_path(&a, &cfg(), Path::new("/repo"), &FakeFs::new(&[]));
-        assert_eq!(choice, TemplateChoice::Path(PathBuf::from("../shared.md")));
+    fn repo_layer_jj_template_used_when_cli_absent() {
+        let mut repo = empty_layer();
+        repo.pr_create_template = Some("description".into());
+        let choice = resolve_template_source(
+            &args(),
+            &repo,
+            &empty_layer(),
+            Path::new("/repo"),
+            &FakeFs::new(&[]),
+        );
+        assert_eq!(choice, TemplateSource::JjTemplate("description".into()));
     }
 
     #[test]
-    fn cli_absolute_path_is_used_verbatim() {
-        let mut a = args("@-");
-        a.template = Some("/etc/template.md".into());
-        let choice = resolve_template_path(&a, &cfg(), Path::new("/repo"), &FakeFs::new(&[]));
+    fn repo_layer_jj_template_wins_over_github_file_autodetect() {
+        let mut repo = empty_layer();
+        repo.pr_create_template = Some("description".into());
+        let fs = FakeFs::new(&[("/repo/.github/PULL_REQUEST_TEMPLATE.md", "body")]);
+        let choice =
+            resolve_template_source(&args(), &repo, &empty_layer(), Path::new("/repo"), &fs);
+        assert_eq!(choice, TemplateSource::JjTemplate("description".into()));
+    }
+
+    #[test]
+    fn repo_layer_file_used_when_cli_absent() {
+        let mut repo = empty_layer();
+        repo.pr_create_template_file = Some(PathBuf::from("/cfg.md"));
+        let choice = resolve_template_source(
+            &args(),
+            &repo,
+            &empty_layer(),
+            Path::new("/repo"),
+            &FakeFs::new(&[]),
+        );
+        assert_eq!(choice, TemplateSource::File(PathBuf::from("/cfg.md")));
+    }
+
+    #[test]
+    fn github_autodetect_wins_over_user_layer() {
+        let mut user = empty_layer();
+        user.pr_create_template = Some("from-user".into());
+        let fs = FakeFs::new(&[("/repo/.github/PULL_REQUEST_TEMPLATE.md", "body")]);
+        let choice =
+            resolve_template_source(&args(), &empty_layer(), &user, Path::new("/repo"), &fs);
         assert_eq!(
             choice,
-            TemplateChoice::Path(PathBuf::from("/etc/template.md"))
+            TemplateSource::File(PathBuf::from("/repo/.github/PULL_REQUEST_TEMPLATE.md"))
         );
     }
 
     #[test]
-    fn config_used_when_cli_absent() {
-        let mut c = cfg();
-        c.template_path = Some(PathBuf::from("/cfg.md"));
-        let choice = resolve_template_path(&args("@-"), &c, Path::new("/repo"), &FakeFs::new(&[]));
-        assert_eq!(choice, TemplateChoice::Path(PathBuf::from("/cfg.md")));
+    fn user_layer_jj_template_used_when_no_repo_or_github_template() {
+        let mut user = empty_layer();
+        user.pr_create_template = Some("from-user".into());
+        let choice = resolve_template_source(
+            &args(),
+            &empty_layer(),
+            &user,
+            Path::new("/repo"),
+            &FakeFs::new(&[]),
+        );
+        assert_eq!(choice, TemplateSource::JjTemplate("from-user".into()));
     }
 
     #[test]
     fn auto_detects_uppercase_github_template() {
         let fs = FakeFs::new(&[("/repo/.github/PULL_REQUEST_TEMPLATE.md", "")]);
-        let choice = resolve_template_path(&args("@-"), &cfg(), Path::new("/repo"), &fs);
+        let choice = resolve_template_source(
+            &args(),
+            &empty_layer(),
+            &empty_layer(),
+            Path::new("/repo"),
+            &fs,
+        );
         assert_eq!(
             choice,
-            TemplateChoice::Path(PathBuf::from("/repo/.github/PULL_REQUEST_TEMPLATE.md"))
+            TemplateSource::File(PathBuf::from("/repo/.github/PULL_REQUEST_TEMPLATE.md"))
         );
     }
 
     #[test]
     fn auto_detects_lowercase_fallback() {
         let fs = FakeFs::new(&[("/repo/.github/pull_request_template.md", "")]);
-        let choice = resolve_template_path(&args("@-"), &cfg(), Path::new("/repo"), &fs);
+        let choice = resolve_template_source(
+            &args(),
+            &empty_layer(),
+            &empty_layer(),
+            Path::new("/repo"),
+            &fs,
+        );
         assert_eq!(
             choice,
-            TemplateChoice::Path(PathBuf::from("/repo/.github/pull_request_template.md"))
+            TemplateSource::File(PathBuf::from("/repo/.github/pull_request_template.md"))
         );
     }
 
     #[test]
     fn none_when_no_template_found() {
-        let choice =
-            resolve_template_path(&args("@-"), &cfg(), Path::new("/repo"), &FakeFs::new(&[]));
-        assert_eq!(choice, TemplateChoice::None);
+        let choice = resolve_template_source(
+            &args(),
+            &empty_layer(),
+            &empty_layer(),
+            Path::new("/repo"),
+            &FakeFs::new(&[]),
+        );
+        assert_eq!(choice, TemplateSource::None);
     }
 
     #[test]
