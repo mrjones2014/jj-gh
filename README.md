@@ -154,6 +154,8 @@ template_path = ".github/PULL_REQUEST_TEMPLATE.md"
 draft = false                                      # default false
 auto_merge = false                                 # default false; enable auto-merge on PR after creation
 auto_merge_method = "merge"                        # default "merge"; one of "merge", "squash", "rebase"
+default_remote = "origin"                          # default remote to use
+upstream_remote = "upstream"                       # default remote to use for cross-fork PR fetching
 
 # Bookmark name template for `pr fetch`. Default "pr-{number}/{branch}".
 # Placeholders: {number}, {branch}, {user}, {repo}. `{{` / `}}` are literal.
@@ -167,6 +169,12 @@ editor = [
 
 # enable or disable the use of nerdfont icons
 # (e.g. in the `pr log` default template)
+# NOTE: if you have issues with nerdfont icons, its most likely your `$PAGER`,
+# you can fix it by either using something like `bat` (https://github.com/sharkdp/bat)
+# as your pager, or setting
+# ~/.config/jj/config.toml
+# [ui]
+# pager = { command = ["less", "-FRX"], env = { LESSCHARSET = "utf-8", LESSUTFCHARDEF = "E000-F8FF:p,F0000-FFFFD:p,100000-10FFFD:p" } }
 nerdfonts = true
 ```
 
