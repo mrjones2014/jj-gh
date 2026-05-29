@@ -6,8 +6,9 @@
 
 use anyhow::Result;
 use serde::Deserialize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
+pub mod inject;
 pub mod real;
 
 /// What we read about a single revision.
@@ -101,13 +102,39 @@ pub trait Jj {
     /// commit id the *local* bookmark currently targets. Used to scope GitHub
     /// PR lookups to branches the user has actually pushed and to render PR
     /// badges against the local commit (even when the local bookmark has
-    /// diverged from the remote — e.g. local rebase without push). Sorted by
+    /// diverged from the remote, e.g. local rebase without push). Sorted by
     /// name, deduped.
     ///
     /// # Errors
     ///
     /// Propagates jj errors.
     async fn pushed_bookmarks(&self, remote: &str) -> Result<Vec<PushedBookmark>>;
+
+    /// Render `template` by invoking `jj log` against `revset`. When
+    /// `config_file` is `Some`, jj is given `--config-file <path>` so the
+    /// template can reference aliases or colors defined there (typically built
+    /// via [`inject::TemplateAliases`]).
+    ///
+    /// Returns raw stdout. Callers trim or otherwise normalize the result
+    /// based on what they expect (a bookmark name versus a multi-line PR
+    /// body).
+    ///
+    /// `reversed` sets the `--reversed` flag so multi-commit revsets render oldest
+    /// first (chronological order).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if jj exits non-zero (template parse failures land
+    /// here with jj's own error in the message). Callers should add their own
+    /// context via [`anyhow::Context`].
+    #[expect(dead_code, reason = "callers added in PR 2")]
+    async fn eval_template(
+        &self,
+        revset: &str,
+        template: &str,
+        config_file: Option<&Path>,
+        reversed: bool,
+    ) -> Result<String>;
 }
 
 /// Compose the revset used to compute the default PR title.
