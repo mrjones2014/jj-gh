@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4](https://github.com/mrjones2014/jj-gh/compare/jj-gh-v0.1.3...jj-gh-v0.1.4) - 2026-05-29
+
+### Fixed
+
+- *(nix)* Validate home-manager module opts against Rust `Config` struct
+
+### Other
+
+- *(docs)* Add note about nerdfont support in pager
+
 ## [0.1.3](https://github.com/mrjones2014/jj-gh/compare/jj-gh-v0.1.2...jj-gh-v0.1.3) - 2026-05-28
 
 ### Fixed
