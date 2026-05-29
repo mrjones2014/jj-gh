@@ -117,10 +117,21 @@ in
         description = "Default git remote used for cross-fork PR target.";
       };
 
-      template_path = mkOption {
+      pr_create_template_file = mkOption {
         type = types.nullOr types.path;
         default = null;
-        description = "Default PR template path.";
+        description = "Path to a markdown file used as the PR body template.";
+      };
+
+      pr_create_template = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        example = ''description ++ "\n"'';
+        description = ''
+          jj template string used to render the PR body. Evaluated against the
+          revset being PR'd in chronological order, with `pr_title`, `pr_base`,
+          and `pr_head_branch` aliases injected.
+        '';
       };
 
       draft = mkOption {
@@ -161,8 +172,12 @@ in
       pr_fetch_bookmark_template = mkOption {
         type = types.nullOr types.str;
         default = null;
-        example = "pr-{number}/{branch}";
-        description = "Bookmark name template for `jj pr fetch`.";
+        example = ''"pr-" ++ pr_number ++ "/" ++ pr_branch'';
+        description = ''
+          jj template string used to render the local bookmark name created by
+          `jj pr fetch`. Evaluated against `root()` with `pr_*` aliases
+          pre-populated from the PR's metadata.
+        '';
       };
 
       nerdfonts = mkOption {

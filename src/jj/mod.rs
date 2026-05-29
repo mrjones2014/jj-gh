@@ -127,7 +127,6 @@ pub trait Jj {
     /// Returns an error if jj exits non-zero (template parse failures land
     /// here with jj's own error in the message). Callers should add their own
     /// context via [`anyhow::Context`].
-    #[expect(dead_code, reason = "callers added in PR 2")]
     async fn eval_template(
         &self,
         revset: &str,

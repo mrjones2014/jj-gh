@@ -65,17 +65,34 @@ pub struct CreateArgs {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auto_merge_method: Option<AutoMergeMethod>,
 
-    /// Template path or name under `.github/PULL_REQUEST_TEMPLATE/`. Default:
-    /// `template_path` in config, else auto-detect
-    /// `.github/PULL_REQUEST_TEMPLATE.md`. CLI path resolution needs the repo
-    /// root, so this stays out of figment merging and is handled by
-    /// `resolve_template_path` at handler time.
-    #[arg(long, value_name = "PATH_OR_NAME")]
+    /// jj template string used to render the PR body. Evaluated against the
+    /// revset being PR'd in chronological order (`--reversed`), so a
+    /// multi-commit stack renders bottom-up.
+    ///
+    /// All standard jj template builtins are available (`description`,
+    /// `commit_id`, `author`, etc.). The following string aliases are also
+    /// injected:
+    ///
+    /// - `pr_title`: default title (first-line description of the oldest
+    ///   commit on the stack).
+    /// - `pr_base`: resolved base branch.
+    /// - `pr_head_branch`: existing local bookmark on the rev, or empty if
+    ///   the rev is unpushed.
+    ///
+    /// Mutually exclusive with `--template-file` and `--no-template`.
+    #[arg(short = 'T', long, value_name = "TEMPLATE", conflicts_with_all = ["template_file", "no_template"])]
     #[serde(skip)]
     pub template: Option<String>,
 
-    /// Skip template selection entirely.
-    #[arg(long = "no-template", conflicts_with = "template")]
+    /// Path or name (under `.github/PULL_REQUEST_TEMPLATE/`) of a markdown
+    /// template file to use as the PR body. Mutually exclusive with `-T` and
+    /// `--no-template`.
+    #[arg(long = "template-file", value_name = "PATH_OR_NAME", conflicts_with_all = ["template", "no_template"])]
+    #[serde(skip)]
+    pub template_file: Option<String>,
+
+    /// Skip body templating entirely.
+    #[arg(long = "no-template", conflicts_with_all = ["template", "template_file"])]
     #[serde(skip)]
     pub no_template: bool,
 
@@ -157,7 +174,15 @@ where
     let title_revset = jj::title_base_revset(&args.rev, ancestor.as_deref());
     let default_title = jj.first_commit_description(&title_revset).await?;
 
-    let raw_template = load_template_for(args, config, jj)?;
+    let raw_template = load_template_for(
+        args,
+        jj,
+        &title_revset,
+        &default_title,
+        &base,
+        existing_branch.as_deref(),
+    )
+    .await?;
     let initial_fm = Frontmatter {
         title: default_title,
         base: base.clone(),

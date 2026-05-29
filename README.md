@@ -139,7 +139,7 @@ If you use the `home-manager` module with `programs.fish.enable` / `programs.bas
 ## Config
 
 Add a `[jj-gh]` table to any jj config layer (global `~/.config/jj/config.toml` or repo-local config via `jj config edit --repo`).
-Options related to PR metadata may also be overidden via the [markdown frontmatter](#frontmatter-format) when your editor opens.
+Options related to PR metadata may also be overridden via the [markdown frontmatter](#frontmatter-format) when your editor opens.
 
 ```toml
 [jj-gh]
@@ -149,17 +149,32 @@ gh_token = "ghp_..."                                      # plain token, less sa
 askpass_timeout_secs = 20                                 # default 20
 
 # Behavior
-default_base_branch = "main"                       # default "master"
-template_path = ".github/PULL_REQUEST_TEMPLATE.md"
-draft = false                                      # default false
-auto_merge = false                                 # default false; enable auto-merge on PR after creation
-auto_merge_method = "merge"                        # default "merge"; one of "merge", "squash", "rebase"
-default_remote = "origin"                          # default remote to use
-upstream_remote = "upstream"                       # default remote to use for cross-fork PR fetching
+default_base_branch = "main" # default "master"
+draft = false                # default false
+auto_merge = false           # default false; enable auto-merge on PR after creation
+auto_merge_method = "merge"  # default "merge"; one of "merge", "squash", "rebase"
+default_remote = "origin"    # default remote to use
+upstream_remote = "upstream" # default remote to use for cross-fork PR fetching
 
-# Bookmark name template for `pr fetch`. Default "pr-{number}/{branch}".
-# Placeholders: {number}, {branch}, {user}, {repo}. `{{` / `}}` are literal.
-pr_fetch_bookmark_template = "pr-{number}/{branch}"
+# PR body template. `pr_create_template` is a jj template string, evaluated
+# against the revset being PR'd in chronological order. `pr_create_template_file`
+# is a markdown file path. See "PR body template resolution" below for the full
+# precedence list and "Template aliases" for what's available inside
+# `pr_create_template`.
+# Example: emit each commit's full description, separated by blank lines.
+pr_create_template = 'description ++ "\n"'
+# if not set, by default this will look for the following candidates:
+# .github/PULL_REQUEST_TEMPLATE.md
+# .github/PULL_REQUEST_TEMPLATE/PULL_REQUEST_TEMPLATE.md
+# .github/pull_request_template.md
+# .github/PULL_REQUEST_TEMPLATE/pull_request_template.md
+pr_create_template_file = ".github/PULL_REQUEST_TEMPLATE.md"
+
+# Bookmark name template for `pr fetch`. A jj template string, evaluated once
+# against `root()` with `pr_*` aliases pre-populated from the PR's metadata.
+# Default: '"pr-" ++ pr_number ++ "/" ++ pr_branch'. See "Template aliases" for
+# the full list.
+pr_fetch_bookmark_template = '"pr-" ++ pr_number ++ "/" ++ pr_branch'
 
 # Editor command, shell-words split. Falls back to $VISUAL, then $EDITOR.
 editor = [
@@ -181,11 +196,15 @@ nerdfonts = true
 Config precedence (high to low):
 
 1. CLI flags
-1. env (`GH_ASKPASS`, `JJ_GH_TEMPLATE`)
+1. env (`GH_ASKPASS`, `JJ_GH_TEMPLATE`, `JJ_GH_TEMPLATE_FILE`)
 1. `$JJ_GH_EXTRA_CONFIG` file
 1. `jj` repo-local config file
 1. `jj` global config file
 1. built-in defaults
+
+`JJ_GH_TEMPLATE` maps to `pr_create_template` (jj template string).
+`JJ_GH_TEMPLATE_FILE` maps to `pr_create_template_file` (path to a markdown
+template).
 
 Token source precedence (high to low):
 
@@ -200,6 +219,73 @@ Env vars override `gh_token` from config, but a configured `gh_askpass` still
 wins. Use `$JJ_GH_TOKEN` when you need a different token for `jj-gh` than for
 the `gh` CLI itself. You may also run `gh auth login` before running `jj-gh`
 to use the GitHub CLI's authentication.
+
+## Template aliases
+
+`jj-gh` renders three different template surfaces through jj's template engine,
+each with its own set of injected aliases. Aliases are pre-quoted strings, so
+use them directly without wrapping in `"..."`.
+
+### `pr create` body (`-T` / `pr_create_template`)
+
+Evaluated against the revset being PR'd, in chronological order (`--reversed`),
+so a multi-commit stack renders bottom-up. All standard jj template builtins
+work (`description`, `commit_id`, `author`, etc.). Injected aliases:
+
+- `pr_title`: default title (first-line description of the oldest commit on
+  the stack).
+- `pr_base`: resolved base branch.
+- `pr_head_branch`: existing local bookmark on the rev, or empty if the rev
+  is unpushed.
+
+The rendered output seeds the buffer your editor opens; you can still edit
+the body and frontmatter before the PR is submitted.
+
+### `pr fetch` bookmark name (`-T` / `pr_fetch_bookmark_template`)
+
+Evaluated once against `root()` (no commit context). Injected aliases:
+
+- `pr_number`: PR number as a decimal string.
+- `pr_title`: PR title.
+- `pr_branch`: head ref name (the source branch on the PR's fork).
+- `pr_url`: PR's `html_url`.
+- `pr_head_sha`: 40-char hex commit SHA of the PR's head.
+- `pr_head_user`: PR's head fork owner login, or empty if the fork was
+  deleted.
+- `pr_head_repo`: PR's head fork repository name, or empty if the fork was
+  deleted.
+- `pr_slug`: sanitized lowercase ASCII slug of the title (max 50 chars),
+  suitable for embedding in a bookmark name.
+
+### `pr log` (`-T` forwarded to `jj log`)
+
+Per-commit aliases, each keyed on `commit_id` and empty for commits without
+a matching open PR:
+
+- `pr_number`: PR number as a string.
+- `pr_url`: PR URL.
+- `pr_ci_status`: `SUCCESS`, `FAILED`, or `PENDING`.
+- `pr_merge_status`: merged / in-merge-queue / auto-merge label.
+- `pr_meta`: pre-formatted hyperlinked PR number, colored CI icon, and merge
+  status.
+
+## PR body template resolution
+
+`pr create` picks the body template from the following sources, highest first:
+
+1. `--no-template` flag (skip templating entirely).
+2. `-T` / `--template` CLI (jj template string).
+3. `--template-file` CLI (path).
+4. Repo-layer `pr_create_template` (jj template string from repo, workspace,
+   or `$JJ_GH_EXTRA_CONFIG` config).
+5. Repo-layer `pr_create_template_file` (path).
+6. Auto-detected `.github/PULL_REQUEST_TEMPLATE.md` (case variants included).
+7. User-layer `pr_create_template` (from your global jj config).
+8. User-layer `pr_create_template_file` (path from your global jj config).
+
+The split between repo and user layers lets you set a global default jj
+template while still picking up per-repo `.github/PULL_REQUEST_TEMPLATE.md`
+files when contributing to OSS.
 
 ## Frontmatter format
 
