@@ -78,6 +78,13 @@ pub struct CreateArgs {
     /// - `pr_base`: resolved base branch.
     /// - `pr_head_branch`: existing local bookmark on the rev, or empty if
     ///   the rev is unpushed.
+    /// - `pr_oldest_rev_id`: 40-char hex commit SHA of the oldest commit in
+    ///   the revset. Because the template runs once per commit in the
+    ///   revset, static content like a fixed PR header would otherwise be
+    ///   duplicated N times for an N-commit stack. Comparing
+    ///   `commit_id.short(40) == pr_oldest_rev_id` lets the template emit
+    ///   such content exactly once, at the bottom-most commit (which lands
+    ///   at the top of the output thanks to `--reversed`).
     ///
     /// Mutually exclusive with `--template-file` and `--no-template`.
     #[arg(short = 'T', long, value_name = "TEMPLATE", conflicts_with_all = ["template_file", "no_template"])]
