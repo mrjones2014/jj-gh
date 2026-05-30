@@ -1,7 +1,6 @@
 //! End-to-end orchestrator for `jj-gh pr create` / `jj-gh pr fetch` / `jj-gh pr auto-merge`.
 
 mod auto_merge;
-mod create;
 mod editor;
 pub mod fetch;
 mod frontmatter;
@@ -10,7 +9,7 @@ mod template;
 mod validation;
 
 use crate::{
-    auth,
+    auth::{self, OsEnv},
     cli::GlobalOpts,
     config::{self, Config},
     fs::RealFs,
@@ -18,8 +17,11 @@ use crate::{
     git::real::RealGit,
     jj::{self, Jj},
     pr::{
-        auto_merge::AutoMergeArgs, create::CreateArgs, editor::TempfileEditor, fetch::FetchArgs,
-        pr_log::PrLogArgs, template::TemplateChoice,
+        auto_merge::AutoMergeArgs,
+        editor::{TempfileEditor, create::CreateArgs},
+        fetch::FetchArgs,
+        pr_log::PrLogArgs,
+        template::TemplateChoice,
     },
 };
 use anyhow::{Context, Result, anyhow};
@@ -92,7 +94,9 @@ pub async fn dispatch(global: &GlobalOpts, action: PrAction) -> Result<()> {
     let gh = gh::real::OctocrabGh::new(&token)?;
     let editor = TempfileEditor;
     match action {
-        PrAction::Create(args) => create::run(&jj, &gh, &editor, &config, &args).await?,
+        PrAction::Create(args) => {
+            editor::create::run(&jj, &gh, &OsEnv, &editor, &config, &args).await?
+        }
         PrAction::Fetch(args) => {
             let git = RealGit::new(jj.repo().clone());
             fetch::run_with(&jj, &gh, &git, &config, &args).await?;
@@ -129,6 +133,7 @@ pub async fn get_pr<J: Jj, G: Gh>(
     gh: &G,
     config: &Config,
     number_or_rev: &str,
+    body: bool,
 ) -> Result<PrDetails> {
     if let Ok(num) = number_or_rev.parse::<u64>() {
         let origin_url = jj
@@ -137,7 +142,7 @@ pub async fn get_pr<J: Jj, G: Gh>(
             .ok_or_else(|| anyhow!("`{}` remote is not configured", config.default_remote))?;
         let upstream_url = jj.remote_url(&config.upstream_remote).await?;
         let target = remote::target(&origin_url, upstream_url.as_deref())?;
-        gh.get_pr(&target.owner, &target.repo, num).await
+        gh.get_pr(&target.owner, &target.repo, num, body).await
     } else {
         let lookup = resolve_pr_for_rev(jj, gh, config, number_or_rev).await?;
         let summary = lookup.summary.ok_or_else(|| {
@@ -146,8 +151,13 @@ pub async fn get_pr<J: Jj, G: Gh>(
                 lookup.head_spec,
             )
         })?;
-        gh.get_pr(&lookup.target.owner, &lookup.target.repo, summary.number)
-            .await
+        gh.get_pr(
+            &lookup.target.owner,
+            &lookup.target.repo,
+            summary.number,
+            body,
+        )
+        .await
     }
 }
 

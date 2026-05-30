@@ -95,7 +95,7 @@ pub async fn run_with<J: Jj, G: Gh, GO: GitOps>(
         .ok_or_else(|| anyhow!("`{}` remote is not configured", config.default_remote))?;
     let (owner, repo) = parse_owner_repo(&origin_url)?;
 
-    let pr = gh.get_pr(&owner, &repo, args.pr).await?;
+    let pr = gh.get_pr(&owner, &repo, args.pr, false).await?;
 
     let template = resolve_template(config);
     let bookmark = bookmark_template::render(
@@ -210,7 +210,13 @@ mod tests {
         async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<()> {
             unimplemented!("fetch does not call add_labels")
         }
-        async fn get_pr(&self, owner: &str, repo: &str, number: u64) -> Result<PrDetails> {
+        async fn get_pr(
+            &self,
+            owner: &str,
+            repo: &str,
+            number: u64,
+            body: bool,
+        ) -> Result<PrDetails> {
             assert_eq!(owner, self.expected.0);
             assert_eq!(repo, self.expected.1);
             assert_eq!(number, self.expected.2);
@@ -274,7 +280,7 @@ mod tests {
             head_user_login: Some("octocat".into()),
             head_repo_name: Some("r".into()),
             graphql_node_id: "PR_kwDOABCDEF".into(),
-            has_merge_queue: false,
+            in_merge_queue: false,
         }
     }
 

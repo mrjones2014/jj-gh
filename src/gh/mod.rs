@@ -26,10 +26,14 @@ pub struct PrSummary {
 /// returns a null user/repo (e.g. the source fork has been deleted).
 #[derive(Debug, Clone)]
 pub struct PrDetails {
+    pub is_draft: bool,
+    pub auto_merge: bool,
+    pub auto_merge_method: Option<AutoMergeMethod>,
     pub number: u64,
     pub title: String,
     pub html_url: String,
     pub head_ref: String,
+    /// In GraphQL this is called `headRefOid`
     pub head_sha: String,
     pub head_user_login: Option<String>,
     pub head_repo_name: Option<String>,
@@ -37,7 +41,11 @@ pub struct PrDetails {
     /// True when the PR's base branch has a merge queue. Determines whether
     /// "merge when ready" routes through `enqueuePullRequest` instead of
     /// `enablePullRequestAutoMerge`.
-    pub has_merge_queue: bool,
+    pub in_merge_queue: bool,
+    pub labels: Vec<String>,
+    pub reviewers: Vec<String>,
+    /// Body, if you requested it
+    pub body: Option<String>,
 }
 
 /// Result of [`Gh::lookup_base`]: the base repo's GraphQL node ID plus whether
@@ -132,7 +140,7 @@ pub trait Gh {
     /// # Errors
     ///
     /// Returns a clear "not found" error on 404; propagates other API errors.
-    async fn get_pr(&self, owner: &str, repo: &str, number: u64) -> Result<PrDetails>;
+    async fn get_pr(&self, owner: &str, repo: &str, number: u64, body: bool) -> Result<PrDetails>;
 
     /// Enable "merge when ready" on a PR. Dispatches to either
     /// `enablePullRequestAutoMerge` or `enqueuePullRequest` based on

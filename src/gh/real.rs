@@ -7,10 +7,10 @@ use crate::{
         CreatePrInternal, CreatePrResponseData, CreatePrVariables, EnableAutoMergeInternal,
         EnableAutoMergeResponseData, EnableAutoMergeVariables, EnqueuePrInternal,
         EnqueuePrResponseData, EnqueuePrVariables, FindOpenPrInternal, FindOpenPrResponseData,
-        FindOpenPrVariables, GetPrInternal, GetPrResponseData, GetPrVariables, LookupBaseInternal,
-        LookupBaseResponseData, LookupBaseVariables, PrWithCiStatus, PrsWithCiStatusInternal,
-        PrsWithCiStatusResponseData, PrsWithCiStatusVariables, PullRequestMergeMethod,
-        PullRequestState,
+        FindOpenPrVariables, GetPrInternal, GetPrInternalRepositoryPullRequest, GetPrResponseData,
+        GetPrVariables, LookupBaseInternal, LookupBaseResponseData, LookupBaseVariables,
+        PrWithCiStatus, PrsWithCiStatusInternal, PrsWithCiStatusResponseData,
+        PrsWithCiStatusVariables, PullRequestMergeMethod, PullRequestState, RequestedReviewer,
     },
 };
 use anyhow::{Context, Result, anyhow};
@@ -189,37 +189,83 @@ impl Gh for OctocrabGh {
         Ok(())
     }
 
-    async fn get_pr(&self, owner: &str, repo: &str, number: u64) -> Result<PrDetails> {
+    async fn get_pr(&self, owner: &str, repo: &str, number: u64, body: bool) -> Result<PrDetails> {
         let vars = GetPrVariables {
             owner: owner.to_string(),
             name: repo.to_string(),
             number: i64::try_from(number).context("PR number out of range")?,
+            body,
         };
         let body = GetPrInternal::build_query(vars);
-        let data: GetPrResponseData = self
+        let data = self
             .octo
-            .graphql(&body)
+            .graphql::<GetPrResponseData>(&body)
             .await
             .map_err(humanize)
             .with_context(|| format!("fetching PR #{number} on {owner}/{repo}"))?;
-        let pr = data
+        let GetPrInternalRepositoryPullRequest {
+            id,
+            number,
+            title,
+            url,
+            head_ref_name,
+            head_ref_oid,
+            merge_queue,
+            head_repository,
+            labels,
+            is_draft,
+            auto_merge_request,
+            review_requests,
+            body,
+        } = data
             .repository
             .and_then(|r| r.pull_request)
             .ok_or_else(|| anyhow!("PR #{number} not found on {owner}/{repo}"))?;
-        let (head_user_login, head_repo_name) = match pr.head_repository {
+        let (head_user_login, head_repo_name) = match head_repository {
             Some(hr) => (Some(hr.owner.login), Some(hr.name)),
             None => (None, None),
         };
         Ok(PrDetails {
-            number: u64::try_from(pr.number).context("PR number out of range")?,
-            title: pr.title,
-            html_url: pr.url,
-            head_ref: pr.head_ref_name,
-            head_sha: pr.head_ref_oid,
+            number: u64::try_from(number).context("PR number out of range")?,
+            title,
+            is_draft,
+            html_url: url,
+            head_ref: head_ref_name,
+            head_sha: head_ref_oid,
             head_user_login,
             head_repo_name,
-            graphql_node_id: pr.id,
-            has_merge_queue: pr.merge_queue.is_some(),
+            graphql_node_id: id,
+            in_merge_queue: merge_queue.is_some(),
+            body: if body.is_empty() { None } else { Some(body) },
+            labels: labels
+                .and_then(|labels| labels.nodes)
+                .map(|labels| {
+                    labels
+                        .into_iter()
+                        .filter_map(|labels| labels)
+                        .map(|label| label.name)
+                        .collect()
+                })
+                .unwrap_or_default(),
+            auto_merge: auto_merge_request.is_some(),
+            auto_merge_method: auto_merge_request.and_then(|req| req.into()),
+            reviewers: review_requests
+                .and_then(|requests| requests.nodes)
+                .map(|nodes| {
+                    nodes
+                        .into_iter()
+                        .filter_map(|node| node)
+                        .filter_map(|node| node.requested_reviewer)
+                        .map(|node| match node {
+                            RequestedReviewer::User(user) => user.login,
+                            RequestedReviewer::Bot(clanker) => clanker.login,
+                            RequestedReviewer::Mannequin(mannequin) => mannequin.login,
+                            RequestedReviewer::Team(team) => team.combined_slug,
+                        })
+                        .map(|slug| format!("@{slug}"))
+                        .collect()
+                })
+                .unwrap_or_default(),
         })
     }
 

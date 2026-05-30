@@ -17,7 +17,10 @@ pub use enqueue_pr::{EnqueuePrInternal, EnqueuePrResponseData, EnqueuePrVariable
 pub use find_open_pr::{
     FindOpenPrInternal, FindOpenPrResponseData, FindOpenPrVariables, PullRequestState,
 };
-pub use get_pr::{GetPrInternal, GetPrResponseData, GetPrVariables};
+pub use get_pr::{
+    GetPrInternal, GetPrInternalRepositoryPullRequest, GetPrResponseData, GetPrVariables,
+    RequestedReviewer,
+};
 pub use lookup_base::{LookupBaseInternal, LookupBaseResponseData, LookupBaseVariables};
 pub use prs_with_ci_status::{
     CiStatus, PrWithCiStatus, PrsWithCiStatusInternal, PrsWithCiStatusResponseData,

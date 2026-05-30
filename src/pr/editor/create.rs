@@ -1,4 +1,5 @@
 use crate::{
+    auth::EnvReader,
     cli::AuthArgs,
     config::{AutoMergeMethod, Config},
     gh::{CreatePrRequest, Gh, remote},
@@ -96,9 +97,10 @@ pub struct CreateArgs {
 ///
 /// Returns an error from any step (rev resolution, GH API, push, editor, etc.).
 #[expect(clippy::too_many_lines)]
-pub async fn run<J, G, E>(
+pub async fn run<J, G, E, ENV>(
     jj: &J,
     gh: &G,
+    env: &ENV,
     editor: &E,
     config: &Config,
     args: &CreateArgs,
@@ -107,6 +109,7 @@ where
     J: Jj,
     G: Gh,
     E: EditorRoundTrip,
+    ENV: EnvReader,
 {
     let info = jj.resolve_rev(&args.rev).await?;
     let existing_branch = info.bookmarks.first().cloned();
@@ -170,9 +173,7 @@ where
     let initial_buffer = initial_fm.render(raw_template.as_deref().unwrap_or(""))?;
     let raw_template_body = raw_template.unwrap_or_default();
 
-    let visual = std::env::var("VISUAL").ok();
-    let editor_env = std::env::var("EDITOR").ok();
-    let editor_argv = resolve_editor_argv(config, visual.as_deref(), editor_env.as_deref())?;
+    let editor_argv = resolve_editor_argv(config, env)?;
     let edited = editor.edit(&editor_argv, &initial_buffer).await?;
     let (final_fm, body) = Frontmatter::parse(&edited)?;
     validation::validate(&final_fm, &body, &raw_template_body)?;

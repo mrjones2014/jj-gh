@@ -3,7 +3,10 @@
 //! Production [`TempfileEditor`] writes the initial buffer to a tempfile, spawns
 //! the editor (inheriting stdio), then reads back. Tests use a fake.
 
-use crate::config::Config;
+pub(crate) mod create;
+pub(crate) mod edit;
+
+use crate::{auth::EnvReader, config::Config};
 use anyhow::{Context, Result, anyhow};
 use tokio::process::Command;
 
@@ -28,19 +31,16 @@ pub trait EditorRoundTrip {
 /// # Errors
 ///
 /// Returns an error if no source produced a non-empty argv.
-pub fn resolve_editor_argv(
-    config: &Config,
-    visual: Option<&str>,
-    editor: Option<&str>,
-) -> Result<Vec<String>> {
+#[must_use]
+pub fn resolve_editor_argv<E: EnvReader>(config: &Config, env: &E) -> Result<Vec<String>> {
     if let Some(argv) = config.editor.as_deref().filter(|v| !v.is_empty()) {
         return Ok(argv.to_vec());
     }
 
-    for (name, value) in [("VISUAL", visual), ("EDITOR", editor)] {
+    for (name, value) in [("VISUAL", env.get("VISUAL")), ("EDITOR", env.get("EDITOR"))] {
         if let Some(raw) = value.filter(|s| !s.trim().is_empty()) {
             let parts =
-                shell_words::split(raw).with_context(|| format!("could not split ${name}"))?;
+                shell_words::split(&raw).with_context(|| format!("could not split ${name}"))?;
             if !parts.is_empty() {
                 return Ok(parts);
             }
@@ -84,6 +84,27 @@ impl EditorRoundTrip for TempfileEditor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+
+    #[derive(Default)]
+    struct FakeEnv(HashMap<String, String>);
+
+    impl FakeEnv {
+        fn with(pairs: &[(&str, &str)]) -> Self {
+            Self(
+                pairs
+                    .iter()
+                    .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+                    .collect(),
+            )
+        }
+    }
+
+    impl EnvReader for FakeEnv {
+        fn get(&self, key: &str) -> Option<String> {
+            self.0.get(key).cloned()
+        }
+    }
 
     fn cfg() -> Config {
         Config::default()
@@ -93,25 +114,29 @@ mod tests {
     fn config_used_when_set() {
         let mut c = cfg();
         c.editor = Some(vec!["code".into(), "--wait".into()]);
-        let argv = resolve_editor_argv(&c, Some("vim"), Some("vi")).unwrap();
+        let env = FakeEnv::with(&[("VISUAL", "vim"), ("EDITOR", "vi")]);
+        let argv = resolve_editor_argv(&c, &env).unwrap();
         assert_eq!(argv, vec!["code".to_string(), "--wait".into()]);
     }
 
     #[test]
     fn visual_outranks_editor() {
-        let argv = resolve_editor_argv(&cfg(), Some("nvim +7"), Some("vi")).unwrap();
+        let env = FakeEnv::with(&[("VISUAL", "nvim +7"), ("EDITOR", "vi")]);
+        let argv = resolve_editor_argv(&cfg(), &env).unwrap();
         assert_eq!(argv, vec!["nvim".to_string(), "+7".into()]);
     }
 
     #[test]
     fn editor_env_used_when_visual_absent() {
-        let argv = resolve_editor_argv(&cfg(), None, Some("vi")).unwrap();
+        let env = FakeEnv::with(&[("EDITOR", "vi")]);
+        let argv = resolve_editor_argv(&cfg(), &env).unwrap();
         assert_eq!(argv, vec!["vi".to_string()]);
     }
 
     #[test]
     fn empty_visual_falls_through_to_editor() {
-        let argv = resolve_editor_argv(&cfg(), Some(""), Some("vi")).unwrap();
+        let env = FakeEnv::with(&[("VISUAL", ""), ("EDITOR", "vi")]);
+        let argv = resolve_editor_argv(&cfg(), &env).unwrap();
         assert_eq!(argv, vec!["vi".to_string()]);
     }
 
@@ -119,13 +144,15 @@ mod tests {
     fn empty_config_editor_falls_through() {
         let mut c = cfg();
         c.editor = Some(vec![]);
-        let argv = resolve_editor_argv(&c, None, Some("vi")).unwrap();
+        let env = FakeEnv::with(&[("EDITOR", "vi")]);
+        let argv = resolve_editor_argv(&c, &env).unwrap();
         assert_eq!(argv, vec!["vi".to_string()]);
     }
 
     #[test]
     fn no_sources_errors() {
-        let err = resolve_editor_argv(&cfg(), None, None).unwrap_err();
+        let env = FakeEnv::default();
+        let err = resolve_editor_argv(&cfg(), &env).unwrap_err();
         assert!(err.to_string().contains("no editor configured"));
     }
 }
