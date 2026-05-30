@@ -38,16 +38,6 @@ pub fn validate(fm: &Frontmatter, body: &str, raw_template_body: &str) -> Result
         );
     }
 
-    if fm
-        .reviewers
-        .iter()
-        .any(|r| r.chars().filter(|c| c == &'/').count() > 1)
-    {
-        return Err(anyhow!(
-            "Invalid reviewers; team reviewers should be in the form `your-org/team-name` and contain exactly 1 `/`"
-        ));
-    }
-
     Ok(())
 }
 

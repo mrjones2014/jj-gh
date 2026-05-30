@@ -1,20 +1,55 @@
-query GetPrInternal($owner: String!, $name: String!, $number: Int!) {
+query GetPrInternal(
+  $owner: String!
+  $name: String!
+  $number: Int!
+  $body: Boolean!
+) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
       id
+      isDraft
       number
       title
       url
       headRefName
       headRefOid
+      body @include(if: $body)
       mergeQueue {
         id
+      }
+      autoMergeRequest {
+        mergeMethod
+      }
+      reviewRequests(first: 100) {
+        nodes {
+          requestedReviewer {
+            __typename
+            ... on Bot {
+              login
+            }
+            ... on Mannequin {
+              login
+            }
+            ... on User {
+              login
+            }
+            ... on Team {
+              combinedSlug
+            }
+          }
+        }
       }
       headRepository {
         name
         owner {
           __typename
           login
+        }
+      }
+      labels(first: 100) {
+        nodes {
+          id
+          name
         }
       }
     }

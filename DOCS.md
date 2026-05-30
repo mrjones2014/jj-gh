@@ -11,6 +11,7 @@ This document contains the help content for the `jj-gh` command-line program.
 - [`jj-gh pr create`↴](#jj-gh-pr-create)
 - [`jj-gh pr fetch`↴](#jj-gh-pr-fetch)
 - [`jj-gh pr auto-merge`↴](#jj-gh-pr-auto-merge)
+- [`jj-gh pr edit`↴](#jj-gh-pr-edit)
 - [`jj-gh pr log`↴](#jj-gh-pr-log)
 - [`jj-gh debug`↴](#jj-gh-debug)
 - [`jj-gh debug config`↴](#jj-gh-debug-config)
@@ -50,6 +51,7 @@ Commands to work with PRs
 - `create` — Open your preferred editor to create a PR from a revision
 - `fetch` — Fetch a pull request into a local bookmark
 - `auto-merge` — Enable auto-merge on a PR
+- `edit` — Edit an existing PR's title, body, base, labels, reviewers, draft state, and auto-merge settings via the markdown frontmatter editor flow
 - `log` — Like `jj log`, but injects PR metadata (e.g. number, CI status, URL)
 
 ## `jj-gh pr create`
@@ -137,6 +139,27 @@ Accepts either a PR number or a revision; with a revision, the PR is looked up b
 
   Possible values: `merge`, `squash`, `rebase`
 
+- `--gh-askpass <CMD>` — Askpass helper command that prints a GitHub token on stdout; shell-words split, e.g. `--gh-askpass "op read op://Vault/gh/token"`. Default: `gh_askpass` in config, then `$GH_ASKPASS`
+- `--askpass-timeout <SECS>` — Timeout in seconds for the askpass helper. Default: 20
+
+## `jj-gh pr edit`
+
+Edit an existing PR's title, body, base, labels, reviewers, draft state, and auto-merge settings via the markdown frontmatter editor flow.
+
+Resolves the PR from a revision (via its local bookmark) or a PR number, fetches its current state, opens your editor, and applies only the diffs: labels you didn't touch keep whatever others (CI bots, etc.) set.
+
+**Usage:** `jj-gh pr edit [OPTIONS] <PR_NUM|REV>`
+
+**Command Alias:** `e`
+
+###### **Arguments:**
+
+- `<PR_NUM|REV>` — PR number, or revision ID to look up a PR from
+
+###### **Options:**
+
+- `-f`, `--force` — Edit even if the PR body is empty. By default, `jj-gh` refuses to edit an empty body to avoid clobbering one that exists but failed to load
+- `-e`, `--editor <CMD>` — Editor command; shell-words split, e.g. `--editor "nvim +7"`. Default: `editor` in config, then `$VISUAL`, then `$EDITOR`
 - `--gh-askpass <CMD>` — Askpass helper command that prints a GitHub token on stdout; shell-words split, e.g. `--gh-askpass "op read op://Vault/gh/token"`. Default: `gh_askpass` in config, then `$GH_ASKPASS`
 - `--askpass-timeout <SECS>` — Timeout in seconds for the askpass helper. Default: 20
 

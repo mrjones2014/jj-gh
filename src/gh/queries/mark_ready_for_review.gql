@@ -1,0 +1,7 @@
+mutation MarkReadyForReviewInternal($prId: ID!) {
+  markPullRequestReadyForReview(input: { pullRequestId: $prId }) {
+    pullRequest {
+      id
+    }
+  }
+}

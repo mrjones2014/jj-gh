@@ -12,7 +12,7 @@
 //! <body>
 //! ```
 
-use crate::config::AutoMergeMethod;
+use crate::{config::AutoMergeMethod, gh::Reviewer};
 use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
 
@@ -27,7 +27,7 @@ pub struct Frontmatter {
     #[serde(default)]
     pub labels: Vec<String>,
     #[serde(default)]
-    pub reviewers: Vec<String>,
+    pub reviewers: Vec<Reviewer>,
     #[serde(default)]
     pub draft: bool,
     #[serde(default)]
@@ -79,7 +79,7 @@ mod tests {
             title: title.into(),
             base: "main".into(),
             labels: vec!["bug".into(), "p1".into()],
-            reviewers: vec!["@john-carmack".into()],
+            reviewers: vec![Reviewer::parse("@john-carmack").unwrap()],
             draft: false,
             auto_merge: false,
             auto_merge_method: AutoMergeMethod::Merge,

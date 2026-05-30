@@ -123,7 +123,7 @@ pub async fn run_with<J: Jj, G: Gh, GO: GitOps>(
         .ok_or_else(|| anyhow!("`{}` remote is not configured", config.default_remote))?;
     let (owner, repo) = parse_owner_repo(&origin_url)?;
 
-    let pr = gh.get_pr(&owner, &repo, args.pr).await?;
+    let pr = gh.get_pr(&owner, &repo, args.pr, false).await?;
     if pr.head_user_login.is_none() || pr.head_repo_name.is_none() {
         log::warn!(
             "PR #{}: head fork appears deleted; `pr_head_user` / `pr_head_repo` will be empty",
@@ -310,14 +310,41 @@ mod tests {
             _owner: &str,
             _repo: &str,
             _pr: u64,
-            _reviewers: Vec<String>,
+            _reviewers: Vec<crate::gh::Reviewer>,
         ) -> Result<()> {
             unimplemented!("fetch does not call add_reviewers")
+        }
+        async fn remove_reviewers(
+            &self,
+            _owner: &str,
+            _repo: &str,
+            _pr: u64,
+            _reviewers: Vec<crate::gh::Reviewer>,
+        ) -> Result<()> {
+            unimplemented!("fetch does not call remove_reviewers")
         }
         async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<()> {
             unimplemented!("fetch does not call add_labels")
         }
-        async fn get_pr(&self, owner: &str, repo: &str, number: u64) -> Result<PrDetails> {
+        async fn remove_labels(&self, _: &str, _: &[String]) -> Result<()> {
+            unimplemented!("fetch does not call remove_labels")
+        }
+        async fn update_pr(&self, _req: crate::gh::UpdatePr) -> Result<()> {
+            unimplemented!("fetch does not call update_pr")
+        }
+        async fn set_draft(&self, _pr_node_id: &str, _draft: bool) -> Result<()> {
+            unimplemented!("fetch does not call set_draft")
+        }
+        async fn disable_auto_merge(&self, _pr_node_id: &str) -> Result<()> {
+            unimplemented!("fetch does not call disable_auto_merge")
+        }
+        async fn get_pr(
+            &self,
+            owner: &str,
+            repo: &str,
+            number: u64,
+            _body: bool,
+        ) -> Result<PrDetails> {
             assert_eq!(owner, self.expected.0);
             assert_eq!(repo, self.expected.1);
             assert_eq!(number, self.expected.2);
@@ -379,7 +406,13 @@ mod tests {
             head_user_login: Some("octocat".into()),
             head_repo_name: Some("r".into()),
             graphql_node_id: "PR_kwDOABCDEF".into(),
-            has_merge_queue: false,
+            in_merge_queue: false,
+            is_draft: false,
+            auto_merge: false,
+            auto_merge_method: None,
+            labels: vec![],
+            reviewers: vec![],
+            body: None,
         }
     }
 

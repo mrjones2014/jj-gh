@@ -1,7 +1,6 @@
 //! End-to-end orchestrator for `jj-gh pr create` / `jj-gh pr fetch` / `jj-gh pr auto-merge`.
 
 mod auto_merge;
-mod create;
 mod editor;
 pub mod fetch;
 mod frontmatter;
@@ -10,7 +9,7 @@ mod template;
 mod validation;
 
 use crate::{
-    auth,
+    auth::{self, OsEnv},
     cli::GlobalOpts,
     config::{self, Config},
     fs::RealFs,
@@ -21,13 +20,18 @@ use crate::{
         inject::{TemplateAliases, escape_jj_string},
     },
     pr::{
-        auto_merge::AutoMergeArgs, create::CreateArgs, editor::TempfileEditor, fetch::FetchArgs,
-        pr_log::PrLogArgs, template::TemplateSource,
+        auto_merge::AutoMergeArgs,
+        editor::{TempfileEditor, edit::EditArgs},
+        fetch::FetchArgs,
+        pr_log::PrLogArgs,
+        template::TemplateSource,
     },
 };
 use anyhow::{Context, Result, anyhow};
 use clap::Subcommand;
 use figment::providers::Serialized;
+
+pub use editor::create::CreateArgs;
 
 #[derive(Debug, Subcommand)]
 pub enum PrAction {
@@ -54,6 +58,14 @@ pub enum PrAction {
     /// local bookmark. Fails if the repo does not allow auto-merge.
     #[command(visible_alias = "am")]
     AutoMerge(AutoMergeArgs),
+    /// Edit an existing PR's title, body, base, labels, reviewers, draft state,
+    /// and auto-merge settings via the markdown frontmatter editor flow.
+    ///
+    /// Resolves the PR from a revision (via its local bookmark) or a PR number,
+    /// fetches its current state, opens your editor, and applies only the diffs:
+    /// labels you didn't touch keep whatever others (CI bots, etc.) set.
+    #[command(visible_alias = "e")]
+    Edit(EditArgs),
 
     /// Like `jj log`, but injects PR metadata (e.g. number, CI status, URL).
     ///
@@ -85,6 +97,7 @@ pub async fn dispatch(global: &GlobalOpts, action: PrAction) -> Result<()> {
         PrAction::Create(a) => fig.merge(Serialized::defaults(a)),
         PrAction::Fetch(a) => fig.merge(Serialized::defaults(a)),
         PrAction::AutoMerge(a) => fig.merge(Serialized::defaults(a)),
+        PrAction::Edit(a) => fig.merge(Serialized::defaults(a)),
         PrAction::Log(a) => fig.merge(Serialized::defaults(a)),
     };
     let config = config::extract(&fig)?;
@@ -94,12 +107,17 @@ pub async fn dispatch(global: &GlobalOpts, action: PrAction) -> Result<()> {
     let gh = gh::real::OctocrabGh::new(&token)?;
     let editor = TempfileEditor;
     match action {
-        PrAction::Create(args) => create::run(&jj, &gh, &editor, &config, &args).await?,
+        PrAction::Create(args) => {
+            editor::create::run(&jj, &gh, &OsEnv, &editor, &config, &args).await?;
+        }
         PrAction::Fetch(args) => {
             let git = RealGit::new(jj.repo().clone());
             fetch::run_with(&jj, &gh, &git, &config, &args).await?;
         }
         PrAction::AutoMerge(args) => auto_merge::run(&jj, &gh, &config, &args).await?,
+        PrAction::Edit(args) => {
+            editor::edit::run(&jj, &gh, &OsEnv, &editor, &config, &args).await?;
+        }
         PrAction::Log(args) => pr_log::run(&args, &config, &gh, &jj).await?,
     }
     Ok(())
@@ -131,6 +149,7 @@ pub async fn get_pr<J: Jj, G: Gh>(
     gh: &G,
     config: &Config,
     number_or_rev: &str,
+    body: bool,
 ) -> Result<PrDetails> {
     if let Ok(num) = number_or_rev.parse::<u64>() {
         let origin_url = jj
@@ -139,7 +158,7 @@ pub async fn get_pr<J: Jj, G: Gh>(
             .ok_or_else(|| anyhow!("`{}` remote is not configured", config.default_remote))?;
         let upstream_url = jj.remote_url(&config.upstream_remote).await?;
         let target = remote::target(&origin_url, upstream_url.as_deref())?;
-        gh.get_pr(&target.owner, &target.repo, num).await
+        gh.get_pr(&target.owner, &target.repo, num, body).await
     } else {
         let lookup = resolve_pr_for_rev(jj, gh, config, number_or_rev).await?;
         let summary = lookup.summary.ok_or_else(|| {
@@ -148,8 +167,13 @@ pub async fn get_pr<J: Jj, G: Gh>(
                 lookup.head_spec,
             )
         })?;
-        gh.get_pr(&lookup.target.owner, &lookup.target.repo, summary.number)
-            .await
+        gh.get_pr(
+            &lookup.target.owner,
+            &lookup.target.repo,
+            summary.number,
+            body,
+        )
+        .await
     }
 }
 

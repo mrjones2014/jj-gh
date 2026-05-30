@@ -37,11 +37,11 @@ where
         method: _,
         auth: _,
     } = args;
-    let pr = pr::get_pr(jj, gh, config, number_or_rev).await?;
+    let pr = pr::get_pr(jj, gh, config, number_or_rev, false).await?;
 
     gh.enable_auto_merge(
         &pr.graphql_node_id,
-        pr.has_merge_queue,
+        pr.in_merge_queue,
         config.auto_merge_method,
     )
     .await
