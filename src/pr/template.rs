@@ -143,10 +143,6 @@ mod tests {
             template_file: None,
             no_template: false,
             editor: None,
-            auth: crate::cli::AuthArgs {
-                gh_askpass: None,
-                askpass_timeout_secs: None,
-            },
         }
     }
 

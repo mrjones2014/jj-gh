@@ -1,0 +1,19 @@
+mutation UpdatePrInternal(
+  $prId: ID!
+  $title: String
+  $body: String
+  $baseRefName: String
+) {
+  updatePullRequest(
+    input: {
+      pullRequestId: $prId
+      title: $title
+      body: $body
+      baseRefName: $baseRefName
+    }
+  ) {
+    pullRequest {
+      id
+    }
+  }
+}

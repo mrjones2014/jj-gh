@@ -1,0 +1,7 @@
+mutation RemoveLabelsInternal($prId: ID!, $labelIds: [ID!]!) {
+  removeLabelsFromLabelable(
+    input: { labelableId: $prId, labelIds: $labelIds }
+  ) {
+    clientMutationId
+  }
+}

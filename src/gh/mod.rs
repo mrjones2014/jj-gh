@@ -7,10 +7,12 @@ use crate::config::AutoMergeMethod;
 use anyhow::Result;
 
 mod queries;
+mod reviewer;
 
 pub mod real;
 pub mod remote;
 pub use queries::{CiStatus, PrWithCiStatus};
+pub use reviewer::Reviewer;
 
 /// Summary of an existing pull request. Just the fields we render.
 #[derive(Debug, Clone)]
@@ -26,10 +28,14 @@ pub struct PrSummary {
 /// returns a null user/repo (e.g. the source fork has been deleted).
 #[derive(Debug, Clone)]
 pub struct PrDetails {
+    pub is_draft: bool,
+    pub auto_merge: bool,
+    pub auto_merge_method: Option<AutoMergeMethod>,
     pub number: u64,
     pub title: String,
     pub html_url: String,
     pub head_ref: String,
+    /// In GraphQL this is called `headRefOid`
     pub head_sha: String,
     pub head_user_login: Option<String>,
     pub head_repo_name: Option<String>,
@@ -37,7 +43,11 @@ pub struct PrDetails {
     /// True when the PR's base branch has a merge queue. Determines whether
     /// "merge when ready" routes through `enqueuePullRequest` instead of
     /// `enablePullRequestAutoMerge`.
-    pub has_merge_queue: bool,
+    pub in_merge_queue: bool,
+    pub labels: Vec<Label>,
+    pub reviewers: Vec<Reviewer>,
+    /// Body, if you requested it
+    pub body: Option<String>,
 }
 
 /// Result of [`Gh::lookup_base`]: the base repo's GraphQL node ID plus whether
@@ -61,6 +71,32 @@ pub struct CreatePrRequest {
     pub head: String,
     pub base: String,
     pub draft: bool,
+}
+
+/// Mutable text fields on an existing PR. `None` fields are left untouched.
+#[derive(Debug, Clone, Default)]
+pub struct UpdatePr {
+    pub pr_node_id: String,
+    pub title: Option<String>,
+    pub body: Option<String>,
+    pub base_ref_name: Option<String>,
+}
+
+impl UpdatePr {
+    /// True when no text field would actually change. Callers can skip the
+    /// API round-trip for this case.
+    #[must_use]
+    pub fn is_noop(&self) -> bool {
+        self.title.is_none() && self.body.is_none() && self.base_ref_name.is_none()
+    }
+}
+
+/// One label on a PR, with both the human-readable name and the GraphQL
+/// node ID required to mutate it via `removeLabelsFromLabelable`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Label {
+    pub name: String,
+    pub node_id: String,
 }
 
 /// Result of a successful [`Gh::create_pr`].
@@ -105,16 +141,34 @@ pub trait Gh {
     /// Propagates API errors.
     async fn create_pr(&self, req: CreatePrRequest) -> Result<PrCreated>;
 
-    /// Add reviewers to a PR. Will not remove existing reviewers.
+    /// Request reviews from users and/or teams on a PR; additive, does not
+    /// remove existing review requests.
+    ///
+    /// # Errors
+    ///
+    /// Propagates API errors.
     async fn add_reviewers(
         &self,
         owner: &str,
         repo: &str,
         pr: u64,
-        reviewers: Vec<String>,
+        reviewers: Vec<Reviewer>,
     ) -> Result<()>;
 
-    /// Add labels to a PR.
+    /// Remove review requests for the listed users and/or teams.
+    ///
+    /// # Errors
+    ///
+    /// Propagates API errors.
+    async fn remove_reviewers(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr: u64,
+        reviewers: Vec<Reviewer>,
+    ) -> Result<()>;
+
+    /// Add labels to a PR; additive, does not remove any labels.
     ///
     /// # Errors
     ///
@@ -127,12 +181,42 @@ pub trait Gh {
         labels: &[String],
     ) -> Result<()>;
 
+    /// Remove the given labels from a PR by their GraphQL node IDs.
+    ///
+    /// # Errors
+    ///
+    /// Propagates API errors.
+    async fn remove_labels(&self, pr_node_id: &str, label_node_ids: &[String]) -> Result<()>;
+
+    /// Update mutable text fields on a PR.
+    ///
+    /// # Errors
+    ///
+    /// Propagates API errors.
+    async fn update_pr(&self, req: UpdatePr) -> Result<()>;
+
+    /// Toggle a PR's draft state. `draft = true` converts to draft;
+    /// `draft = false` marks ready for review.
+    ///
+    /// # Errors
+    ///
+    /// Propagates API errors.
+    async fn set_draft(&self, pr_node_id: &str, draft: bool) -> Result<()>;
+
+    /// Disable "merge when ready" on a PR. No-op on the server if auto-merge
+    /// was not enabled.
+    ///
+    /// # Errors
+    ///
+    /// Propagates API errors.
+    async fn disable_auto_merge(&self, pr_node_id: &str) -> Result<()>;
+
     /// Fetch full metadata for a PR by number.
     ///
     /// # Errors
     ///
     /// Returns a clear "not found" error on 404; propagates other API errors.
-    async fn get_pr(&self, owner: &str, repo: &str, number: u64) -> Result<PrDetails>;
+    async fn get_pr(&self, owner: &str, repo: &str, number: u64, body: bool) -> Result<PrDetails>;
 
     /// Enable "merge when ready" on a PR. Dispatches to either
     /// `enablePullRequestAutoMerge` or `enqueuePullRequest` based on

@@ -10,7 +10,6 @@
 //! didn't pass their own `-T` / `--template`.
 
 use crate::{
-    cli::AuthArgs,
     config::Config,
     gh::{CiStatus, Gh, PrWithCiStatus},
     git,
@@ -77,10 +76,6 @@ pub struct PrLogArgs {
     #[arg(last = true, allow_hyphen_values = true, value_name = "JJ_LOG_ARGS")]
     #[serde(skip)]
     pub jj_log_args: Vec<String>,
-
-    #[command(flatten)]
-    #[serde(flatten)]
-    pub auth: AuthArgs,
 
     /// Force enable the use of nerdfont icons in the default
     /// `pr log` template. Overrides config. Use `--no-nerdfonts` to disable.

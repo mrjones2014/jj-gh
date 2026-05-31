@@ -1,0 +1,7 @@
+mutation DisableAutoMergeInternal($prId: ID!) {
+  disablePullRequestAutoMerge(input: { pullRequestId: $prId }) {
+    pullRequest {
+      id
+    }
+  }
+}
