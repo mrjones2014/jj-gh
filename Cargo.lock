@@ -2138,6 +2138,7 @@ dependencies = [
 name = "jj-gh"
 version = "0.2.0"
 dependencies = [
+ "anstyle",
  "anyhow",
  "clap",
  "clap_complete",
@@ -2147,7 +2148,6 @@ dependencies = [
  "graphql_client",
  "http",
  "log",
- "nu-ansi-term",
  "octocrab",
  "schemars",
  "secrecy",

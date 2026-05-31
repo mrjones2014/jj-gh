@@ -1,13 +1,13 @@
 //! CLI Logging
 
+use anstyle::{AnsiColor, Color, Style};
 use flexi_logger::{
     AdaptiveFormat, DeferredNow, FlexiLoggerError, LogSpecification, Logger, LoggerHandle,
 };
 use log::Record;
-use nu_ansi_term::{Color, Style};
+use std::fmt::Display;
 
 pub use log::{LevelFilter, debug, error, info, warn};
-use std::fmt::Display;
 
 const ENV_FILTER: &str = "JJ_GH_LOG";
 
@@ -47,13 +47,13 @@ pub fn init(level: LevelFilter) -> Result<LoggerHandle, FlexiLoggerError> {
         .start()
 }
 
-fn level_palette(level: log::Level) -> (&'static str, Color) {
+fn level_palette(level: log::Level) -> (&'static str, AnsiColor) {
     match level {
-        log::Level::Error => (" ERROR ", Color::Red),
-        log::Level::Warn => (" WARN  ", Color::Yellow),
-        log::Level::Info => (" INFO  ", Color::Blue),
-        log::Level::Debug => (" DEBUG ", Color::Magenta),
-        log::Level::Trace => (" TRACE ", Color::DarkGray),
+        log::Level::Error => (" ERROR ", AnsiColor::Red),
+        log::Level::Warn => (" WARN  ", AnsiColor::Yellow),
+        log::Level::Info => (" INFO  ", AnsiColor::Blue),
+        log::Level::Debug => (" DEBUG ", AnsiColor::Magenta),
+        log::Level::Trace => (" TRACE ", AnsiColor::BrightBlack),
     }
 }
 
@@ -62,24 +62,31 @@ fn pretty_format(
     _now: &mut DeferredNow,
     record: &Record,
 ) -> std::io::Result<()> {
-    let (tag, color) = level_palette(record.level());
-    let tag_fg = if matches!(record.level(), log::Level::Warn) {
-        Color::Black
+    let (tag, bg) = level_palette(record.level());
+    let fg = if matches!(record.level(), log::Level::Warn) {
+        AnsiColor::Black
     } else {
-        Color::White
+        AnsiColor::White
     };
-    let tag_style = tag_fg.on(color).bold();
-    let msg_style = color.normal();
+    let tag_style = Style::new()
+        .fg_color(Some(Color::Ansi(fg)))
+        .bg_color(Some(Color::Ansi(bg)))
+        .bold();
+    let msg_style = Style::new().fg_color(Some(Color::Ansi(bg)));
     write!(
         w,
-        "{} {}",
-        tag_style.paint(tag),
-        msg_style.paint(format!("{}", record.args()))
+        "{}{tag}{} {}{}{}",
+        tag_style.render(),
+        tag_style.render_reset(),
+        msg_style.render(),
+        record.args(),
+        msg_style.render_reset(),
     )?;
     if matches!(record.level(), log::Level::Debug | log::Level::Trace)
         && let Some(m) = record.module_path()
     {
-        write!(w, " {}", Style::new().dimmed().paint(format!("({m})")))?;
+        let dim = Style::new().dimmed();
+        write!(w, " {}({m}){}", dim.render(), dim.render_reset())?;
     }
     Ok(())
 }

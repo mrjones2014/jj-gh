@@ -1,14 +1,26 @@
 //! CLI arg parser
 
 use crate::{completions::SubcommandStr, pr::PrAction};
-use clap::{Parser, Subcommand};
+use clap::{
+    Parser, Subcommand,
+    builder::{Styles, styling::AnsiColor},
+};
 use clap_complete::Shell;
 use log::LevelFilter;
 use serde::Serialize;
 use std::io::IsTerminal;
 
+const STYLES: Styles = Styles::styled()
+    .header(AnsiColor::Yellow.on_default().bold())
+    .usage(AnsiColor::Yellow.on_default().bold())
+    .literal(AnsiColor::Green.on_default().bold())
+    .placeholder(AnsiColor::Cyan.on_default())
+    .error(AnsiColor::Red.on_default().bold())
+    .valid(AnsiColor::Green.on_default().bold())
+    .invalid(AnsiColor::Red.on_default().bold());
+
 #[derive(Debug, Parser)]
-#[command(name = "jj-gh", version, about)]
+#[command(name = "jj-gh", version, about, styles = STYLES)]
 pub struct Cli {
     #[command(flatten)]
     pub global: GlobalOpts,
