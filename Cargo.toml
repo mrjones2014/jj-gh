@@ -26,6 +26,7 @@ members = ["tools/gen-docs", "tools/print-config-schema"]
 schema-validation = ["dep:schemars"]
 
 [dependencies]
+anstyle = "1"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
@@ -45,7 +46,6 @@ gix = { version = "0.84", default-features = false, features = [
 graphql_client = "0.16"
 http = "1"
 log = "0.4"
-nu-ansi-term = "0.50"
 octocrab = "0.51"
 schemars = { version = "1", optional = true }
 secrecy = { version = "0.10", features = ["serde"] }
