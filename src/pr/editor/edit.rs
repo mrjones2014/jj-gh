@@ -1,6 +1,5 @@
 use crate::{
     auth::EnvReader,
-    cli::AuthArgs,
     config::Config,
     gh::{Gh, PrDetails, remote::Target},
     jj::Jj,
@@ -32,10 +31,6 @@ pub struct EditArgs {
     #[arg(short = 'e', long, value_name = "CMD", value_parser = shell_words::split)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub editor: Option<Vec<String>>,
-
-    #[command(flatten)]
-    #[serde(flatten)]
-    pub auth: AuthArgs,
 }
 
 /// Fetch a PR, open the editor, and apply only the diff. Properties the user

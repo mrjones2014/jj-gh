@@ -1,6 +1,5 @@
 use crate::{
     auth::EnvReader,
-    cli::AuthArgs,
     config::{AutoMergeMethod, Config},
     gh::{CreatePrRequest, Gh, remote},
     jj::{self, Jj},
@@ -110,10 +109,6 @@ pub struct CreateArgs {
     #[arg(short = 'e', long, value_name = "CMD", value_parser = shell_words::split)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub editor: Option<Vec<String>>,
-
-    #[command(flatten)]
-    #[serde(flatten)]
-    pub auth: AuthArgs,
 }
 
 /// Run the full pr-create flow.

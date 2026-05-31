@@ -470,20 +470,12 @@ mod tests {
         assert!(!c.nerdfonts);
     }
 
-    fn empty_auth() -> crate::cli::AuthArgs {
-        crate::cli::AuthArgs {
-            gh_askpass: None,
-            askpass_timeout_secs: None,
-        }
-    }
-
     #[test]
     fn fetch_cli_template_overrides_config() {
         let args = FetchArgs {
             pr: 1,
             template: Some("cli-{number}".into()),
             force: false,
-            auth: empty_auth(),
         };
         let fig = config::defaults_figment()
             .merge(Serialized::default(
@@ -503,7 +495,6 @@ mod tests {
         let args = AutoMergeArgs {
             number_or_rev: "1".into(),
             method: Some(AutoMergeMethod::Squash),
-            auth: empty_auth(),
         };
         let fig = config::defaults_figment()
             .merge(Serialized::default(
@@ -513,31 +504,6 @@ mod tests {
             .merge(Serialized::defaults(&args));
         let c = config::extract(&fig).unwrap();
         assert_eq!(c.auto_merge_method, AutoMergeMethod::Squash);
-    }
-
-    #[test]
-    fn auth_cli_overrides_config_via_flatten() {
-        let args = AutoMergeArgs {
-            number_or_rev: "1".into(),
-            method: None,
-            auth: crate::cli::AuthArgs {
-                gh_askpass: Some(vec!["cli-askpass".into()]),
-                askpass_timeout_secs: Some(99),
-            },
-        };
-        let fig = config::defaults_figment()
-            .merge(Serialized::default(
-                "gh_askpass",
-                vec!["cfg-askpass".to_string()],
-            ))
-            .merge(Serialized::default("askpass_timeout_secs", 5u64))
-            .merge(Serialized::defaults(&args));
-        let c = config::extract(&fig).unwrap();
-        assert_eq!(
-            c.gh_askpass.as_deref(),
-            Some(&["cli-askpass".to_string()][..])
-        );
-        assert_eq!(c.askpass_timeout_secs, 99);
     }
 
     #[test]

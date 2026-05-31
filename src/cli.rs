@@ -45,6 +45,10 @@ pub struct GlobalOpts {
     #[arg(long = "upstream-remote", value_name = "NAME", global = true)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub upstream_remote: Option<String>,
+
+    #[command(flatten)]
+    #[serde(flatten)]
+    pub auth: AuthArgs,
 }
 
 impl GlobalOpts {

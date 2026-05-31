@@ -39,6 +39,8 @@ Opinionated `jj` tools for working with GitHub from your terminal
 - `--log-level <LEVEL>` — Set log level explicitly, overrides `-v` and `-q`
 - `--remote <NAME>` — Git remote used for the user's own pushes and PR head lookups. Overrides config `default_remote` (default: `origin`)
 - `--upstream-remote <NAME>` — Git remote used as the PR target in fork workflows. Overrides config `upstream_remote` (default: `upstream`)
+- `--gh-askpass <CMD>` — Askpass helper command that prints a GitHub token on stdout; shell-words split, e.g. `--gh-askpass "op read op://Vault/gh/token"`. Default: `gh_askpass` in config, then `$GH_ASKPASS`
+- `--askpass-timeout <SECS>` — Timeout in seconds for the askpass helper. Default: 20
 
 ## `jj-gh pr`
 
@@ -89,8 +91,6 @@ Opens your editor to a markdown file where you can write the PR description, and
 - `--template-file <PATH_OR_NAME>` — Path or name (under `.github/PULL_REQUEST_TEMPLATE/`) of a markdown template file to use as the PR body. Mutually exclusive with `-T` and `--no-template`
 - `--no-template` — Skip body templating entirely
 - `-e`, `--editor <CMD>` — Editor command; shell-words split, e.g. `--editor "nvim +7"`. Default: `editor` in config, then `$VISUAL`, then `$EDITOR`
-- `--gh-askpass <CMD>` — Askpass helper command that prints a GitHub token on stdout; shell-words split, e.g. `--gh-askpass "op read op://Vault/gh/token"`. Default: `gh_askpass` in config, then `$GH_ASKPASS`
-- `--askpass-timeout <SECS>` — Timeout in seconds for the askpass helper. Default: 20
 
 ## `jj-gh pr fetch`
 
@@ -116,8 +116,6 @@ See: <https://github.com/jj-vcs/jj/issues/4388>
   - `pr_number`: PR number as a decimal string. - `pr_title`: PR title. - `pr_branch`: head ref name (the source branch on the PR's fork). - `pr_url`: PR's `html_url`. - `pr_head_sha`: 40-char hex commit SHA of the PR's head. - `pr_head_user`: PR's head fork owner login, or empty if the fork was deleted. - `pr_head_repo`: PR's head fork repository name, or empty if the fork was deleted. - `pr_slug`: sanitized lowercase ASCII slug of the title (max 50 chars), suitable for embedding in a bookmark name.
 
 - `-f`, `--force` — Replace an existing local bookmark of the same name
-- `--gh-askpass <CMD>` — Askpass helper command that prints a GitHub token on stdout; shell-words split, e.g. `--gh-askpass "op read op://Vault/gh/token"`. Default: `gh_askpass` in config, then `$GH_ASKPASS`
-- `--askpass-timeout <SECS>` — Timeout in seconds for the askpass helper. Default: 20
 
 ## `jj-gh pr auto-merge`
 
@@ -139,9 +137,6 @@ Accepts either a PR number or a revision; with a revision, the PR is looked up b
 
   Possible values: `merge`, `squash`, `rebase`
 
-- `--gh-askpass <CMD>` — Askpass helper command that prints a GitHub token on stdout; shell-words split, e.g. `--gh-askpass "op read op://Vault/gh/token"`. Default: `gh_askpass` in config, then `$GH_ASKPASS`
-- `--askpass-timeout <SECS>` — Timeout in seconds for the askpass helper. Default: 20
-
 ## `jj-gh pr edit`
 
 Edit an existing PR's title, body, base, labels, reviewers, draft state, and auto-merge settings via the markdown frontmatter editor flow.
@@ -160,8 +155,6 @@ Resolves the PR from a revision (via its local bookmark) or a PR number, fetches
 
 - `-f`, `--force` — Edit even if the PR body is empty. By default, `jj-gh` refuses to edit an empty body to avoid clobbering one that exists but failed to load
 - `-e`, `--editor <CMD>` — Editor command; shell-words split, e.g. `--editor "nvim +7"`. Default: `editor` in config, then `$VISUAL`, then `$EDITOR`
-- `--gh-askpass <CMD>` — Askpass helper command that prints a GitHub token on stdout; shell-words split, e.g. `--gh-askpass "op read op://Vault/gh/token"`. Default: `gh_askpass` in config, then `$GH_ASKPASS`
-- `--askpass-timeout <SECS>` — Timeout in seconds for the askpass helper. Default: 20
 
 ## `jj-gh pr log`
 
@@ -184,8 +177,6 @@ The following template aliases are available for use if you pass your own templa
 
 ###### **Options:**
 
-- `--gh-askpass <CMD>` — Askpass helper command that prints a GitHub token on stdout; shell-words split, e.g. `--gh-askpass "op read op://Vault/gh/token"`. Default: `gh_askpass` in config, then `$GH_ASKPASS`
-- `--askpass-timeout <SECS>` — Timeout in seconds for the askpass helper. Default: 20
 - `--nerdfonts <NERDFONTS>` — Force enable the use of nerdfont icons in the default `pr log` template. Overrides config. Use `--no-nerdfonts` to disable
 - `--no-nerdfonts` — Force the default `pr log` template not to use nerdfont icons. Overrides config
 

@@ -9,7 +9,6 @@
 //! (only `refs/heads/*`), so we shell to git for the special pull ref.
 
 use crate::{
-    cli::AuthArgs,
     config::Config,
     gh::{Gh, PrDetails},
     git::{real::GitOps, url::parse_owner_repo},
@@ -94,10 +93,6 @@ pub struct FetchArgs {
     #[arg(short = 'f', long)]
     #[serde(skip)]
     pub force: bool,
-
-    #[command(flatten)]
-    #[serde(flatten)]
-    pub auth: AuthArgs,
 }
 
 /// Run `pr fetch` end-to-end. Parameterized over [`GitOps`] so tests can
@@ -212,7 +207,6 @@ fn slugify(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cli::AuthArgs;
     use crate::gh::{BaseLookup, CreatePrRequest, PrCreated, PrSummary};
     use crate::jj::CommitInfo;
     use std::cell::RefCell;
@@ -421,10 +415,6 @@ mod tests {
             pr,
             template: template.map(str::to_string),
             force,
-            auth: AuthArgs {
-                gh_askpass: None,
-                askpass_timeout_secs: None,
-            },
         }
     }
 
