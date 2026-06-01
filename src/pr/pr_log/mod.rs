@@ -17,6 +17,7 @@ use crate::{
         Jj,
         inject::{TemplateAliases, escape_jj_string},
     },
+    ui::Spinner,
 };
 use anyhow::{Context, Result, anyhow};
 use serde::Serialize;
@@ -101,6 +102,7 @@ pub async fn run(args: &PrLogArgs, config: &Config, gh: &impl Gh, jj: &impl Jj) 
         .await?
         .ok_or_else(|| anyhow!("`{}` remote is not configured", config.default_remote))?;
     let (owner, repo) = git::url::parse_owner_repo(&origin_url)?;
+    let spinner = Spinner::start("Resolving local PRs");
     let bookmarks = jj.pushed_bookmarks(&config.default_remote).await?;
     let branch_to_local: HashMap<String, String> = bookmarks
         .iter()
@@ -108,6 +110,7 @@ pub async fn run(args: &PrLogArgs, config: &Config, gh: &impl Gh, jj: &impl Jj) 
         .collect();
     let names = bookmarks.into_iter().map(|b| b.name).collect::<Vec<_>>();
     let prs = gh.local_pulls(&owner, &repo, &names).await?;
+    spinner.stop().await;
 
     let aliases = build_aliases(&prs, &branch_to_local, config);
     let tmp = aliases.write_temp_config()?;
