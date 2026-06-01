@@ -55,7 +55,7 @@ jobs:
           extra_nix_config: |
             experimental-features = nix-command flakes
             access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
-      - uses: cachix/cachix-action@v15
+      - uses: cachix/cachix-action@v17
         with:
           name: jj-gh
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
@@ -84,7 +84,7 @@ jobs:
           extra_nix_config: |
             experimental-features = nix-command flakes
             access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
-      - uses: cachix/cachix-action@v15
+      - uses: cachix/cachix-action@v17
         with:
           name: jj-gh
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
