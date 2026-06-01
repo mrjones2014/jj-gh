@@ -12,14 +12,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: cachix/install-nix-action@v27
-      - name: bump github-graphql-schema tag
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          latest=$(gh api repos/octokit/graphql-schema/releases/latest --jq .tag_name)
-          sed -i -E "s|(github:octokit/graphql-schema/)v[0-9]+\.[0-9]+\.[0-9]+|\1${latest}|" flake.nix
       - name: update flake.lock
         run: nix flake update
+      - name: update GitHub GraphQL schema
+        run: nix run .#fetch-schema
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v8
         with:

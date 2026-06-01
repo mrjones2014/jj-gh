@@ -13,10 +13,6 @@
       url = "github:numtide/treefmt-nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    github-graphql-schema = {
-      url = "github:octokit/graphql-schema/v15.26.1";
-      flake = false;
-    };
   };
 
   outputs =
@@ -27,7 +23,6 @@
       rust-overlay,
       crane,
       treefmt-nix,
-      github-graphql-schema,
     }:
     flake-utils.lib.eachDefaultSystem (
       system:
@@ -50,15 +45,12 @@
             fileset = pkgs.lib.fileset.unions [
               (craneLib.fileset.commonCargoSources root)
               (pkgs.lib.fileset.fileFilter (f: f.hasExt "gql") root)
+              (pkgs.lib.fileset.fileFilter (f: f.hasExt "graphql") root)
             ];
           };
         commonArgs = {
           inherit src;
           strictDeps = true;
-          postPatch = ''
-            mkdir -p src/gh
-            cp ${github-graphql-schema}/schema.graphql src/gh/github.graphql
-          '';
           buildInputs =
             (pkgs.lib.optionals pkgs.stdenv.isDarwin [
               pkgs.libiconv
@@ -160,9 +152,15 @@
             pkgs.git
           ];
           text = ''
-            ln -sfn ${github-graphql-schema}/schema.graphql src/gh/github.graphql
             release-plz release-pr --git-token "$GITHUB_TOKEN" "$@"
             release-plz release --git-token "$GITHUB_TOKEN" "$@"
+          '';
+        };
+        fetch-schema-app = pkgs.writeShellApplication {
+          name = "fetch-schema";
+          runtimeInputs = [ pkgs.python3 ];
+          text = ''
+            python3 ${./tools/fetch-schema.py}
           '';
         };
       in
@@ -190,6 +188,10 @@
             drv = release-app;
             name = "release";
           };
+          fetch-schema = flake-utils.lib.mkApp {
+            drv = fetch-schema-app;
+            name = "fetch-schema";
+          };
         };
         formatter = treefmtEval.config.build.wrapper;
         devShells.default = craneLib.devShell {
@@ -202,10 +204,6 @@
             pkgs.rust-analyzer
             treefmtEval.config.build.wrapper
           ];
-          # this is so rust-analyzer sees it while developing; its included properly in the actual nix derivations as well
-          shellHook = ''
-            ln -sfn ${github-graphql-schema}/schema.graphql src/gh/github.graphql
-          '';
         };
         checks = {
           inherit jj-gh;
@@ -240,7 +238,7 @@
                   echo "no .gql files found under src/gh" >&2
                   exit 1
                 fi
-                python3 ${./graphql-validate.py} ${github-graphql-schema}/schema.graphql "''${docs[@]}"
+                python3 ${./graphql-validate.py} ${./src/gh/github.graphql} "''${docs[@]}"
                 touch $out
               '';
           hm-module-schema =

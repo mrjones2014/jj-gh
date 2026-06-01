@@ -46,8 +46,7 @@ pub struct PrDetails {
     pub in_merge_queue: bool,
     pub labels: Vec<Label>,
     pub reviewers: Vec<Reviewer>,
-    /// Body, if you requested it
-    pub body: Option<String>,
+    pub body: String,
 }
 
 /// Result of [`Gh::lookup_base`]: the base repo's GraphQL node ID plus whether
@@ -271,7 +270,7 @@ pub trait Gh {
     /// # Errors
     ///
     /// Returns a clear "not found" error on 404; propagates other API errors.
-    async fn get_pr(&self, owner: &str, repo: &str, number: u64, body: bool) -> Result<PrDetails>;
+    async fn get_pr(&self, owner: &str, repo: &str, number: u64) -> Result<PrDetails>;
 
     /// Enable "merge when ready" on a PR. Dispatches to either
     /// `enablePullRequestAutoMerge` or `enqueuePullRequest` based on

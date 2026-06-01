@@ -1,9 +1,4 @@
-query GetPrInternal(
-  $owner: String!
-  $name: String!
-  $number: Int!
-  $body: Boolean!
-) {
+query GetPrInternal($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
       id
@@ -13,7 +8,7 @@ query GetPrInternal(
       url
       headRefName
       headRefOid
-      body @include(if: $body)
+      body
       mergeQueue {
         id
       }
@@ -34,6 +29,9 @@ query GetPrInternal(
               login
             }
             ... on Team {
+              combinedSlug
+            }
+            ... on EnterpriseTeam {
               combinedSlug
             }
           }

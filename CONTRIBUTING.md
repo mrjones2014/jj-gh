@@ -40,13 +40,21 @@ patterns = ["glob:'**/*'"]
 
 - [Rustup](https://rustup.rs/)
 
-1. Run `rustup toolchain install` in the project to download and install the Rust toolchain.
-1. Open `flake.nix` and note what git ref is used for `github-graphql-schema`
-1. Open GitHub to that ref, e.g. <https://github.com/octokit/graphql-schema/tree/v15.26.1>
-1. Download `schema.graphql` and place it at `./src/gh/github.graphql`
-1. You will have to keep this file up to date
+Run `rustup toolchain install` in the project to download and install the Rust toolchain.
 
-A PR is welcome that would make this less manual for non Nix users.
+## Refreshing the GitHub GraphQL schema
+
+The GitHub GraphQL SDL is vendored at `src/gh/github.graphql`. To refresh it from
+GitHub's public docs endpoint, run from the repo root:
+
+```bash
+nix run .#fetch-schema
+# or, without nix:
+python3 tools/fetch-schema.py
+```
+
+The script also strips description docstrings so the file stays under jj's 1MiB
+snapshot limit. A weekly workflow does the same and opens a PR on drift.
 
 ## Developing
 

@@ -165,9 +165,8 @@ pub async fn get_pr<J: Jj, G: Gh>(
     gh: &G,
     config: &Config,
     number_or_rev: &str,
-    body: bool,
 ) -> Result<PrDetails> {
-    Ok(resolve_pr_with_target(jj, gh, config, number_or_rev, body)
+    Ok(resolve_pr_with_target(jj, gh, config, number_or_rev)
         .await?
         .0)
 }
@@ -184,7 +183,6 @@ pub async fn resolve_pr_with_target<J: Jj, G: Gh>(
     gh: &G,
     config: &Config,
     number_or_rev: &str,
-    body: bool,
 ) -> Result<(PrDetails, remote::Target)> {
     if let Ok(num) = number_or_rev.parse::<u64>() {
         let origin_url = jj
@@ -193,7 +191,7 @@ pub async fn resolve_pr_with_target<J: Jj, G: Gh>(
             .ok_or_else(|| anyhow!("`{}` remote is not configured", config.default_remote))?;
         let upstream_url = jj.remote_url(&config.upstream_remote).await?;
         let target = remote::target(&origin_url, upstream_url.as_deref())?;
-        let pr = gh.get_pr(&target.owner, &target.repo, num, body).await?;
+        let pr = gh.get_pr(&target.owner, &target.repo, num).await?;
         Ok((pr, target))
     } else {
         let lookup = resolve_pr_for_rev(jj, gh, config, number_or_rev).await?;
@@ -204,12 +202,7 @@ pub async fn resolve_pr_with_target<J: Jj, G: Gh>(
             )
         })?;
         let pr = gh
-            .get_pr(
-                &lookup.target.owner,
-                &lookup.target.repo,
-                summary.number,
-                body,
-            )
+            .get_pr(&lookup.target.owner, &lookup.target.repo, summary.number)
             .await?;
         Ok((pr, lookup.target))
     }

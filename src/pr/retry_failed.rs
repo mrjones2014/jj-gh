@@ -64,7 +64,7 @@ where
         cancel_timeout,
     } = args;
 
-    let (pr, target) = pr::resolve_pr_with_target(jj, gh, config, number_or_rev, false).await?;
+    let (pr, target) = pr::resolve_pr_with_target(jj, gh, config, number_or_rev).await?;
     let owner = &target.owner;
     let repo = &target.repo;
 
@@ -289,7 +289,7 @@ mod tests {
             in_merge_queue: false,
             labels: Vec::<Label>::new(),
             reviewers: vec![],
-            body: None,
+            body: String::new(),
         }
     }
 
@@ -432,7 +432,7 @@ mod tests {
         async fn disable_auto_merge(&self, _id: &str) -> Result<()> {
             unimplemented!()
         }
-        async fn get_pr(&self, _o: &str, _r: &str, _n: u64, _b: bool) -> Result<PrDetails> {
+        async fn get_pr(&self, _o: &str, _r: &str, _n: u64) -> Result<PrDetails> {
             Ok(self.pr.clone())
         }
         async fn enable_auto_merge(

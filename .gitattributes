@@ -1,0 +1,2 @@
+src/gh/github.graphql linguist-generated=true
+src/gh/github.graphql -diff
