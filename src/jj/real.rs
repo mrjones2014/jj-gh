@@ -210,6 +210,10 @@ impl Jj for JjCli {
         // `normal_target.commit_id()` is the local commit (which may diverge
         // from the remote target, e.g. local rebase without push).
         //
+        // `-r '~trunk()'` restricts to bookmarks whose target is not the
+        // trunk commit, so callers (e.g. `pr log`) never burn a GitHub PR
+        // search slot on `main`/`master`.
+        //
         // Emit NDJSON: one `PushedBookmark` per line, parsed via serde so
         // bookmark names with unusual characters round-trip safely.
         let record = json_object_template(&[
@@ -223,6 +227,8 @@ impl Jj for JjCli {
             "--tracked",
             "--remote",
             remote,
+            "-r",
+            "~trunk()",
             "-T",
             &template,
         ])

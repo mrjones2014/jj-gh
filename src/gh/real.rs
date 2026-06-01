@@ -15,16 +15,18 @@ use crate::{
         FindOpenPrVariables, GetPrInternal, GetPrInternalRepositoryPullRequest, GetPrResponseData,
         GetPrVariables, LookupBaseInternal, LookupBaseResponseData, LookupBaseVariables,
         MarkReadyForReviewInternal, MarkReadyForReviewResponseData, MarkReadyForReviewVariables,
+        PrCheckContextsPageInternal, PrCheckContextsPageResponseData, PrCheckContextsPageVariables,
         PrWithCiStatus, PrsWithCiStatusInternal, PrsWithCiStatusResponseData,
         PrsWithCiStatusVariables, PullRequestMergeMethod, PullRequestState, RemoveLabelsInternal,
         RemoveLabelsResponseData, RemoveLabelsVariables, RequestedReviewer, UpdatePrInternal,
-        UpdatePrResponseData, UpdatePrVariables,
+        UpdatePrResponseData, UpdatePrVariables, count_contexts_page, extract_pr_partials,
     },
 };
 use anyhow::{Context, Result, anyhow};
 use graphql_client::GraphQLQuery;
 use octocrab::Octocrab;
 use secrecy::{ExposeSecret, SecretString};
+use std::collections::HashMap;
 
 /// Production [`Gh`] impl wrapping an authenticated `octocrab` client.
 pub struct OctocrabGh {
@@ -455,26 +457,90 @@ impl Gh for OctocrabGh {
 
         let mut out: Vec<PrWithCiStatus> = Vec::new();
         let mut seen: std::collections::HashSet<u64> = std::collections::HashSet::new();
+        let mut pending_followups: Vec<(String, String)> = Vec::new();
         for search_query in build_search_queries(owner, repo, branches) {
             let vars = PrsWithCiStatusVariables {
                 query: search_query,
             };
             let body = PrsWithCiStatusInternal::build_query(vars);
-            let batch: Vec<PrWithCiStatus> = self
+            let response = self
                 .octo
                 .graphql::<PrsWithCiStatusResponseData>(&body)
                 .await
                 .map_err(humanize)
-                .context("fetching local PRs")?
-                .into();
-            for pr in batch {
-                if seen.insert(pr.number) {
-                    out.push(pr);
+                .context("fetching local PRs")?;
+            for partial in extract_pr_partials(response) {
+                if !seen.insert(partial.pr.number) {
+                    continue;
+                }
+                if let Some(cursor) = partial.next_after {
+                    pending_followups.push((partial.pr.id.clone(), cursor));
+                }
+                out.push(partial.pr);
+            }
+        }
+
+        if !pending_followups.is_empty() {
+            let extra = fetch_remaining_contexts(&self.octo, owner, repo, pending_followups)
+                .await
+                .context("paginating PR check contexts")?;
+            let index_by_id: HashMap<String, usize> = out
+                .iter()
+                .enumerate()
+                .map(|(i, pr)| (pr.id.clone(), i))
+                .collect();
+            for (pr_id, counts) in extra {
+                if let Some(&i) = index_by_id.get(&pr_id) {
+                    out[i].ci_counts += counts;
                 }
             }
         }
         Ok(out)
     }
+}
+
+/// Follow each PR's context-page cursor to exhaustion, in parallel via
+/// `JoinSet`. Returns `(pr_node_id, extra_counts)` for every PR that had
+/// more than one page of contexts.
+async fn fetch_remaining_contexts(
+    octo: &Octocrab,
+    owner: &str,
+    repo: &str,
+    cursors: Vec<(String, String)>,
+) -> Result<Vec<(String, super::CiCounts)>> {
+    let mut set = tokio::task::JoinSet::new();
+    for (pr_id, first_cursor) in cursors {
+        let octo = octo.clone();
+        let owner = owner.to_string();
+        let repo = repo.to_string();
+        set.spawn(async move {
+            let mut total = super::CiCounts::default();
+            let mut cursor = Some(first_cursor);
+            while let Some(after) = cursor.take() {
+                let vars = PrCheckContextsPageVariables {
+                    after,
+                    pr_id: pr_id.clone(),
+                };
+                let body = PrCheckContextsPageInternal::build_query(vars);
+                let response = octo
+                    .graphql::<PrCheckContextsPageResponseData>(&body)
+                    .await
+                    .map_err(humanize)
+                    .with_context(|| {
+                        format!("fetching contexts page for {owner}/{repo} pr {pr_id}")
+                    })?;
+                let (counts, next) = count_contexts_page(response);
+                total += counts;
+                cursor = next;
+            }
+            Ok::<_, anyhow::Error>((pr_id, total))
+        });
+    }
+    let mut out = Vec::new();
+    while let Some(joined) = set.join_next().await {
+        out.push(joined.context("contexts pagination task panicked")??);
+    }
+    Ok(out)
 }
 
 /// Split reviewers into `(user_logins, team_names)` as the REST review-request

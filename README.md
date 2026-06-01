@@ -6,7 +6,8 @@
   - Intelligently supports stacked PRs by choosing the correct base if the revision has an ancestor bookmark for which an open PR exists
 - Enable auto-merge for a PR by its revision ID, without having to know/find its PR number (e.g. `jj pr auto-merge zqxy`)
 - Create local bookmarks for PRs, including across forks (e.g. `jj pr fetch 1234 && jj new pr-1234/...`, useful for testing PRs to OSS repos)
-- Show PR metadata like number and CI status in commit graph (e.g. `jj pr log`)
+- Show PR metadata like number and CI breakdown counts in commit graph (e.g. `jj pr log`)
+- Re-run failed CI jobs on a PR by revision ID or PR number (e.g. `jj pr retry-failed zqxy`), with `--cancel` to cancel and restart the entire pipeline
 
 all from the comfort of your terminal, without touching GitHub's clunky web UI.
 Works great when combined with the [jj megamerge](https://isaaccorbrey.com/notes/jujutsu-megamerges-for-fun-and-profit) workflow!
@@ -283,9 +284,15 @@ a matching open PR:
 
 - `pr_number`: PR number as a string.
 - `pr_url`: PR URL.
-- `pr_ci_status`: `SUCCESS`, `FAILED`, or `PENDING`.
+- `pr_ci_status`: `SUCCESS`, `FAILED`, or `PENDING` (rolled-up rollup state).
+- `pr_ci_breakdown`: per-bucket check counts `(● P / ✗ F / ✓ S)` with colored
+  labels. Pending and failed chunks are hidden when their count is `0`, so a
+  fully-green PR renders as `(✓ 27)`. Empty when the PR has no CI contexts.
+- `pr_draft_status`: colored `draft` label (with a `` nerdfont icon when
+  enabled), or empty when the PR is not a draft.
 - `pr_merge_status`: merged / in-merge-queue / auto-merge label.
-- `pr_meta`: pre-formatted hyperlinked PR number, colored CI icon, and merge
+- `pr_meta`: pre-formatted hyperlinked PR number, draft indicator, the
+  breakdown counts (or the rolled-up CI icon when no contexts), and merge
   status.
 
 ## PR body template resolution

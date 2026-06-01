@@ -9,6 +9,7 @@ mod find_open_pr;
 mod get_pr;
 mod lookup_base;
 mod mark_ready_for_review;
+mod pr_check_contexts_page;
 mod prs_with_ci_status;
 mod remove_labels;
 mod update_pr;
@@ -36,9 +37,13 @@ pub use lookup_base::{LookupBaseInternal, LookupBaseResponseData, LookupBaseVari
 pub use mark_ready_for_review::{
     MarkReadyForReviewInternal, MarkReadyForReviewResponseData, MarkReadyForReviewVariables,
 };
+pub use pr_check_contexts_page::count_contexts_page;
+pub use pr_check_contexts_page::{
+    PrCheckContextsPageInternal, PrCheckContextsPageResponseData, PrCheckContextsPageVariables,
+};
 pub use prs_with_ci_status::{
-    CiStatus, PrWithCiStatus, PrsWithCiStatusInternal, PrsWithCiStatusResponseData,
-    PrsWithCiStatusVariables,
+    CiCounts, CiStatus, PrWithCiStatus, PrsWithCiStatusInternal, PrsWithCiStatusResponseData,
+    PrsWithCiStatusVariables, extract_pr_partials,
 };
 pub use remove_labels::{RemoveLabelsInternal, RemoveLabelsResponseData, RemoveLabelsVariables};
 pub use update_pr::{UpdatePrInternal, UpdatePrResponseData, UpdatePrVariables};

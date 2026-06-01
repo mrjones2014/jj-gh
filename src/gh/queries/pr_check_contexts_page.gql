@@ -1,0 +1,25 @@
+query PrCheckContextsPageInternal($prId: ID!, $after: String!) {
+  node(id: $prId) {
+    __typename
+    ... on PullRequest {
+      statusCheckRollup {
+        contexts(first: 100, after: $after) {
+          nodes {
+            __typename
+            ... on CheckRun {
+              status
+              conclusion
+            }
+            ... on StatusContext {
+              state
+            }
+          }
+          pageInfo {
+            endCursor
+            hasNextPage
+          }
+        }
+      }
+    }
+  }
+}

@@ -17,6 +17,22 @@ query PrsWithCiStatusInternal($query: String!) {
         }
         statusCheckRollup {
           state
+          contexts(first: 100) {
+            nodes {
+              __typename
+              ... on CheckRun {
+                status
+                conclusion
+              }
+              ... on StatusContext {
+                state
+              }
+            }
+            pageInfo {
+              endCursor
+              hasNextPage
+            }
+          }
         }
       }
     }

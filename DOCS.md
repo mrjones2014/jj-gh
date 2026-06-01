@@ -175,7 +175,7 @@ The following template aliases are available for use if you pass your own templa
 ###### **Arguments:**
 
 - `<JJ_LOG_ARGS>` — Arguments forwarded verbatim to the underlying `jj log` invocation. Pass after `--`, e.g. `jj-gh pr log -- -r 'mine()' -T builtin_log_compact`. If you pass `-T` / `--template`, the default PR-aware template is not applied; the following per-commit aliases are then available in your own template, each keyed on `commit_id`:
-  - `pr_number`: PR number as a string, or empty for commits without a PR. - `pr_url`: PR URL, or empty. - `pr_ci_status`: `SUCCESS`, `FAILED`, `PENDING`, or empty. - `pr_merge_status`: merged / in-merge-queue / auto-merge label, or empty. - `pr_meta`: pre-formatted hyperlinked PR number plus colored CI icon plus merge status (empty for commits without a PR).
+  - `pr_number`: PR number as a string, or empty for commits without a PR. - `pr_url`: PR URL, or empty. - `pr_ci_status`: `SUCCESS`, `FAILED`, `PENDING`, or empty. - `pr_ci_breakdown`: per-bucket counts `(● P / ✗ F / ✓ S)` with labeled colors, or empty when the PR has no CI contexts. - `pr_draft_status`: a colored "draft" label (with a nerdfont icon when enabled), or empty when the PR is not a draft. - `pr_merge_status`: merged / in-merge-queue / auto-merge label, or empty. - `pr_meta`: pre-formatted hyperlinked PR number plus colored CI icon plus merge status (empty for commits without a PR).
 
 ###### **Options:**
 

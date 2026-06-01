@@ -11,7 +11,7 @@ mod reviewer;
 
 pub mod real;
 pub mod remote;
-pub use queries::{CiStatus, PrWithCiStatus};
+pub use queries::{CiCounts, CiStatus, PrWithCiStatus};
 pub use reviewer::Reviewer;
 
 /// Summary of an existing pull request. Just the fields we render.

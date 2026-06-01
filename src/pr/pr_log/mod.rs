@@ -11,12 +11,13 @@
 
 use crate::{
     config::Config,
-    gh::{CiStatus, Gh, PrWithCiStatus},
+    gh::{CiCounts, CiStatus, Gh, PrWithCiStatus},
     git,
     jj::{
         Jj,
         inject::{TemplateAliases, escape_jj_string},
     },
+    ui::Spinner,
 };
 use anyhow::{Context, Result, anyhow};
 use serde::Serialize;
@@ -30,6 +31,7 @@ const COLOR_CI_SUCCESS: &str = "gh-ci-success";
 const COLOR_CI_FAILED: &str = "gh-ci-failed";
 const COLOR_CI_PENDING: &str = "gh-ci-pending";
 const COLOR_PR_MERGE_STATUS: &str = "gh-pr-merge-status";
+const COLOR_PR_DRAFT: &str = "gh-pr-draft";
 
 /// Default `pr_log` template applied when the user did not pass their own
 /// `-T` / `--template`. References the `pr_meta` alias so spacing only appears
@@ -69,6 +71,10 @@ pub struct PrLogArgs {
     ///   PR.
     /// - `pr_url`: PR URL, or empty.
     /// - `pr_ci_status`: `SUCCESS`, `FAILED`, `PENDING`, or empty.
+    /// - `pr_ci_breakdown`: per-bucket counts `(● P / ✗ F / ✓ S)` with
+    ///   labeled colors, or empty when the PR has no CI contexts.
+    /// - `pr_draft_status`: a colored "draft" label (with a nerdfont icon
+    ///   when enabled), or empty when the PR is not a draft.
     /// - `pr_merge_status`: merged / in-merge-queue / auto-merge label, or
     ///   empty.
     /// - `pr_meta`: pre-formatted hyperlinked PR number plus colored CI icon
@@ -107,7 +113,13 @@ pub async fn run(args: &PrLogArgs, config: &Config, gh: &impl Gh, jj: &impl Jj) 
         .map(|b| (b.name.clone(), b.local_commit_id.clone()))
         .collect();
     let names = bookmarks.into_iter().map(|b| b.name).collect::<Vec<_>>();
-    let prs = gh.local_pulls(&owner, &repo, &names).await?;
+    let spinner = Spinner::start(format!(
+        "resolving PRs for {} local bookmark(s)",
+        names.len()
+    ));
+    let prs_result = gh.local_pulls(&owner, &repo, &names).await;
+    spinner.stop().await;
+    let prs = prs_result?;
 
     let aliases = build_aliases(&prs, &branch_to_local, config);
     let tmp = aliases.write_temp_config()?;
@@ -161,6 +173,12 @@ fn build_aliases(
     let status = if_chain_alias(prs, branch_to_local, |pr| {
         format!(r#""{}""#, ci_status_str(pr.ci_status))
     });
+    let breakdown = if_chain_alias(prs, branch_to_local, |pr| {
+        ci_breakdown_body(pr.ci_counts).unwrap_or_else(|| r#""""#.to_string())
+    });
+    let draft_status = if_chain_alias(prs, branch_to_local, |pr| {
+        draft_status_body(pr, config).unwrap_or_else(|| r#""""#.to_string())
+    });
     let merge_status = if_chain_alias(prs, branch_to_local, |pr| {
         format!(r#""{}""#, merge_status(pr, config).unwrap_or_default())
     });
@@ -170,6 +188,8 @@ fn build_aliases(
         .alias("pr_number", number)
         .alias("pr_url", url)
         .alias("pr_ci_status", status)
+        .alias("pr_ci_breakdown", breakdown)
+        .alias("pr_draft_status", draft_status)
         .alias("pr_meta", meta)
         .alias("pr_merge_status", merge_status)
         .alias("pr_log", PR_LOG_TEMPLATE)
@@ -177,6 +197,7 @@ fn build_aliases(
         .color(COLOR_CI_FAILED, "red")
         .color(COLOR_CI_PENDING, "yellow")
         .color(COLOR_PR_MERGE_STATUS, "bright black")
+        .color(COLOR_PR_DRAFT, "bright black")
 }
 
 /// Render the body of a single `pr_meta` if-chain arm: the full template
@@ -189,8 +210,14 @@ fn render_pr_meta_body(pr: &PrWithCiStatus, config: &Config) -> String {
         n = pr.number
     );
 
-    template = match ci_status_icon_label(pr) {
-        Some(icon) => format!(r#"{template} ++ " " ++ {icon}"#),
+    template = match draft_status_body(pr, config) {
+        Some(frag) => format!(r#"{template} ++ " " ++ {frag}"#),
+        None => template,
+    };
+
+    let ci_fragment = ci_breakdown_body(pr.ci_counts).or_else(|| ci_status_icon_label(pr));
+    template = match ci_fragment {
+        Some(frag) => format!(r#"{template} ++ " " ++ {frag}"#),
         None => template,
     };
 
@@ -227,6 +254,17 @@ fn merge_status(pr: &PrWithCiStatus, config: &Config) -> Option<String> {
     }
 }
 
+/// Render the per-PR draft indicator: a pencil nerdfont icon (when enabled)
+/// plus a `draft` label, colored. Returns `None` when the PR is not a draft
+/// so the template emits nothing.
+fn draft_status_body(pr: &PrWithCiStatus, config: &Config) -> Option<String> {
+    if !pr.is_draft {
+        return None;
+    }
+    let icon = if config.nerdfonts { " " } else { "" };
+    Some(format!(r#"label("{COLOR_PR_DRAFT}", "{icon}draft")"#))
+}
+
 fn ci_status_icon_label(pr: &PrWithCiStatus) -> Option<String> {
     Some(match pr.ci_status {
         CiStatus::Success => format!(r#"label("{COLOR_CI_SUCCESS}", "✓")"#),
@@ -234,6 +272,38 @@ fn ci_status_icon_label(pr: &PrWithCiStatus) -> Option<String> {
         CiStatus::Pending => format!(r#"label("{COLOR_CI_PENDING}", "●")"#),
         CiStatus::None => return None,
     })
+}
+
+/// Per-bucket counts fragment `(● P / ✗ F / ✓ S)` with colored labels.
+/// Returns `None` when the PR has no contexts (matches `ci_status_icon_label`'s
+/// `CiStatus::None` behavior, so the default template renders nothing).
+///
+/// `pending` and `failed` chunks are omitted when their count is `0`; the
+/// `passed` chunk is always shown (it carries the "this PR has CI configured"
+/// signal even when nothing has failed). Separators are emitted only between
+/// visible chunks so a passing PR renders cleanly as `(✓ 27)`.
+fn ci_breakdown_body(counts: CiCounts) -> Option<String> {
+    if counts.total() == 0 {
+        return None;
+    }
+    let CiCounts {
+        pending,
+        failed,
+        passed,
+    } = counts;
+    let sep = format!(r#"label("{COLOR_PR_MERGE_STATUS}", " / ")"#);
+    let mut chunks = Vec::new();
+    if pending > 0 {
+        chunks.push(format!(r#"label("{COLOR_CI_PENDING}", "● {pending}")"#));
+    }
+    if failed > 0 {
+        chunks.push(format!(r#"label("{COLOR_CI_FAILED}", "✗ {failed}")"#));
+    }
+    chunks.push(format!(r#"label("{COLOR_CI_SUCCESS}", "✓ {passed}")"#));
+    let inner = chunks.join(&format!(" ++ {sep} ++ "));
+    Some(format!(
+        r#"label("{COLOR_PR_MERGE_STATUS}", "(") ++ {inner} ++ label("{COLOR_PR_MERGE_STATUS}", ")")"#
+    ))
 }
 
 /// Build a nested `if(commit_id.short(40) == "<sha>", <body>, ...)` chain that
@@ -285,12 +355,12 @@ mod tests {
             id: format!("ID{number}"),
             number,
             url: format!("https://github.com/o/r/pull/{number}"),
-            title: format!("PR {number}"),
             head_ref_name: format!("branch-{number}"),
             head_sha: sha.into(),
             is_draft: false,
             is_in_merge_queue: false,
             ci_status: status,
+            ci_counts: CiCounts::default(),
             merged: false,
             auto_merge_enabled: false,
         }
@@ -306,11 +376,11 @@ mod tests {
             id: format!("ID{number}"),
             number,
             url: format!("https://github.com/o/r/pull/{number}"),
-            title: format!("PR {number}"),
             head_ref_name: format!("branch-{number}"),
             head_sha: number.to_string(),
             is_draft: false,
             ci_status: CiStatus::Success,
+            ci_counts: CiCounts::default(),
             auto_merge_enabled,
             is_in_merge_queue,
             merged,
@@ -445,6 +515,194 @@ mod tests {
         let map = local_map_from(&prs);
         let cfg = build_aliases(&prs, &map, &Config::default()).to_toml();
         assert!(cfg.contains("󰾨 auto-merge enabled"));
+    }
+
+    fn pr_with_counts(sha: &str, number: u64, counts: CiCounts) -> PrWithCiStatus {
+        let mut p = pr(sha, number, CiStatus::Pending);
+        p.ci_counts = counts;
+        p
+    }
+
+    #[test]
+    fn breakdown_body_none_when_no_contexts() {
+        assert!(ci_breakdown_body(CiCounts::default()).is_none());
+    }
+
+    #[test]
+    fn breakdown_body_renders_counts_with_color_labels() {
+        let body = ci_breakdown_body(CiCounts {
+            pending: 7,
+            failed: 3,
+            passed: 27,
+        })
+        .unwrap();
+        assert!(body.contains(r#"label("gh-ci-pending", "● 7")"#), "{body}");
+        assert!(body.contains(r#"label("gh-ci-failed", "✗ 3")"#), "{body}");
+        assert!(body.contains(r#"label("gh-ci-success", "✓ 27")"#), "{body}");
+        assert!(
+            body.contains(r#"label("gh-pr-merge-status", "(")"#),
+            "{body}"
+        );
+        assert!(
+            body.contains(r#"label("gh-pr-merge-status", ")")"#),
+            "{body}"
+        );
+    }
+
+    #[test]
+    fn config_includes_pr_ci_breakdown_alias_with_counts() {
+        let prs = vec![pr_with_counts(
+            &"a".repeat(40),
+            42,
+            CiCounts {
+                pending: 1,
+                failed: 2,
+                passed: 5,
+            },
+        )];
+        let map = local_map_from(&prs);
+        let cfg = build_aliases(&prs, &map, &Config::default()).to_toml();
+        assert!(cfg.contains("pr_ci_breakdown"), "{cfg}");
+        assert!(cfg.contains(r#""● 1""#), "{cfg}");
+        assert!(cfg.contains(r#""✗ 2""#), "{cfg}");
+        assert!(cfg.contains(r#""✓ 5""#), "{cfg}");
+    }
+
+    #[test]
+    fn breakdown_body_hides_zero_pending_and_failed_chunks() {
+        // Only `passed` is non-zero -> just `(✓ 27)`, no separators, no
+        // pending/failed chunks.
+        let body = ci_breakdown_body(CiCounts {
+            pending: 0,
+            failed: 0,
+            passed: 27,
+        })
+        .unwrap();
+        assert!(body.contains(r#"label("gh-ci-success", "✓ 27")"#), "{body}");
+        assert!(!body.contains("● 0"), "{body}");
+        assert!(!body.contains("✗ 0"), "{body}");
+        assert!(!body.contains(" / "), "{body}");
+    }
+
+    #[test]
+    fn breakdown_body_keeps_separator_only_between_visible_chunks() {
+        // pending=0 hides the pending chunk and its separator: `(✗ 3 / ✓ 27)`.
+        let body = ci_breakdown_body(CiCounts {
+            pending: 0,
+            failed: 3,
+            passed: 27,
+        })
+        .unwrap();
+        assert!(!body.contains("● 0"), "{body}");
+        assert!(body.contains(r#"label("gh-ci-failed", "✗ 3")"#), "{body}");
+        assert!(body.contains(r#"label("gh-ci-success", "✓ 27")"#), "{body}");
+        // Exactly one separator between the two visible chunks.
+        assert_eq!(
+            body.matches(r#"label("gh-pr-merge-status", " / ")"#)
+                .count(),
+            1,
+            "{body}"
+        );
+    }
+
+    #[test]
+    fn pr_meta_uses_breakdown_when_counts_present() {
+        let prs = vec![pr_with_counts(
+            &"b".repeat(40),
+            1,
+            CiCounts {
+                pending: 0,
+                failed: 1,
+                passed: 4,
+            },
+        )];
+        let map = local_map_from(&prs);
+        let cfg = build_aliases(&prs, &map, &Config::default()).to_toml();
+        assert!(cfg.contains(r#""✗ 1""#), "{cfg}");
+        assert!(cfg.contains(r#""✓ 4""#), "{cfg}");
+        assert!(!cfg.contains(r#""● 0""#), "{cfg}");
+    }
+
+    #[test]
+    fn pr_meta_falls_back_to_single_icon_when_no_counts() {
+        let prs = vec![pr(&"c".repeat(40), 2, CiStatus::Failed)];
+        let map = local_map_from(&prs);
+        let cfg = build_aliases(&prs, &map, &Config::default()).to_toml();
+        assert!(cfg.contains(r#"label("gh-ci-failed", "✗")"#), "{cfg}");
+        // No breakdown counts emitted.
+        assert!(!cfg.contains(r#""● 0""#), "{cfg}");
+    }
+
+    #[test]
+    fn draft_status_body_none_when_not_draft() {
+        let p = pr(&"a".repeat(40), 1, CiStatus::Success);
+        assert!(draft_status_body(&p, &Config::default()).is_none());
+    }
+
+    #[test]
+    fn draft_status_body_renders_nerdfont_icon_when_enabled() {
+        let mut p = pr(&"a".repeat(40), 1, CiStatus::Success);
+        p.is_draft = true;
+        let cfg = Config {
+            nerdfonts: true,
+            ..Config::default()
+        };
+        let body = draft_status_body(&p, &cfg).unwrap();
+        assert!(body.contains(""), "{body}");
+        assert!(body.contains("draft"), "{body}");
+        assert!(body.contains(r#"label("gh-pr-draft""#), "{body}");
+    }
+
+    #[test]
+    fn draft_status_body_falls_back_to_plain_label_without_nerdfonts() {
+        let mut p = pr(&"a".repeat(40), 1, CiStatus::Success);
+        p.is_draft = true;
+        let cfg = Config {
+            nerdfonts: false,
+            ..Config::default()
+        };
+        let body = draft_status_body(&p, &cfg).unwrap();
+        assert!(!body.contains(""), "{body}");
+        assert!(body.contains("draft"), "{body}");
+    }
+
+    #[test]
+    fn config_includes_pr_draft_status_alias_for_draft_pr() {
+        let mut p = pr(&"a".repeat(40), 42, CiStatus::Success);
+        p.is_draft = true;
+        let prs = vec![p];
+        let map = local_map_from(&prs);
+        let cfg = build_aliases(&prs, &map, &Config::default()).to_toml();
+        assert!(cfg.contains("pr_draft_status"), "{cfg}");
+        assert!(cfg.contains("draft"), "{cfg}");
+    }
+
+    #[test]
+    fn pr_meta_includes_draft_label_for_draft_pr() {
+        let mut p = pr(&"a".repeat(40), 1, CiStatus::Success);
+        p.is_draft = true;
+        let prs = vec![p];
+        let map = local_map_from(&prs);
+        let cfg = build_aliases(&prs, &map, &Config::default()).to_toml();
+        assert!(cfg.contains(r#"label("gh-pr-draft""#), "{cfg}");
+    }
+
+    #[test]
+    fn pr_meta_omits_draft_label_for_non_draft_pr() {
+        let prs = vec![pr(&"a".repeat(40), 1, CiStatus::Success)];
+        let map = local_map_from(&prs);
+        let cfg = build_aliases(&prs, &map, &Config::default()).to_toml();
+        // pr_draft_status alias exists but resolves to an empty string for
+        // this PR; check the rendered meta does not include the draft label.
+        // The if-chain for that PR's sha must not embed the draft label call.
+        let sha_arm = format!(r#"commit_id.short(40) == "{}""#, "a".repeat(40));
+        let start = cfg.find(&sha_arm).expect("arm present");
+        // Slice through the next ~400 chars looking for a draft label in this arm.
+        let window: &str = &cfg[start..(start + 800).min(cfg.len())];
+        assert!(
+            !window.contains(r#"label("gh-pr-draft""#),
+            "draft label leaked into non-draft arm: {window}"
+        );
     }
 
     #[test]
