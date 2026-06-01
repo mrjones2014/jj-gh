@@ -111,6 +111,61 @@ pub struct PrCreated {
     pub has_merge_queue: bool,
 }
 
+/// Top-level state of a workflow run from the Actions API.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkflowRunStatus {
+    /// Run is queued but has not started.
+    Queued,
+    /// Run is actively executing.
+    InProgress,
+    /// Run finished; [`WorkflowRun::conclusion`] is set.
+    Completed,
+    /// Any state we don't model explicitly (waiting, pending, requested, etc.).
+    /// Treated as "not completed" by retry-failed logic.
+    Other,
+}
+
+/// Final result of a completed workflow run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkflowRunConclusion {
+    Success,
+    Failure,
+    Cancelled,
+    TimedOut,
+    ActionRequired,
+    Skipped,
+    Neutral,
+    StartupFailure,
+    /// Any other conclusion string from the API.
+    Other,
+}
+
+/// A single workflow run on a commit. Subset of fields needed by
+/// `jj pr retry-failed`.
+#[derive(Debug, Clone)]
+pub struct WorkflowRun {
+    pub id: u64,
+    pub status: WorkflowRunStatus,
+    pub conclusion: Option<WorkflowRunConclusion>,
+}
+
+impl WorkflowRunConclusion {
+    /// True for conclusions that mean the run did not succeed and is worth
+    /// retrying (failure, cancelled, timed out, action required, startup
+    /// failure). `Success`, `Skipped`, `Neutral` are not retried.
+    #[must_use]
+    pub fn is_retryable_failure(self) -> bool {
+        matches!(
+            self,
+            Self::Failure
+                | Self::Cancelled
+                | Self::TimedOut
+                | Self::ActionRequired
+                | Self::StartupFailure
+        )
+    }
+}
+
 pub trait Gh {
     /// First open PR whose `head` matches `head_spec`. Must be `owner:branch`;
     /// GitHub silently ignores the `head` filter without the owner prefix.
@@ -222,7 +277,7 @@ pub trait Gh {
     /// `enablePullRequestAutoMerge` or `enqueuePullRequest` based on
     /// `has_merge_queue` (callers get this from [`PrDetails::has_merge_queue`]
     /// or [`PrCreated::has_merge_queue`]). `method` is ignored when the queue
-    /// path is taken — the queue's own config decides the merge method.
+    /// path is taken; the queue's own config decides the merge method.
     ///
     /// # Errors
     ///
@@ -255,4 +310,41 @@ pub trait Gh {
         repo: &str,
         branches: &[String],
     ) -> Result<Vec<PrWithCiStatus>>;
+
+    /// List GitHub Actions workflow runs whose head commit matches `sha`.
+    /// Returns the subset of fields needed to decide retry/cancel eligibility.
+    ///
+    /// # Errors
+    ///
+    /// Propagates API errors.
+    async fn list_workflow_runs_for_sha(
+        &self,
+        owner: &str,
+        repo: &str,
+        sha: &str,
+    ) -> Result<Vec<WorkflowRun>>;
+
+    /// Cancel an in-progress workflow run. The API call is fire-and-forget;
+    /// GitHub asynchronously transitions the run to `completed/cancelled`.
+    ///
+    /// # Errors
+    ///
+    /// Propagates API errors.
+    async fn cancel_workflow_run(&self, owner: &str, repo: &str, run_id: u64) -> Result<()>;
+
+    /// Re-run every job in a workflow run. Only valid when the run is
+    /// `completed`; GitHub returns 403 otherwise.
+    ///
+    /// # Errors
+    ///
+    /// Propagates API errors.
+    async fn rerun_workflow_run(&self, owner: &str, repo: &str, run_id: u64) -> Result<()>;
+
+    /// Re-run only the failed jobs in a workflow run. Only valid when the run
+    /// is `completed`; GitHub returns 403 otherwise.
+    ///
+    /// # Errors
+    ///
+    /// Propagates API errors.
+    async fn rerun_failed_jobs(&self, owner: &str, repo: &str, run_id: u64) -> Result<()>;
 }

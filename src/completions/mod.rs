@@ -190,7 +190,7 @@ mod tests {
     #[test]
     fn real_pr_action_covers_all_visible_subcommands() {
         // Catches regressions when adding/renaming subcommands or visible
-        // aliases on `PrAction` — fake_pr_command is too narrow to notice.
+        // aliases on `PrAction`; fake_pr_command is too narrow to notice.
         let bash = emit_real(Shell::Bash);
         for name in ["create", "c", "fetch", "f", "auto-merge", "am", "log", "l"] {
             assert!(bash.contains(name), "bash overlay missing `{name}`");

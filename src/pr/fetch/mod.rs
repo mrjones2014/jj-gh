@@ -360,6 +360,23 @@ mod tests {
         ) -> Result<Vec<crate::gh::PrWithCiStatus>> {
             unimplemented!("fetch does not call local_pulls")
         }
+        async fn list_workflow_runs_for_sha(
+            &self,
+            _owner: &str,
+            _repo: &str,
+            _sha: &str,
+        ) -> Result<Vec<crate::gh::WorkflowRun>> {
+            unimplemented!("fetch does not call list_workflow_runs_for_sha")
+        }
+        async fn cancel_workflow_run(&self, _: &str, _: &str, _: u64) -> Result<()> {
+            unimplemented!("fetch does not call cancel_workflow_run")
+        }
+        async fn rerun_workflow_run(&self, _: &str, _: &str, _: u64) -> Result<()> {
+            unimplemented!("fetch does not call rerun_workflow_run")
+        }
+        async fn rerun_failed_jobs(&self, _: &str, _: &str, _: u64) -> Result<()> {
+            unimplemented!("fetch does not call rerun_failed_jobs")
+        }
     }
 
     #[derive(Debug, Clone)]

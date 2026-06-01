@@ -13,6 +13,7 @@ This document contains the help content for the `jj-gh` command-line program.
 - [`jj-gh pr auto-merge`↴](#jj-gh-pr-auto-merge)
 - [`jj-gh pr edit`↴](#jj-gh-pr-edit)
 - [`jj-gh pr log`↴](#jj-gh-pr-log)
+- [`jj-gh pr retry-failed`↴](#jj-gh-pr-retry-failed)
 - [`jj-gh debug`↴](#jj-gh-debug)
 - [`jj-gh debug config`↴](#jj-gh-debug-config)
 - [`jj-gh debug auth`↴](#jj-gh-debug-auth)
@@ -55,6 +56,7 @@ Commands to work with PRs
 - `auto-merge` — Enable auto-merge on a PR
 - `edit` — Edit an existing PR's title, body, base, labels, reviewers, draft state, and auto-merge settings via the markdown frontmatter editor flow
 - `log` — Like `jj log`, but injects PR metadata (e.g. number, CI status, URL)
+- `retry-failed` — Re-run failed CI jobs on a PR
 
 ## `jj-gh pr create`
 
@@ -179,6 +181,29 @@ The following template aliases are available for use if you pass your own templa
 
 - `--nerdfonts <NERDFONTS>` — Force enable the use of nerdfont icons in the default `pr log` template. Overrides config. Use `--no-nerdfonts` to disable
 - `--no-nerdfonts` — Force the default `pr log` template not to use nerdfont icons. Overrides config
+
+## `jj-gh pr retry-failed`
+
+Re-run failed CI jobs on a PR.
+
+Resolves the PR from a revision (via its local bookmark) or PR number, then re-runs failed workflow runs on the PR's head commit. By default the command fails if CI has not yet completed, because GitHub refuses to re-run a workflow run until it reaches the `completed` state.
+
+With `--cancel`, in-progress runs are cancelled first; once they finalize, every workflow run is re-run (full pipeline restart).
+
+**Usage:** `jj-gh pr retry-failed [OPTIONS] <PR_NUM|REV>`
+
+**Command Alias:** `rerun`
+
+###### **Arguments:**
+
+- `<PR_NUM|REV>` — PR number, or revision ID to look up a PR from
+
+###### **Options:**
+
+- `--cancel` — Cancel any in-progress runs and restart the entire pipeline. Without this flag, the command fails if CI has not yet completed
+- `--cancel-timeout <SECS>` — Seconds to wait for cancelled runs to finalize before re-running. Only meaningful with --cancel
+
+  Default value: `30`
 
 ## `jj-gh debug`
 

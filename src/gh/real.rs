@@ -2,6 +2,7 @@
 
 use super::{
     BaseLookup, CreatePrRequest, Gh, Label, PrCreated, PrDetails, PrSummary, Reviewer, UpdatePr,
+    WorkflowRun, WorkflowRunConclusion, WorkflowRunStatus,
 };
 use crate::{
     config::AutoMergeMethod,
@@ -405,6 +406,43 @@ impl Gh for OctocrabGh {
         Ok(())
     }
 
+    async fn list_workflow_runs_for_sha(
+        &self,
+        owner: &str,
+        repo: &str,
+        sha: &str,
+    ) -> Result<Vec<WorkflowRun>> {
+        let page = self
+            .octo
+            .workflows(owner, repo)
+            .list_all_runs()
+            .head_sha(sha.to_string())
+            .per_page(255)
+            .send()
+            .await
+            .map_err(humanize)
+            .with_context(|| format!("listing workflow runs for {owner}/{repo} sha={sha}"))?;
+        Ok(page.items.iter().map(map_workflow_run).collect())
+    }
+
+    async fn cancel_workflow_run(&self, owner: &str, repo: &str, run_id: u64) -> Result<()> {
+        self.octo
+            .actions()
+            .cancel_workflow_run(owner, repo, run_id.into())
+            .await
+            .map_err(humanize)
+            .with_context(|| format!("cancelling workflow run {run_id} on {owner}/{repo}"))?;
+        Ok(())
+    }
+
+    async fn rerun_workflow_run(&self, owner: &str, repo: &str, run_id: u64) -> Result<()> {
+        post_action_run(&self.octo, owner, repo, run_id, "rerun").await
+    }
+
+    async fn rerun_failed_jobs(&self, owner: &str, repo: &str, run_id: u64) -> Result<()> {
+        post_action_run(&self.octo, owner, repo, run_id, "rerun-failed-jobs").await
+    }
+
     async fn local_pulls(
         &self,
         owner: &str,
@@ -484,6 +522,55 @@ fn build_search_queries(owner: &str, repo: &str, branches: &[String]) -> Vec<Str
         queries.push(current);
     }
     queries
+}
+
+/// POST to a workflow-run action endpoint (`rerun` or `rerun-failed-jobs`).
+/// Octocrab has no typed wrapper for these, so we route through `_post` and
+/// reuse `map_github_error` for consistent error handling.
+async fn post_action_run(
+    octo: &Octocrab,
+    owner: &str,
+    repo: &str,
+    run_id: u64,
+    action: &str,
+) -> Result<()> {
+    let route = format!("/repos/{owner}/{repo}/actions/runs/{run_id}/{action}");
+    let uri = http::Uri::try_from(&route).with_context(|| format!("building URI for {route}"))?;
+    let response = octo
+        ._post(uri, None::<&()>)
+        .await
+        .map_err(humanize)
+        .with_context(|| format!("POST {route}"))?;
+    octocrab::map_github_error(response)
+        .await
+        .map_err(humanize)
+        .with_context(|| format!("POST {route}"))?;
+    Ok(())
+}
+
+fn map_workflow_run(r: &octocrab::models::workflows::Run) -> WorkflowRun {
+    let status = match r.status.as_str() {
+        "queued" => WorkflowRunStatus::Queued,
+        "in_progress" => WorkflowRunStatus::InProgress,
+        "completed" => WorkflowRunStatus::Completed,
+        _ => WorkflowRunStatus::Other,
+    };
+    let conclusion = r.conclusion.as_deref().map(|c| match c {
+        "success" => WorkflowRunConclusion::Success,
+        "failure" => WorkflowRunConclusion::Failure,
+        "cancelled" => WorkflowRunConclusion::Cancelled,
+        "timed_out" => WorkflowRunConclusion::TimedOut,
+        "action_required" => WorkflowRunConclusion::ActionRequired,
+        "skipped" => WorkflowRunConclusion::Skipped,
+        "neutral" => WorkflowRunConclusion::Neutral,
+        "startup_failure" => WorkflowRunConclusion::StartupFailure,
+        _ => WorkflowRunConclusion::Other,
+    });
+    WorkflowRun {
+        id: r.id.into_inner(),
+        status,
+        conclusion,
+    }
 }
 
 /// Map an `octocrab::Error` into an `anyhow::Error` with a human-friendly message

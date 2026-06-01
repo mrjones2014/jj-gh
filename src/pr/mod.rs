@@ -5,6 +5,7 @@ mod editor;
 pub mod fetch;
 mod frontmatter;
 mod pr_log;
+mod retry_failed;
 mod template;
 mod validation;
 
@@ -24,6 +25,7 @@ use crate::{
         editor::{TempfileEditor, edit::EditArgs},
         fetch::FetchArgs,
         pr_log::PrLogArgs,
+        retry_failed::RetryFailedArgs,
         template::TemplateSource,
     },
 };
@@ -82,6 +84,18 @@ pub enum PrAction {
     /// containing all PR information).
     #[command(visible_alias = "l")]
     Log(PrLogArgs),
+
+    /// Re-run failed CI jobs on a PR.
+    ///
+    /// Resolves the PR from a revision (via its local bookmark) or PR number,
+    /// then re-runs failed workflow runs on the PR's head commit. By default
+    /// the command fails if CI has not yet completed, because GitHub refuses
+    /// to re-run a workflow run until it reaches the `completed` state.
+    ///
+    /// With `--cancel`, in-progress runs are cancelled first; once they
+    /// finalize, every workflow run is re-run (full pipeline restart).
+    #[command(visible_alias = "rerun")]
+    RetryFailed(RetryFailedArgs),
 }
 
 /// Dispatch the `pr` subcommand to the matching handler.
@@ -99,6 +113,7 @@ pub async fn dispatch(global: &GlobalOpts, action: PrAction) -> Result<()> {
         PrAction::AutoMerge(a) => fig.merge(Serialized::defaults(a)),
         PrAction::Edit(a) => fig.merge(Serialized::defaults(a)),
         PrAction::Log(a) => fig.merge(Serialized::defaults(a)),
+        PrAction::RetryFailed(a) => fig.merge(Serialized::defaults(a)),
     };
     let config = config::extract(&fig)?;
 
@@ -119,6 +134,7 @@ pub async fn dispatch(global: &GlobalOpts, action: PrAction) -> Result<()> {
             editor::edit::run(&jj, &gh, &OsEnv, &editor, &config, &args).await?;
         }
         PrAction::Log(args) => pr_log::run(&args, &config, &gh, &jj).await?,
+        PrAction::RetryFailed(args) => retry_failed::run(&jj, &gh, &config, &args).await?,
     }
     Ok(())
 }
@@ -151,6 +167,25 @@ pub async fn get_pr<J: Jj, G: Gh>(
     number_or_rev: &str,
     body: bool,
 ) -> Result<PrDetails> {
+    Ok(resolve_pr_with_target(jj, gh, config, number_or_rev, body)
+        .await?
+        .0)
+}
+
+/// Same as [`get_pr`] but also returns the resolved [`remote::Target`] so
+/// callers that need the owner/repo for further API calls don't have to
+/// re-derive it from the remote URL.
+///
+/// # Errors
+///
+/// See [`get_pr`].
+pub async fn resolve_pr_with_target<J: Jj, G: Gh>(
+    jj: &J,
+    gh: &G,
+    config: &Config,
+    number_or_rev: &str,
+    body: bool,
+) -> Result<(PrDetails, remote::Target)> {
     if let Ok(num) = number_or_rev.parse::<u64>() {
         let origin_url = jj
             .remote_url(&config.default_remote)
@@ -158,7 +193,8 @@ pub async fn get_pr<J: Jj, G: Gh>(
             .ok_or_else(|| anyhow!("`{}` remote is not configured", config.default_remote))?;
         let upstream_url = jj.remote_url(&config.upstream_remote).await?;
         let target = remote::target(&origin_url, upstream_url.as_deref())?;
-        gh.get_pr(&target.owner, &target.repo, num, body).await
+        let pr = gh.get_pr(&target.owner, &target.repo, num, body).await?;
+        Ok((pr, target))
     } else {
         let lookup = resolve_pr_for_rev(jj, gh, config, number_or_rev).await?;
         let summary = lookup.summary.ok_or_else(|| {
@@ -167,13 +203,15 @@ pub async fn get_pr<J: Jj, G: Gh>(
                 lookup.head_spec,
             )
         })?;
-        gh.get_pr(
-            &lookup.target.owner,
-            &lookup.target.repo,
-            summary.number,
-            body,
-        )
-        .await
+        let pr = gh
+            .get_pr(
+                &lookup.target.owner,
+                &lookup.target.repo,
+                summary.number,
+                body,
+            )
+            .await?;
+        Ok((pr, lookup.target))
     }
 }
 

@@ -208,7 +208,7 @@ impl Jj for JjCli {
         // local/remote side of each tracked bookmark; filtering on
         // `if(remote, ...)` keeps only the local-side row, whose
         // `normal_target.commit_id()` is the local commit (which may diverge
-        // from the remote target — e.g. local rebase without push).
+        // from the remote target, e.g. local rebase without push).
         //
         // Emit NDJSON: one `PushedBookmark` per line, parsed via serde so
         // bookmark names with unusual characters round-trip safely.
