@@ -9,6 +9,7 @@ query PrsWithCiStatusInternal($query: String!) {
         title
         headRefName
         headRefOid
+        baseRefName
         isDraft
         merged
         isInMergeQueue

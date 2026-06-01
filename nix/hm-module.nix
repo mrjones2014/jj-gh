@@ -134,6 +134,27 @@ in
         '';
       };
 
+      pr_log_template = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        example = ''description ++ " #" ++ pr_number ++ "\n"'';
+        description = ''
+          jj template string used to render the `pr log` subcommand. Template aliases
+          for PR metadata are injected. See https://github.com/mrjones2014/jj-gh#template-aliases
+        '';
+      };
+
+      pr_restack_template = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        example = ''description ++ " #" ++ pr_number ++ "\n"'';
+        description = ''
+          jj template string used to render the `pr restack` subcommand.
+          By default, uses `pr_log_template`. Template aliases
+          for PR metadata are injected. See https://github.com/mrjones2014/jj-gh#template-aliases
+        '';
+      };
+
       draft = mkOption {
         type = types.nullOr types.bool;
         default = null;

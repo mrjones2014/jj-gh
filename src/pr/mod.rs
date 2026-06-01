@@ -5,6 +5,7 @@ mod editor;
 pub mod fetch;
 mod frontmatter;
 mod pr_log;
+mod restack;
 mod retry_failed;
 mod template;
 mod validation;
@@ -25,6 +26,7 @@ use crate::{
         editor::{TempfileEditor, edit::EditArgs},
         fetch::FetchArgs,
         pr_log::PrLogArgs,
+        restack::RestackArgs,
         retry_failed::RetryFailedArgs,
         template::TemplateSource,
     },
@@ -85,6 +87,17 @@ pub enum PrAction {
     #[command(visible_alias = "l")]
     Log(PrLogArgs),
 
+    /// Push the current `jj` stack shape up to GitHub by updating each PR's
+    /// base branch to match its closest stacked ancestor bookmark.
+    ///
+    /// Restack does not rewrite the jj graph; the user shapes the graph first
+    /// (e.g. via `jj rebase`) and then runs `jj-gh pr restack` to set each
+    /// PR's `baseRefName` on the remote. Launches an interactive TUI by
+    /// default. Pass `--dry-run` or `--json` to print the proposed plan
+    /// without making any API calls.
+    #[command(visible_alias = "rs")]
+    Restack(RestackArgs),
+
     /// Re-run failed CI jobs on a PR.
     ///
     /// Resolves the PR from a revision (via its local bookmark) or PR number,
@@ -113,6 +126,7 @@ pub async fn dispatch(global: &GlobalOpts, action: PrAction) -> Result<()> {
         PrAction::AutoMerge(a) => fig.merge(Serialized::defaults(a)),
         PrAction::Edit(a) => fig.merge(Serialized::defaults(a)),
         PrAction::Log(a) => fig.merge(Serialized::defaults(a)),
+        PrAction::Restack(a) => fig.merge(Serialized::defaults(a)),
         PrAction::RetryFailed(a) => fig.merge(Serialized::defaults(a)),
     };
     let config = config::extract(&fig)?;
@@ -134,6 +148,7 @@ pub async fn dispatch(global: &GlobalOpts, action: PrAction) -> Result<()> {
             editor::edit::run(&jj, &gh, &OsEnv, &editor, &config, &args).await?;
         }
         PrAction::Log(args) => pr_log::run(&args, &config, &gh, &jj).await?,
+        PrAction::Restack(args) => restack::run(&jj, &gh, &config, &args).await?,
         PrAction::RetryFailed(args) => retry_failed::run(&jj, &gh, &config, &args).await?,
     }
     Ok(())

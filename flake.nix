@@ -256,8 +256,6 @@
                 if ! diff -u rust-fields.txt nix-fields.txt >&2; then
                   echo "" >&2
                   echo "ERROR: jj-gh Config struct fields drifted from hm-module.nix settings options." >&2
-                  echo "  left  = Rust Config field names (tools/print-config-schema)" >&2
-                  echo "  right = nix/hm-module.nix settings options" >&2
                   exit 1
                 fi
                 touch $out

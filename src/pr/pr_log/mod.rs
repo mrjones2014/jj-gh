@@ -33,9 +33,10 @@ const COLOR_CI_PENDING: &str = "gh-ci-pending";
 const COLOR_PR_MERGE_STATUS: &str = "gh-pr-merge-status";
 
 /// Default `pr_log` template applied when the user did not pass their own
-/// `-T` / `--template`. References the `pr_meta` alias so spacing only appears
-/// for commits that actually have a PR.
-const PR_LOG_TEMPLATE: &str = r#"
+/// `-T` / `--template` and no `pr_log_template` config override is set.
+/// References the `pr_meta` alias so spacing only appears for commits that
+/// actually have a PR.
+pub(crate) const PR_LOG_TEMPLATE: &str = r#"
 if(root,
   format_root_commit(self),
   label(
@@ -152,7 +153,7 @@ fn user_set_template(args: &[String]) -> bool {
 /// `pr_number`, `pr_url`, and `pr_ci_status` as raw `String` aliases for
 /// users who want to build custom templates; they work in direct contexts
 /// even if they cannot be re-chained through `if()`.
-fn build_aliases(
+pub(crate) fn build_aliases(
     prs: &[PrWithCiStatus],
     branch_to_local: &HashMap<String, String>,
     config: &Config,
@@ -169,13 +170,14 @@ fn build_aliases(
     });
     let meta = if_chain_alias(prs, branch_to_local, |pr| render_pr_meta_body(pr, config));
 
+    let pr_log_body = config.pr_log_template.as_deref().unwrap_or(PR_LOG_TEMPLATE);
     TemplateAliases::builder()
         .alias("pr_number", number)
         .alias("pr_url", url)
         .alias("pr_ci_status", status)
         .alias("pr_meta", meta)
         .alias("pr_merge_status", merge_status)
-        .alias("pr_log", PR_LOG_TEMPLATE)
+        .alias("pr_log", pr_log_body)
         .color(COLOR_CI_SUCCESS, "green")
         .color(COLOR_CI_FAILED, "red")
         .color(COLOR_CI_PENDING, "yellow")
@@ -291,6 +293,7 @@ mod tests {
             title: format!("PR {number}"),
             head_ref_name: format!("branch-{number}"),
             head_sha: sha.into(),
+            base_ref_name: "master".into(),
             is_draft: false,
             is_in_merge_queue: false,
             ci_status: status,
@@ -312,6 +315,7 @@ mod tests {
             title: format!("PR {number}"),
             head_ref_name: format!("branch-{number}"),
             head_sha: number.to_string(),
+            base_ref_name: "master".into(),
             is_draft: false,
             ci_status: CiStatus::Success,
             auto_merge_enabled,
