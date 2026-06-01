@@ -1,5 +1,3 @@
 /target/
 /.direnv/
 /result
-# symlinked from flake input
-/src/gh/github.graphql

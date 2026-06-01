@@ -118,7 +118,7 @@ pub async fn run_with<J: Jj, G: Gh, GO: GitOps>(
         .ok_or_else(|| anyhow!("`{}` remote is not configured", config.default_remote))?;
     let (owner, repo) = parse_owner_repo(&origin_url)?;
 
-    let pr = gh.get_pr(&owner, &repo, args.pr, false).await?;
+    let pr = gh.get_pr(&owner, &repo, args.pr).await?;
     if pr.head_user_login.is_none() || pr.head_repo_name.is_none() {
         log::warn!(
             "PR #{}: head fork appears deleted; `pr_head_user` / `pr_head_repo` will be empty",
@@ -332,13 +332,7 @@ mod tests {
         async fn disable_auto_merge(&self, _pr_node_id: &str) -> Result<()> {
             unimplemented!("fetch does not call disable_auto_merge")
         }
-        async fn get_pr(
-            &self,
-            owner: &str,
-            repo: &str,
-            number: u64,
-            _body: bool,
-        ) -> Result<PrDetails> {
+        async fn get_pr(&self, owner: &str, repo: &str, number: u64) -> Result<PrDetails> {
             assert_eq!(owner, self.expected.0);
             assert_eq!(repo, self.expected.1);
             assert_eq!(number, self.expected.2);
@@ -423,7 +417,7 @@ mod tests {
             auto_merge_method: None,
             labels: vec![],
             reviewers: vec![],
-            body: None,
+            body: String::new(),
         }
     }
 

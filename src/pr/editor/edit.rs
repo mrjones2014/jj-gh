@@ -58,7 +58,7 @@ where
 
     let (owner, repo, pr_number) = resolve_pr_target(jj, gh, config, &args.number_or_rev).await?;
     let details = gh
-        .get_pr(&owner, &repo, pr_number, true)
+        .get_pr(&owner, &repo, pr_number)
         .await
         .context("fetching PR from GitHub")?;
     let PrDetails {
@@ -77,7 +77,7 @@ where
         ..
     } = details;
 
-    if body.is_none() {
+    if body.is_empty() {
         if args.force {
             log::warn!("PR body is empty, but `--force` was passed");
         } else {
@@ -87,7 +87,7 @@ where
         }
     }
 
-    let before_body = body.unwrap_or_default();
+    let before_body = body;
     let before_label_ids: HashMap<String, String> = labels
         .iter()
         .map(|l| (l.name.clone(), l.node_id.clone()))

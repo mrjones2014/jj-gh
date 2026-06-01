@@ -286,12 +286,11 @@ impl Gh for OctocrabGh {
         Ok(())
     }
 
-    async fn get_pr(&self, owner: &str, repo: &str, number: u64, body: bool) -> Result<PrDetails> {
+    async fn get_pr(&self, owner: &str, repo: &str, number: u64) -> Result<PrDetails> {
         let vars = GetPrVariables {
             owner: owner.to_string(),
             name: repo.to_string(),
             number: i64::try_from(number).context("PR number out of range")?,
-            body,
         };
         let body = GetPrInternal::build_query(vars);
         let data = self
@@ -333,7 +332,7 @@ impl Gh for OctocrabGh {
             head_repo_name,
             graphql_node_id: id,
             in_merge_queue: merge_queue.is_some(),
-            body: if body.is_empty() { None } else { Some(body) },
+            body,
             labels: labels
                 .and_then(|labels| labels.nodes)
                 .map(|nodes| {
@@ -362,6 +361,7 @@ impl Gh for OctocrabGh {
                                 RequestedReviewer::Bot(clanker) => clanker.login,
                                 RequestedReviewer::Mannequin(mannequin) => mannequin.login,
                                 RequestedReviewer::Team(team) => team.combined_slug,
+                                RequestedReviewer::EnterpriseTeam(team) => team.combined_slug,
                             };
                             Reviewer::parse(&slug)
                                 .inspect_err(|e| {
