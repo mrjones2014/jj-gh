@@ -238,7 +238,7 @@
                   echo "no .gql files found under src/gh" >&2
                   exit 1
                 fi
-                python3 ${./graphql-validate.py} ${./src/gh/github.graphql} "''${docs[@]}"
+                python3 ${./tools/graphql-validate.py} ${./src/gh/github.graphql} "''${docs[@]}"
                 touch $out
               '';
           hm-module-schema =
