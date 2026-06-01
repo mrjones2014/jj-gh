@@ -5,6 +5,7 @@
 //! loop.
 
 use std::io::{IsTerminal, Write};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -18,19 +19,22 @@ const TICK: Duration = Duration::from_millis(100);
 pub struct Spinner {
     handle: Option<JoinHandle<()>>,
     stop_tx: Option<oneshot::Sender<()>>,
+    msg: Arc<Mutex<String>>,
 }
 
 impl Spinner {
     /// Start a spinner with `msg`. When stderr is not a terminal, returns a
     /// no-op spinner so callers can use it unconditionally.
     pub fn start(msg: impl Into<String>) -> Self {
+        let msg = Arc::new(Mutex::new(msg.into()));
         if !std::io::stderr().is_terminal() {
             return Self {
                 handle: None,
                 stop_tx: None,
+                msg,
             };
         }
-        let msg = msg.into();
+        let task_msg = Arc::clone(&msg);
         let (stop_tx, mut stop_rx) = oneshot::channel::<()>();
         let handle = tokio::spawn(async move {
             let dim = anstyle::Style::new().dimmed();
@@ -43,8 +47,9 @@ impl Spinner {
                     _ = interval.tick() => {
                         let glyph = FRAMES[frame % FRAMES.len()];
                         frame = frame.wrapping_add(1);
+                        let current = task_msg.lock().expect("spinner msg poisoned").clone();
                         let mut err = std::io::stderr().lock();
-                        let _ = write!(err, "\r{dim}{glyph} {msg}{dim:#}");
+                        let _ = write!(err, "\r\x1b[2K{dim}{glyph} {current}{dim:#}");
                         let _ = err.flush();
                     }
                 }
@@ -56,7 +61,14 @@ impl Spinner {
         Self {
             handle: Some(handle),
             stop_tx: Some(stop_tx),
+            msg,
         }
+    }
+
+    /// Replace the message shown next to the spinner glyph. No-op when stderr
+    /// is not a terminal.
+    pub fn set_message(&self, msg: impl Into<String>) {
+        *self.msg.lock().expect("spinner msg poisoned") = msg.into();
     }
 
     /// Stop the spinner and clear its line. Awaiting ensures the cleared line

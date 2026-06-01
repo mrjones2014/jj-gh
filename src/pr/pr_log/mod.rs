@@ -58,6 +58,41 @@ if(root,
 )
 "#;
 
+/// Printable ASCII markers used to bracket each commit id in the
+/// `restack_log` template. Restack scans the captured log output for
+/// `<OPEN><40-hex commit id><CLOSE>` to build a `commit_id → line_idx` map,
+/// then strips the markers before display. Plain ASCII is used (rather than
+/// private-use Unicode) so the bytes round-trip cleanly through TOML
+/// serialization and jj's template-string parser.
+pub(crate) const RESTACK_SENTINEL_OPEN: &str = "<<jjgh-restack-mark::";
+pub(crate) const RESTACK_SENTINEL_CLOSE: &str = "::jjgh-restack-mark>>";
+
+/// Same body as [`PR_LOG_TEMPLATE`] but prepends a sentinel
+/// `<OPEN>commit_id<CLOSE>` so the caller can map commit ids to line offsets
+/// in the captured stdout.
+pub(crate) const RESTACK_LOG_TEMPLATE: &str = r#"
+if(root,
+  format_root_commit(self),
+  label(
+    separate(" ",
+      if(current_working_copy, "working_copy"),
+      if(immutable, "immutable", "mutable"),
+      if(conflict, "conflicted"),
+    ),
+    concat(
+      "<<jjgh-restack-mark::" ++ commit_id.short(40) ++ "::jjgh-restack-mark>>" ++ format_short_commit_header(self) ++ surround(" ", "", pr_meta) ++ "\n",
+      separate(" ",
+        if(empty, empty_commit_marker),
+        if(description,
+          description.first_line(),
+          label(if(empty, "empty"), description_placeholder),
+        ),
+      ) ++ "\n",
+    ),
+  )
+)
+"#;
+
 #[derive(Debug, clap::Args, Serialize)]
 pub struct PrLogArgs {
     /// Arguments forwarded verbatim to the underlying `jj log` invocation.
@@ -152,7 +187,7 @@ fn user_set_template(args: &[String]) -> bool {
 /// `pr_number`, `pr_url`, and `pr_ci_status` as raw `String` aliases for
 /// users who want to build custom templates; they work in direct contexts
 /// even if they cannot be re-chained through `if()`.
-fn build_aliases(
+pub(crate) fn build_aliases(
     prs: &[PrWithCiStatus],
     branch_to_local: &HashMap<String, String>,
     config: &Config,
@@ -176,6 +211,7 @@ fn build_aliases(
         .alias("pr_meta", meta)
         .alias("pr_merge_status", merge_status)
         .alias("pr_log", PR_LOG_TEMPLATE)
+        .alias("restack_log", RESTACK_LOG_TEMPLATE)
         .color(COLOR_CI_SUCCESS, "green")
         .color(COLOR_CI_FAILED, "red")
         .color(COLOR_CI_PENDING, "yellow")
@@ -291,6 +327,7 @@ mod tests {
             title: format!("PR {number}"),
             head_ref_name: format!("branch-{number}"),
             head_sha: sha.into(),
+            base_ref_name: "master".into(),
             is_draft: false,
             is_in_merge_queue: false,
             ci_status: status,
@@ -312,6 +349,7 @@ mod tests {
             title: format!("PR {number}"),
             head_ref_name: format!("branch-{number}"),
             head_sha: number.to_string(),
+            base_ref_name: "master".into(),
             is_draft: false,
             ci_status: CiStatus::Success,
             auto_merge_enabled,

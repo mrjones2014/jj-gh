@@ -73,6 +73,10 @@ pub struct PrWithCiStatus {
     /// from the remote PR head (e.g. if you rebase the PR on `trunk()` but have
     /// not pushed it to the remote yet).
     pub head_sha: String,
+    /// Name of the branch the PR is currently targeted at on the remote.
+    /// Used by `pr restack` to detect which PRs already point at the proposed
+    /// base.
+    pub base_ref_name: String,
     /// Whether the PR is a draft.
     pub is_draft: bool,
     /// Whether the PR is merged
@@ -108,6 +112,7 @@ impl From<prs_with_ci_status_internal::ResponseData> for Vec<PrWithCiStatus> {
                      title,
                      head_ref_name,
                      head_ref_oid,
+                     base_ref_name,
                      is_draft,
                      merged,
                      is_in_merge_queue,
@@ -128,6 +133,7 @@ impl From<prs_with_ci_status_internal::ResponseData> for Vec<PrWithCiStatus> {
                     is_in_merge_queue,
                     head_ref_name,
                     head_sha: head_ref_oid,
+                    base_ref_name,
                     ci_status: status_check_rollup.into(),
                     auto_merge_enabled: auto_merge_request.is_some_and(|r| r.enabled_at.is_some()),
                 },
