@@ -351,3 +351,5 @@ echo "Opened $URL"
 - TTY on `STDOUT`: default log level is `INFO`.
 - Piped `STDOUT`: default log level drops to `ERROR`, so only failures appear on `STDERR`.
 - Override with `-v` / `-vv`, `-q`, `--log-level <level>`, or `$JJ_GH_LOG`.
+
+test
