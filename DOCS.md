@@ -39,8 +39,8 @@ Opinionated `jj` tools for working with GitHub from your terminal
 - `-v`, `--verbose` — Increase log verbosity (repeat for more, e.g. `-vv`)
 - `-q`, `--quiet` — Drop log level to `ERROR`
 - `--log-level <LEVEL>` — Set log level explicitly, overrides `-v` and `-q`
-- `--remote <NAME>` — Git remote used for the user's own pushes and PR head lookups. Overrides config `default_remote` (default: `origin`)
-- `--upstream-remote <NAME>` — Git remote used as the PR target in fork workflows. Overrides config `upstream_remote` (default: `upstream`)
+- `--remote <NAME>` — Git remote used for the user's own pushes and PR head lookups. Default: `origin` (or `default_remote` in config)
+- `--upstream-remote <NAME>` — Git remote used as the PR target in fork workflows. Default: `upstream` (or `upstream_remote` in config)
 - `--gh-askpass <CMD>` — Askpass helper command that prints a GitHub token on stdout; shell-words split, e.g. `--gh-askpass "op read op://Vault/gh/token"`. Default: `gh_askpass` in config, then `$GH_ASKPASS`
 - `--askpass-timeout <SECS>` — Timeout in seconds for the askpass helper. Default: 20
 
@@ -76,7 +76,7 @@ Opens your editor to a markdown file where you can write the PR description, and
 
 ###### **Options:**
 
-- `--base <BRANCH>` — Override the base bookmark. Default: closest ancestor bookmark on the stack, falling back to the remote's `main` / `master` / configured `default_base_branch`
+- `--base <BRANCH>` — Override the base bookmark. Default: closest ancestor bookmark on the stack, falling back to jj `trunk()`, then to the configured `default_base_branch`. Errors if none resolve
 - `--draft <DRAFT>` — Force the PR to be a draft. Overrides config (default: `draft = false`). Use `--no-draft` to force non-draft
 - `--no-draft` — Force the PR to be non-draft. Overrides config
 - `--auto-merge <AUTO_MERGE>` — Enable auto-merge on the PR after creation (merges once required checks pass). Overrides config (default: `auto_merge = false`). Use `--no-auto-merge` to force no auto-merge
@@ -87,14 +87,20 @@ Opens your editor to a markdown file where you can write the PR description, and
 
 - `-T`, `--template <TEMPLATE>` — jj template string used to render the PR body. Evaluated against the revset being PR'd in chronological order (`--reversed`), so a multi-commit stack renders bottom-up.
 
-  All standard jj template builtins are available (`description`, `commit_id`, `author`, etc.). The following string aliases are also injected:
-  - `pr_title`: default title (first-line description of the oldest commit on the stack). - `pr_base`: resolved base branch. - `pr_head_branch`: existing local bookmark on the rev, or empty if the rev is unpushed. - `pr_oldest_rev_id`: 40-char hex commit SHA of the oldest commit in the revset. Because the template runs once per commit in the revset, static content like a fixed PR header would otherwise be duplicated N times for an N-commit stack. Comparing `commit_id.short(40) == pr_oldest_rev_id` lets the template emit such content exactly once, at the bottom-most commit (which lands at the top of the output thanks to `--reversed`).
-
   Mutually exclusive with `--template-file` and `--no-template`.
+
+  All standard jj template builtins are available (`description`, `commit_id`, `author`, etc.). The following template aliases are also injected:
+  - `pr_title`: default title (first-line description of the oldest commit on the stack).
+
+  - `pr_base`: resolved base branch.
+
+  - `pr_head_branch`: existing local bookmark on the rev, or empty if the rev is unpushed.
+
+  - `pr_oldest_rev_id`: 40-char hex commit SHA of the oldest commit in the revset.
 
 - `--template-file <PATH_OR_NAME>` — Path or name (under `.github/PULL_REQUEST_TEMPLATE/`) of a markdown template file to use as the PR body. Mutually exclusive with `-T` and `--no-template`
 - `--no-template` — Skip body templating entirely
-- `-e`, `--editor <CMD>` — Editor command; shell-words split, e.g. `--editor "nvim +7"`. Default: `editor` in config, then `$VISUAL`, then `$EDITOR`
+- `-e`, `--editor <CMD>` — Editor command, e.g. `--editor "nvim +7"`. Default: `editor` in config, then `$VISUAL`, then `$EDITOR`
 
 ## `jj-gh pr fetch`
 
@@ -116,8 +122,22 @@ See: <https://github.com/jj-vcs/jj/issues/4388>
 
 - `-T`, `--template <TEMPLATE>` — Override the bookmark template. The argument is a jj template string evaluated once against `root()` (no commit context). Default: `pr_fetch_bookmark_template` in config, else `"pr-" ++ pr_number ++ "/" ++ pr_branch"`.
 
-  Injected string aliases (each is already double-quoted, so use them directly without wrapping in `"..."`):
-  - `pr_number`: PR number as a decimal string. - `pr_title`: PR title. - `pr_branch`: head ref name (the source branch on the PR's fork). - `pr_url`: PR's `html_url`. - `pr_head_sha`: 40-char hex commit SHA of the PR's head. - `pr_head_user`: PR's head fork owner login, or empty if the fork was deleted. - `pr_head_repo`: PR's head fork repository name, or empty if the fork was deleted. - `pr_slug`: sanitized lowercase ASCII slug of the title (max 50 chars), suitable for embedding in a bookmark name.
+  All standard jj template builtins are available (`description`, `commit_id`, `author`, etc.). The following template aliases are also injected:
+  - `pr_number`: PR number as a decimal string.
+
+  - `pr_title`: PR title.
+
+  - `pr_branch`: head ref name (the source branch on the PR's fork).
+
+  - `pr_url`: PR's `html_url`.
+
+  - `pr_head_sha`: 40-char hex commit SHA of the PR's head.
+
+  - `pr_head_user`: PR's head fork owner login, or empty if the fork was deleted.
+
+  - `pr_head_repo`: PR's head fork repository name, or empty if the fork was deleted.
+
+  - `pr_slug`: sanitized lowercase ASCII slug of the title (max 50 chars), suitable for embedding in a bookmark name.
 
 - `-f`, `--force` — Replace an existing local bookmark of the same name
 
@@ -158,7 +178,7 @@ Resolves the PR from a revision (via its local bookmark) or a PR number, fetches
 ###### **Options:**
 
 - `-f`, `--force` — Edit even if the PR body is empty. By default, `jj-gh` refuses to edit an empty body to avoid clobbering one that exists but failed to load
-- `-e`, `--editor <CMD>` — Editor command; shell-words split, e.g. `--editor "nvim +7"`. Default: `editor` in config, then `$VISUAL`, then `$EDITOR`
+- `-e`, `--editor <CMD>` — Editor command, e.g. `--editor "nvim +7"`. Default: `editor` in config, then `$VISUAL`, then `$EDITOR`
 
 ## `jj-gh pr log`
 
@@ -166,23 +186,30 @@ Like `jj log`, but injects PR metadata (e.g. number, CI status, URL).
 
 This works by injecting template aliases keyed by `commit_id` and renders inline PR info in a temporary config file added via `jj`'s `--config-file` argument. Any arguments after `--` are forwarded to the underlying `jj log` invocation, e.g. `jj-gh pr log -- -r 'mine()'`. A default template that mirror's `jj`'s default template is provided, but you may provide your own with the `-T|--template` argument and use the injected template aliases.
 
-The following template aliases are available for use if you pass your own template instead of using the default:
-
-`pr_number`, `pr_url`, `pr_ci_status`, `pr_merge_status`, `pr_meta` (formatted string containing all PR information).
-
 **Usage:** `jj-gh pr log [OPTIONS] [-- <JJ_LOG_ARGS>...]`
 
 **Command Alias:** `l`
 
 ###### **Arguments:**
 
-- `<JJ_LOG_ARGS>` — Arguments forwarded verbatim to the underlying `jj log` invocation. Pass after `--`, e.g. `jj-gh pr log -- -r 'mine()' -T builtin_log_compact`. If you pass `-T` / `--template`, the default PR-aware template is not applied; the following per-commit aliases are then available in your own template, each keyed on `commit_id`:
-  - `pr_number`: PR number as a string, or empty for commits without a PR. - `pr_url`: PR URL, or empty. - `pr_ci_status`: `SUCCESS`, `FAILED`, `PENDING`, or empty. - `pr_merge_status`: merged / in-merge-queue / auto-merge label, or empty. - `pr_meta`: pre-formatted hyperlinked PR number plus colored CI icon plus merge status (empty for commits without a PR).
+- `<JJ_LOG_ARGS>` — Arguments forwarded verbatim to the underlying `jj log` invocation. Pass after `--`, e.g. `jj-gh pr log -- -r 'mine()' -T builtin_log_compact`. If you pass `-T` / `--template`, the default PR-aware template is not applied.
+
+  All standard jj template builtins are available (`description`, `commit_id`, `author`, etc.). The following template aliases are also injected:
+  - `pr_number`: PR number as a string, or empty for commits without a PR.
+
+  - `pr_url`: PR URL, or empty.
+
+  - `pr_ci_status`: `SUCCESS`, `FAILED`, `PENDING`, or empty.
+
+  - `pr_merge_status`: merged / in-merge-queue / auto-merge label, or empty.
+
+  - `pr_meta`: pre-formatted hyperlinked PR number plus colored CI icon plus merge status.
 
 ###### **Options:**
 
 - `--nerdfonts <NERDFONTS>` — Force enable the use of nerdfont icons in the default `pr log` template. Overrides config. Use `--no-nerdfonts` to disable
 - `--no-nerdfonts` — Force the default `pr log` template not to use nerdfont icons. Overrides config
+- `-T <TEMPLATE>` — Override `pr_log_template` from config for this invocation. Sets the body of the default `pr_log` template alias jj-gh injects. Has no effect if you pass your own `-T` / `--template` in forwarded `jj log` args (after `--`)
 
 ## `jj-gh pr restack`
 
@@ -202,7 +229,9 @@ Restack does not rewrite the jj graph; the user shapes the graph first (e.g. via
 
 - `--dry-run` — Print the proposed plan and exit without launching the TUI. No PR is updated. Auto-enabled when stdout is not a terminal
 - `--json` — Emit the proposed plan as JSON. Implies `--dry-run`
-- `-T`, `--template <TEMPLATE>` — Template to use in interactive mode; conflicts with `--json` and `--dry-run`
+- `-T`, `--template <TEMPLATE>` — Template to use in interactive mode; conflicts with `--json` and `--dry-run`. The same template aliases as `pr log` are injected here. See `jj-gh pr log --help`
+- `--nerdfonts <NERDFONTS>` — Force enable nerdfont icons in the default restack/log template. Overrides config. Use `--no-nerdfonts` to disable
+- `--no-nerdfonts` — Force the default restack/log template not to use nerdfont icons. Overrides config
 
 ## `jj-gh pr retry-failed`
 

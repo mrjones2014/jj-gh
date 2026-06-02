@@ -2216,6 +2216,7 @@ dependencies = [
  "gix",
  "graphql_client",
  "http",
+ "jj-gh-config-derive",
  "log",
  "octocrab",
  "schemars",
@@ -2229,6 +2230,15 @@ dependencies = [
  "tokio",
  "toml 1.1.2+spec-1.1.0",
  "url",
+]
+
+[[package]]
+name = "jj-gh-config-derive"
+version = "0.0.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

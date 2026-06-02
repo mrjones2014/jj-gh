@@ -1,114 +1,106 @@
 use crate::{
     auth::EnvReader,
-    config::{AutoMergeMethod, Config},
+    cli::GlobalOpts,
+    config::AutoMergeMethod,
     gh::{CreatePrRequest, Gh, remote},
     jj::{self, Jj},
+    logging::ResultExt,
     pr::{
         editor::{self, ApplyChangesCtx, Editor, resolve_editor_argv},
         frontmatter::Frontmatter,
-        load_template_for, resolve_base, validation,
+        load_template_for, validation,
     },
 };
 use anyhow::{Context, Result, anyhow};
-use serde::Serialize;
+use jj_gh_config_derive::subcommand_args;
 use std::collections::HashMap;
 
-#[derive(Debug, clap::Args, Serialize)]
-pub struct CreateArgs {
-    /// Revision to create the PR from.
-    #[arg(value_name = "REV")]
-    #[serde(skip)]
-    pub rev: String,
+subcommand_args! {
+    pub struct CreateArgs {
+        /// Revision to create the PR from.
+        #[arg(value_name = "REV")]
+        pub rev: String,
 
-    /// Override the base bookmark. Default: closest ancestor bookmark on the
-    /// stack, falling back to the remote's `main` / `master` / configured
-    /// `default_base_branch`.
-    #[arg(long, value_name = "BRANCH")]
-    #[serde(skip)]
-    pub base: Option<String>,
+        /// Override the base bookmark. Default: closest ancestor bookmark on
+        /// the stack, falling back to jj `trunk()`, then to the configured
+        /// `default_base_branch`. Errors if none resolve.
+        #[arg(long, value_name = "BRANCH")]
+        #[config(fallback = "default_base_branch")]
+        pub base: Option<String>,
 
-    /// Force the PR to be a draft. Overrides config (default: `draft = false`).
-    /// Use `--no-draft` to force non-draft.
-    #[arg(
-        long,
-        num_args = 0,
-        default_missing_value = "true",
-        default_value_if("no_draft", "true", Some("false"))
-    )]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub draft: Option<bool>,
+        /// Force the PR to be a draft. Overrides config (default: `draft = false`).
+        /// Use `--no-draft` to force non-draft.
+        #[arg(
+            long,
+            num_args = 0,
+            default_missing_value = "true",
+            default_value_if("no_draft", "true", Some("false"))
+        )]
+        #[config]
+        pub draft: bool,
 
-    /// Force the PR to be non-draft. Overrides config.
-    #[arg(long = "no-draft", conflicts_with = "draft")]
-    #[serde(skip)]
-    pub no_draft: bool,
+        /// Force the PR to be non-draft. Overrides config.
+        #[arg(long, conflicts_with = "draft")]
+        pub no_draft: bool,
 
-    /// Enable auto-merge on the PR after creation (merges once required checks
-    /// pass). Overrides config (default: `auto_merge = false`). Use
-    /// `--no-auto-merge` to force no auto-merge.
-    #[arg(
-        long = "auto-merge",
-        num_args = 0,
-        default_missing_value = "true",
-        default_value_if("no_auto_merge", "true", Some("false"))
-    )]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub auto_merge: Option<bool>,
+        /// Enable auto-merge on the PR after creation (merges once required checks
+        /// pass). Overrides config (default: `auto_merge = false`). Use
+        /// `--no-auto-merge` to force no auto-merge.
+        #[arg(
+            long,
+            num_args = 0,
+            default_missing_value = "true",
+            default_value_if("no_auto_merge", "true", Some("false"))
+        )]
+        #[config]
+        pub auto_merge: bool,
 
-    /// Disable auto-merge on the created PR. Overrides config.
-    #[arg(long = "no-auto-merge", conflicts_with = "auto_merge")]
-    #[serde(skip)]
-    pub no_auto_merge: bool,
+        /// Disable auto-merge on the created PR. Overrides config.
+        #[arg(long, conflicts_with = "auto_merge")]
+        pub no_auto_merge: bool,
 
-    /// Merge method used when auto-merge is enabled. Overrides config
-    /// `auto_merge_method` (default `merge`).
-    #[arg(long = "auto-merge-method", value_name = "METHOD", value_enum)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub auto_merge_method: Option<AutoMergeMethod>,
+        /// Merge method used when auto-merge is enabled. Overrides config
+        /// `auto_merge_method` (default `merge`).
+        #[arg(long, value_name = "METHOD", value_enum)]
+        #[config]
+        pub auto_merge_method: AutoMergeMethod,
 
-    /// jj template string used to render the PR body. Evaluated against the
-    /// revset being PR'd in chronological order (`--reversed`), so a
-    /// multi-commit stack renders bottom-up.
-    ///
-    /// All standard jj template builtins are available (`description`,
-    /// `commit_id`, `author`, etc.). The following string aliases are also
-    /// injected:
-    ///
-    /// - `pr_title`: default title (first-line description of the oldest
-    ///   commit on the stack).
-    /// - `pr_base`: resolved base branch.
-    /// - `pr_head_branch`: existing local bookmark on the rev, or empty if
-    ///   the rev is unpushed.
-    /// - `pr_oldest_rev_id`: 40-char hex commit SHA of the oldest commit in
-    ///   the revset. Because the template runs once per commit in the
-    ///   revset, static content like a fixed PR header would otherwise be
-    ///   duplicated N times for an N-commit stack. Comparing
-    ///   `commit_id.short(40) == pr_oldest_rev_id` lets the template emit
-    ///   such content exactly once, at the bottom-most commit (which lands
-    ///   at the top of the output thanks to `--reversed`).
-    ///
-    /// Mutually exclusive with `--template-file` and `--no-template`.
-    #[arg(short = 'T', long, value_name = "TEMPLATE", conflicts_with_all = ["template_file", "no_template"])]
-    #[serde(skip)]
-    pub template: Option<String>,
+        /// jj template string used to render the PR body. Evaluated against the
+        /// revset being PR'd in chronological order (`--reversed`), so a
+        /// multi-commit stack renders bottom-up.
+        ///
+        /// Mutually exclusive with `--template-file` and `--no-template`.
+        ///
+        /// All standard jj template builtins are available (`description`,
+        /// `commit_id`, `author`, etc.). The following template aliases are also
+        /// injected:
+        ///
+        /// - `pr_title`: default title (first-line description of the oldest commit on the stack).
+        ///
+        /// - `pr_base`: resolved base branch.
+        ///
+        /// - `pr_head_branch`: existing local bookmark on the rev, or empty if the rev is unpushed.
+        ///
+        /// - `pr_oldest_rev_id`: 40-char hex commit SHA of the oldest commit in the revset.
+        #[arg(short = 'T', long, value_name = "TEMPLATE", conflicts_with_all = ["template_file", "no_template"])]
+        pub template: Option<String>,
 
-    /// Path or name (under `.github/PULL_REQUEST_TEMPLATE/`) of a markdown
-    /// template file to use as the PR body. Mutually exclusive with `-T` and
-    /// `--no-template`.
-    #[arg(long = "template-file", value_name = "PATH_OR_NAME", conflicts_with_all = ["template", "no_template"])]
-    #[serde(skip)]
-    pub template_file: Option<String>,
+        /// Path or name (under `.github/PULL_REQUEST_TEMPLATE/`) of a markdown
+        /// template file to use as the PR body. Mutually exclusive with `-T` and
+        /// `--no-template`.
+        #[arg(long, value_name = "PATH_OR_NAME", conflicts_with_all = ["template", "no_template"])]
+        pub template_file: Option<String>,
 
-    /// Skip body templating entirely.
-    #[arg(long = "no-template", conflicts_with_all = ["template", "template_file"])]
-    #[serde(skip)]
-    pub no_template: bool,
+        /// Skip body templating entirely.
+        #[arg(long, conflicts_with_all = ["template", "template_file"])]
+        pub no_template: bool,
 
-    /// Editor command; shell-words split, e.g. `--editor "nvim +7"`. Default:
-    /// `editor` in config, then `$VISUAL`, then `$EDITOR`.
-    #[arg(short = 'e', long, value_name = "CMD", value_parser = shell_words::split)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub editor: Option<Vec<String>>,
+        /// Editor command, e.g. `--editor "nvim +7"`. Default:
+        /// `editor` in config, then `$VISUAL`, then `$EDITOR`.
+        #[arg(short = 'e', long, value_name = "CMD", value_parser = shell_words::split)]
+        #[config]
+        pub editor: Option<Vec<String>>,
+    }
 }
 
 /// Run the full pr-create flow.
@@ -122,7 +114,6 @@ pub async fn run<J, G, E, ENV>(
     gh: &G,
     env: &ENV,
     editor: &E,
-    config: &Config,
     args: &CreateArgs,
 ) -> Result<()>
 where
@@ -131,14 +122,24 @@ where
     E: Editor,
     ENV: EnvReader,
 {
+    let GlobalOpts {
+        remote,
+        upstream_remote,
+        verbose: _,
+        quiet: _,
+        log_level: _,
+        gh_askpass: _,
+        askpass_timeout_secs: _,
+    } = &args.globals;
+
     let info = jj.resolve_rev(&args.rev).await?;
     let existing_branch = info.bookmarks.first().cloned();
 
     let origin_url = jj
-        .remote_url(&config.default_remote)
+        .remote_url(remote)
         .await?
-        .ok_or_else(|| anyhow!("`{}` remote is not configured", config.default_remote))?;
-    let upstream_url = jj.remote_url(&config.upstream_remote).await?;
+        .ok_or_else(|| anyhow!("`{remote}` remote is not configured"))?;
+    let upstream_url = jj.remote_url(upstream_remote).await?;
     let target = remote::target(&origin_url, upstream_url.as_deref())?;
 
     // Pre-flight only when we already have a bookmark; an unpushed rev can't have
@@ -162,11 +163,20 @@ where
     }
 
     let ancestor = jj.stacked_ancestor_bookmark(&args.rev).await?;
-    let detected_base = jj
-        .trunk_branch()
-        .await?
-        .unwrap_or_else(|| config.default_base_branch.clone());
-    let base = resolve_base(args, ancestor.as_deref(), &detected_base);
+    let base = args
+        .base
+        .resolve_or(
+            || async {
+                if let Some(a) = &ancestor {
+                    return Some(a.clone());
+                }
+                jj.trunk_branch().await.log_err().ok().flatten()
+            },
+            "could not detect base branch: `--base` not passed, no ancestor \
+             bookmark on the stack, jj `trunk()` resolves to nothing, and \
+             `default_base_branch` is not set in config",
+        )
+        .await?;
 
     let base_lookup = gh.lookup_base(&target.owner, &target.repo, &base).await?;
     if !base_lookup.branch_exists {
@@ -194,13 +204,13 @@ where
         base: base.clone(),
         labels: vec![],
         reviewers: vec![],
-        draft: config.draft,
-        auto_merge: config.auto_merge,
-        auto_merge_method: config.auto_merge_method,
+        draft: args.draft,
+        auto_merge: args.auto_merge,
+        auto_merge_method: args.auto_merge_method,
     };
     let raw_template_body = raw_template.clone().unwrap_or_default();
 
-    let editor_argv = resolve_editor_argv(config, env)?;
+    let editor_argv = resolve_editor_argv(args.editor.as_deref(), env)?;
     let (final_fm, body) = editor::round_trip(
         editor,
         &editor_argv,

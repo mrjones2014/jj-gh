@@ -9,7 +9,7 @@
 //! (only `refs/heads/*`), so we shell to git for the special pull ref.
 
 use crate::{
-    config::Config,
+    cli::GlobalOpts,
     gh::{Gh, PrDetails},
     git::{real::GitOps, url::parse_owner_repo},
     jj::{
@@ -18,7 +18,7 @@ use crate::{
     },
 };
 use anyhow::{Context, Result, anyhow};
-use serde::Serialize;
+use jj_gh_config_derive::subcommand_args;
 use std::path::Path;
 
 /// Default jj template used to render the bookmark name when neither the
@@ -47,52 +47,44 @@ fn ensure_colocated(workspace_root: &Path) -> Result<()> {
     ))
 }
 
-/// Pick the jj template string to evaluate for this fetch, honoring CLI then
-/// config then the built-in default.
-fn resolve_template<'a>(args: &'a FetchArgs, config: &'a Config) -> &'a str {
-    args.template
-        .as_deref()
-        .or(config.pr_fetch_bookmark_template.as_deref())
-        .unwrap_or(DEFAULT_FETCH_TEMPLATE)
-}
+subcommand_args! {
+    pub struct FetchArgs {
+        /// PR number to fetch.
+        #[arg(value_name = "PR_NUM")]
+        pub pr: u64,
 
-#[derive(Debug, clap::Args, Serialize)]
-pub struct FetchArgs {
-    /// PR number to fetch.
-    #[arg(value_name = "PR_NUM")]
-    #[serde(skip)]
-    pub pr: u64,
+        /// Override the bookmark template. The argument is a jj template string
+        /// evaluated once against `root()` (no commit context). Default:
+        /// `pr_fetch_bookmark_template` in config, else
+        /// `"pr-" ++ pr_number ++ "/" ++ pr_branch"`.
+        ///
+        /// All standard jj template builtins are available (`description`,
+        /// `commit_id`, `author`, etc.). The following template aliases are also
+        /// injected:
+        ///
+        /// - `pr_number`: PR number as a decimal string.
+        ///
+        /// - `pr_title`: PR title.
+        ///
+        /// - `pr_branch`: head ref name (the source branch on the PR's fork).
+        ///
+        /// - `pr_url`: PR's `html_url`.
+        ///
+        /// - `pr_head_sha`: 40-char hex commit SHA of the PR's head.
+        ///
+        /// - `pr_head_user`: PR's head fork owner login, or empty if the fork was deleted.
+        ///
+        /// - `pr_head_repo`: PR's head fork repository name, or empty if the fork was deleted.
+        ///
+        /// - `pr_slug`: sanitized lowercase ASCII slug of the title (max 50 chars), suitable for embedding in a bookmark name.
+        #[arg(short = 'T', long, value_name = "TEMPLATE")]
+        #[config(maps_to = "pr_fetch_bookmark_template")]
+        pub template: Option<String>,
 
-    /// Override the bookmark template. The argument is a jj template string
-    /// evaluated once against `root()` (no commit context). Default:
-    /// `pr_fetch_bookmark_template` in config, else
-    /// `"pr-" ++ pr_number ++ "/" ++ pr_branch"`.
-    ///
-    /// Injected string aliases (each is already double-quoted, so use them
-    /// directly without wrapping in `"..."`):
-    ///
-    /// - `pr_number`: PR number as a decimal string.
-    /// - `pr_title`: PR title.
-    /// - `pr_branch`: head ref name (the source branch on the PR's fork).
-    /// - `pr_url`: PR's `html_url`.
-    /// - `pr_head_sha`: 40-char hex commit SHA of the PR's head.
-    /// - `pr_head_user`: PR's head fork owner login, or empty if the fork
-    ///   was deleted.
-    /// - `pr_head_repo`: PR's head fork repository name, or empty if the
-    ///   fork was deleted.
-    /// - `pr_slug`: sanitized lowercase ASCII slug of the title (max 50
-    ///   chars), suitable for embedding in a bookmark name.
-    #[arg(short = 'T', long, value_name = "TEMPLATE")]
-    #[serde(
-        rename = "pr_fetch_bookmark_template",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub template: Option<String>,
-
-    /// Replace an existing local bookmark of the same name.
-    #[arg(short = 'f', long)]
-    #[serde(skip)]
-    pub force: bool,
+        /// Replace an existing local bookmark of the same name.
+        #[arg(short = 'f', long)]
+        pub force: bool,
+    }
 }
 
 /// Run `pr fetch` end-to-end. Parameterized over [`GitOps`] so tests can
@@ -102,23 +94,38 @@ pub struct FetchArgs {
 ///
 /// Propagates errors from any step (auth, GH API, colocation, git fetch, jj
 /// import, template eval).
-pub async fn run_with<J: Jj, G: Gh, GO: GitOps>(
+pub async fn run<J: Jj, G: Gh, GO: GitOps>(
     jj: &J,
     gh: &G,
     git: &GO,
-    config: &Config,
     args: &FetchArgs,
 ) -> Result<()> {
+    let FetchArgs {
+        pr: pr_num,
+        template,
+        force,
+        globals:
+            GlobalOpts {
+                remote,
+                verbose: _,
+                quiet: _,
+                log_level: _,
+                upstream_remote: _,
+                gh_askpass: _,
+                askpass_timeout_secs: _,
+            },
+    } = args;
+
     let workspace_root = jj.workspace_root().await?;
     ensure_colocated(workspace_root)?;
 
     let origin_url = jj
-        .remote_url(&config.default_remote)
+        .remote_url(remote)
         .await?
-        .ok_or_else(|| anyhow!("`{}` remote is not configured", config.default_remote))?;
+        .ok_or_else(|| anyhow!("`{remote}` remote is not configured"))?;
     let (owner, repo) = parse_owner_repo(&origin_url)?;
 
-    let pr = gh.get_pr(&owner, &repo, args.pr).await?;
+    let pr = gh.get_pr(&owner, &repo, *pr_num).await?;
     if pr.head_user_login.is_none() || pr.head_repo_name.is_none() {
         log::warn!(
             "PR #{}: head fork appears deleted; `pr_head_user` / `pr_head_repo` will be empty",
@@ -126,11 +133,11 @@ pub async fn run_with<J: Jj, G: Gh, GO: GitOps>(
         );
     }
 
-    let template = resolve_template(args, config);
+    let tmpl = template.as_deref().unwrap_or(DEFAULT_FETCH_TEMPLATE);
     let aliases = build_fetch_aliases(&pr);
     let tmp = aliases.write_temp_config()?;
     let bookmark = jj
-        .eval_template("root()", template, Some(tmp.path()), false)
+        .eval_template("root()", tmpl, Some(tmp.path()), false)
         .await
         .context("evaluating bookmark template")?
         .trim()
@@ -142,14 +149,13 @@ pub async fn run_with<J: Jj, G: Gh, GO: GitOps>(
         ));
     }
 
-    if git.local_bookmark_exists(&bookmark).await? && !args.force {
+    if git.local_bookmark_exists(&bookmark).await? && !force {
         return Err(anyhow!(
             "local bookmark `{bookmark}` already exists; pass --force to overwrite"
         ));
     }
 
-    git.fetch_pr(&config.default_remote, args.pr, &bookmark, args.force)
-        .await?;
+    git.fetch_pr(remote, *pr_num, &bookmark, *force).await?;
     jj.git_import().await?;
 
     log::info!("PR #{}: {}", pr.number, pr.title);
@@ -422,10 +428,23 @@ mod tests {
     }
 
     fn args(pr: u64, template: Option<&str>, force: bool) -> FetchArgs {
+        args_with_remote(pr, template, force, "origin")
+    }
+
+    fn args_with_remote(pr: u64, template: Option<&str>, force: bool, remote: &str) -> FetchArgs {
         FetchArgs {
             pr,
             template: template.map(str::to_string),
             force,
+            globals: GlobalOpts {
+                verbose: 0,
+                quiet: false,
+                log_level: None,
+                remote: remote.into(),
+                upstream_remote: "upstream".into(),
+                gh_askpass: None,
+                askpass_timeout_secs: 20,
+            },
         }
     }
 
@@ -460,11 +479,7 @@ mod tests {
             exists: false,
             fetches: RefCell::new(vec![]),
         };
-        let config = Config::default();
-
-        run_with(&jj, &gh, &git, &config, &args(1234, None, false))
-            .await
-            .unwrap();
+        run(&jj, &gh, &git, &args(1234, None, false)).await.unwrap();
 
         let calls = git.fetches.borrow();
         assert_eq!(calls.len(), 1);
@@ -485,12 +500,7 @@ mod tests {
             exists: false,
             fetches: RefCell::new(vec![]),
         };
-        let config = Config {
-            default_remote: "fork".into(),
-            ..Config::default()
-        };
-
-        run_with(&jj, &gh, &git, &config, &args(1234, None, false))
+        run(&jj, &gh, &git, &args_with_remote(1234, None, false, "fork"))
             .await
             .unwrap();
 
@@ -507,9 +517,7 @@ mod tests {
             exists: true,
             fetches: RefCell::new(vec![]),
         };
-        let config = Config::default();
-
-        let err = run_with(&jj, &gh, &git, &config, &args(1234, None, false))
+        let err = run(&jj, &gh, &git, &args(1234, None, false))
             .await
             .unwrap_err();
         let msg = format!("{err:#}");
@@ -526,11 +534,7 @@ mod tests {
             exists: true,
             fetches: RefCell::new(vec![]),
         };
-        let config = Config::default();
-
-        run_with(&jj, &gh, &git, &config, &args(1234, None, true))
-            .await
-            .unwrap();
+        run(&jj, &gh, &git, &args(1234, None, true)).await.unwrap();
 
         let calls = git.fetches.borrow();
         assert_eq!(calls.len(), 1);
@@ -547,12 +551,8 @@ mod tests {
             fetches: RefCell::new(vec![]),
         };
         let cfg_template = r#""cfg-" ++ pr_number ++ "-" ++ pr_head_user"#;
-        let config = Config {
-            pr_fetch_bookmark_template: Some(cfg_template.into()),
-            ..Config::default()
-        };
 
-        run_with(&jj, &gh, &git, &config, &args(1234, None, false))
+        run(&jj, &gh, &git, &args(1234, Some(cfg_template), false))
             .await
             .unwrap();
 
@@ -574,20 +574,10 @@ mod tests {
             fetches: RefCell::new(vec![]),
         };
         let cli_template = r#""cli-" ++ pr_number"#;
-        let config = Config {
-            pr_fetch_bookmark_template: Some(r#""cfg-" ++ pr_number"#.into()),
-            ..Config::default()
-        };
 
-        run_with(
-            &jj,
-            &gh,
-            &git,
-            &config,
-            &args(1234, Some(cli_template), false),
-        )
-        .await
-        .unwrap();
+        run(&jj, &gh, &git, &args(1234, Some(cli_template), false))
+            .await
+            .unwrap();
 
         let evals = jj.eval_template_calls.lock().unwrap();
         assert_eq!(evals[0].template, cli_template);
@@ -602,11 +592,7 @@ mod tests {
             exists: false,
             fetches: RefCell::new(vec![]),
         };
-        let config = Config::default();
-
-        run_with(&jj, &gh, &git, &config, &args(1234, None, false))
-            .await
-            .unwrap();
+        run(&jj, &gh, &git, &args(1234, None, false)).await.unwrap();
 
         let evals = jj.eval_template_calls.lock().unwrap();
         assert_eq!(evals[0].template, DEFAULT_FETCH_TEMPLATE);
@@ -621,9 +607,7 @@ mod tests {
             exists: false,
             fetches: RefCell::new(vec![]),
         };
-        let config = Config::default();
-
-        let err = run_with(&jj, &gh, &git, &config, &args(1234, None, false))
+        let err = run(&jj, &gh, &git, &args(1234, None, false))
             .await
             .unwrap_err();
         let msg = format!("{err:#}");
@@ -640,9 +624,7 @@ mod tests {
             exists: false,
             fetches: RefCell::new(vec![]),
         };
-        let config = Config::default();
-
-        let err = run_with(&jj, &gh, &git, &config, &args(1234, None, false))
+        let err = run(&jj, &gh, &git, &args(1234, None, false))
             .await
             .unwrap_err();
         assert!(
@@ -661,9 +643,7 @@ mod tests {
             exists: false,
             fetches: RefCell::new(vec![]),
         };
-        let config = Config::default();
-
-        let err = run_with(&jj, &gh, &git, &config, &args(1234, None, false))
+        let err = run(&jj, &gh, &git, &args(1234, None, false))
             .await
             .unwrap_err();
         let msg = format!("{err:#}");

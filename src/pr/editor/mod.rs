@@ -8,7 +8,6 @@ pub(crate) mod edit;
 
 use crate::{
     auth::EnvReader,
-    config::Config,
     gh::{Gh, Reviewer, UpdatePr},
     pr::frontmatter::Frontmatter,
 };
@@ -37,8 +36,11 @@ pub trait Editor {
 /// # Errors
 ///
 /// Returns an error if no source produced a non-empty argv.
-pub fn resolve_editor_argv<E: EnvReader>(config: &Config, env: &E) -> Result<Vec<String>> {
-    if let Some(argv) = config.editor.as_deref().filter(|v| !v.is_empty()) {
+pub fn resolve_editor_argv<E: EnvReader>(
+    editor: Option<&[String]>,
+    env: &E,
+) -> Result<Vec<String>> {
+    if let Some(argv) = editor.filter(|v| !v.is_empty()) {
         return Ok(argv.to_vec());
     }
 
@@ -229,53 +231,47 @@ mod tests {
         }
     }
 
-    fn cfg() -> Config {
-        Config::default()
-    }
-
     #[test]
     fn config_used_when_set() {
-        let mut c = cfg();
-        c.editor = Some(vec!["code".into(), "--wait".into()]);
+        let argv_cfg = vec!["code".to_string(), "--wait".into()];
         let env = FakeEnv::with(&[("VISUAL", "vim"), ("EDITOR", "vi")]);
-        let argv = resolve_editor_argv(&c, &env).unwrap();
+        let argv = resolve_editor_argv(Some(&argv_cfg), &env).unwrap();
         assert_eq!(argv, vec!["code".to_string(), "--wait".into()]);
     }
 
     #[test]
     fn visual_outranks_editor() {
         let env = FakeEnv::with(&[("VISUAL", "nvim +7"), ("EDITOR", "vi")]);
-        let argv = resolve_editor_argv(&cfg(), &env).unwrap();
+        let argv = resolve_editor_argv(None, &env).unwrap();
         assert_eq!(argv, vec!["nvim".to_string(), "+7".into()]);
     }
 
     #[test]
     fn editor_env_used_when_visual_absent() {
         let env = FakeEnv::with(&[("EDITOR", "vi")]);
-        let argv = resolve_editor_argv(&cfg(), &env).unwrap();
+        let argv = resolve_editor_argv(None, &env).unwrap();
         assert_eq!(argv, vec!["vi".to_string()]);
     }
 
     #[test]
     fn empty_visual_falls_through_to_editor() {
         let env = FakeEnv::with(&[("VISUAL", ""), ("EDITOR", "vi")]);
-        let argv = resolve_editor_argv(&cfg(), &env).unwrap();
+        let argv = resolve_editor_argv(None, &env).unwrap();
         assert_eq!(argv, vec!["vi".to_string()]);
     }
 
     #[test]
     fn empty_config_editor_falls_through() {
-        let mut c = cfg();
-        c.editor = Some(vec![]);
+        let empty: Vec<String> = vec![];
         let env = FakeEnv::with(&[("EDITOR", "vi")]);
-        let argv = resolve_editor_argv(&c, &env).unwrap();
+        let argv = resolve_editor_argv(Some(&empty), &env).unwrap();
         assert_eq!(argv, vec!["vi".to_string()]);
     }
 
     #[test]
     fn no_sources_errors() {
         let env = FakeEnv::default();
-        let err = resolve_editor_argv(&cfg(), &env).unwrap_err();
+        let err = resolve_editor_argv(None, &env).unwrap_err();
         assert!(err.to_string().contains("no editor configured"));
     }
 }

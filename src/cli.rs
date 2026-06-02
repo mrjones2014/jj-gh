@@ -6,8 +6,8 @@ use clap::{
     builder::{Styles, styling::AnsiColor},
 };
 use clap_complete::Shell;
+use jj_gh_config_derive::subcommand_args;
 use log::LevelFilter;
-use serde::Serialize;
 use std::io::IsTerminal;
 
 const STYLES: Styles = Styles::styled()
@@ -23,47 +23,54 @@ const STYLES: Styles = Styles::styled()
 #[command(name = "jj-gh", version, about, styles = STYLES)]
 pub struct Cli {
     #[command(flatten)]
-    pub global: GlobalOpts,
+    pub global: GlobalOptsInput,
 
     #[command(subcommand)]
     pub command: Command,
 }
 
-#[derive(Debug, clap::Args, Serialize)]
-pub struct GlobalOpts {
-    /// Increase log verbosity (repeat for more, e.g. `-vv`).
-    #[arg(short = 'v', long = "verbose", action = clap::ArgAction::Count, global = true)]
-    #[serde(skip)]
-    pub verbose: u8,
+subcommand_args! {
+    #[no_globals]
+    pub struct GlobalOpts {
+        /// Increase log verbosity (repeat for more, e.g. `-vv`).
+        #[arg(short = 'v', long, action = clap::ArgAction::Count, global = true)]
+        pub verbose: u8,
 
-    /// Drop log level to `ERROR`.
-    #[arg(short = 'q', long = "quiet", global = true, conflicts_with = "verbose")]
-    #[serde(skip)]
-    pub quiet: bool,
+        /// Drop log level to `ERROR`.
+        #[arg(short = 'q', long, global = true, conflicts_with = "verbose")]
+        pub quiet: bool,
 
-    /// Set log level explicitly, overrides `-v` and `-q`.
-    #[arg(long = "log-level", value_name = "LEVEL", global = true)]
-    #[serde(skip)]
-    pub log_level: Option<LevelFilter>,
+        /// Set log level explicitly, overrides `-v` and `-q`.
+        #[arg(long, value_name = "LEVEL", global = true)]
+        pub log_level: Option<LevelFilter>,
 
-    /// Git remote used for the user's own pushes and PR head lookups.
-    /// Overrides config `default_remote` (default: `origin`).
-    #[arg(long = "remote", value_name = "NAME", global = true)]
-    #[serde(rename = "default_remote", skip_serializing_if = "Option::is_none")]
-    pub remote: Option<String>,
+        /// Git remote used for the user's own pushes and PR head lookups.
+        /// Default: `origin` (or `default_remote` in config).
+        #[arg(long, value_name = "NAME", global = true)]
+        #[config(maps_to = "default_remote")]
+        pub remote: String,
 
-    /// Git remote used as the PR target in fork workflows. Overrides config
-    /// `upstream_remote` (default: `upstream`).
-    #[arg(long = "upstream-remote", value_name = "NAME", global = true)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub upstream_remote: Option<String>,
+        /// Git remote used as the PR target in fork workflows. Default:
+        /// `upstream` (or `upstream_remote` in config).
+        #[arg(long, value_name = "NAME", global = true)]
+        #[config]
+        pub upstream_remote: String,
 
-    #[command(flatten)]
-    #[serde(flatten)]
-    pub auth: AuthArgs,
+        /// Askpass helper command that prints a GitHub token on stdout;
+        /// shell-words split, e.g. `--gh-askpass "op read op://Vault/gh/token"`.
+        /// Default: `gh_askpass` in config, then `$GH_ASKPASS`.
+        #[arg(long, value_name = "CMD", value_parser = shell_words::split, global = true)]
+        #[config]
+        pub gh_askpass: Option<Vec<String>>,
+
+        /// Timeout in seconds for the askpass helper. Default: 20.
+        #[arg(long = "askpass-timeout", value_name = "SECS", global = true)]
+        #[config]
+        pub askpass_timeout_secs: u64,
+    }
 }
 
-impl GlobalOpts {
+impl GlobalOptsInput {
     pub fn resolve_log_level(&self) -> LevelFilter {
         if let Some(level) = self.log_level {
             return level;
@@ -111,28 +118,13 @@ pub enum Command {
         /// Emit an overlay for `jj <NAME> <tab>` instead of the standalone
         /// `jj-gh` script. Pass the jj alias name (e.g. `pr`). Must be
         /// paired with `--subcommand`.
-        #[arg(long = "jj-alias", value_name = "NAME", requires = "jj_gh_subcommand")]
+        #[arg(long, value_name = "NAME", requires = "jj_gh_subcommand")]
         jj_alias: Option<String>,
         /// jj-gh top-level subcommand whose tree the overlay describes
         /// (e.g. `pr`). Must be paired with `--jj-alias`.
         #[arg(long = "subcommand", value_name = "NAME", requires = "jj_alias")]
         jj_gh_subcommand: Option<SubcommandStr>,
     },
-}
-
-#[derive(Debug, clap::Args, Serialize)]
-pub struct AuthArgs {
-    /// Askpass helper command that prints a GitHub token on stdout;
-    /// shell-words split, e.g. `--gh-askpass "op read op://Vault/gh/token"`.
-    /// Default: `gh_askpass` in config, then `$GH_ASKPASS`.
-    #[arg(long = "gh-askpass", value_name = "CMD", value_parser = shell_words::split)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub gh_askpass: Option<Vec<String>>,
-
-    /// Timeout in seconds for the askpass helper. Default: 20.
-    #[arg(long = "askpass-timeout", value_name = "SECS")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub askpass_timeout_secs: Option<u64>,
 }
 
 #[derive(Debug, Subcommand)]

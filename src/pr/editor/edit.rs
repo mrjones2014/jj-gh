@@ -1,6 +1,6 @@
 use crate::{
     auth::EnvReader,
-    config::Config,
+    cli::GlobalOpts,
     gh::{Gh, PrDetails, remote::Target},
     jj::Jj,
     pr::{
@@ -10,27 +10,26 @@ use crate::{
     },
 };
 use anyhow::{Context, Result, anyhow, bail};
-use serde::Serialize;
+use jj_gh_config_derive::subcommand_args;
 use std::collections::HashMap;
 
-#[derive(Debug, clap::Args, Serialize)]
-pub struct EditArgs {
-    /// PR number, or revision ID to look up a PR from.
-    #[arg(value_name = "PR_NUM|REV")]
-    #[serde(skip)]
-    pub number_or_rev: String,
+subcommand_args! {
+    pub struct EditArgs {
+        /// PR number, or revision ID to look up a PR from.
+        #[arg(value_name = "PR_NUM|REV")]
+        pub number_or_rev: String,
 
-    /// Edit even if the PR body is empty. By default, `jj-gh` refuses to edit
-    /// an empty body to avoid clobbering one that exists but failed to load.
-    #[arg(short = 'f', long)]
-    #[serde(skip)]
-    pub force: bool,
+        /// Edit even if the PR body is empty. By default, `jj-gh` refuses to edit
+        /// an empty body to avoid clobbering one that exists but failed to load.
+        #[arg(short = 'f', long)]
+        pub force: bool,
 
-    /// Editor command; shell-words split, e.g. `--editor "nvim +7"`. Default:
-    /// `editor` in config, then `$VISUAL`, then `$EDITOR`.
-    #[arg(short = 'e', long, value_name = "CMD", value_parser = shell_words::split)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub editor: Option<Vec<String>>,
+        /// Editor command, e.g. `--editor "nvim +7"`. Default:
+        /// `editor` in config, then `$VISUAL`, then `$EDITOR`.
+        #[arg(short = 'e', long, value_name = "CMD", value_parser = shell_words::split)]
+        #[config]
+        pub editor: Option<Vec<String>>,
+    }
 }
 
 /// Fetch a PR, open the editor, and apply only the diff. Properties the user
@@ -40,23 +39,33 @@ pub struct EditArgs {
 /// # Errors
 ///
 /// Returns an error from any step (rev resolution, GH API, editor, etc.).
-pub async fn run<J, G, E, ENV>(
-    jj: &J,
-    gh: &G,
-    env: &ENV,
-    editor: &E,
-    config: &Config,
-    args: &EditArgs,
-) -> Result<()>
+pub async fn run<J, G, E, ENV>(jj: &J, gh: &G, env: &ENV, editor: &E, args: &EditArgs) -> Result<()>
 where
     J: Jj,
     G: Gh,
     E: Editor,
     ENV: EnvReader,
 {
-    let editor_argv = resolve_editor_argv(config, env)?;
+    let EditArgs {
+        number_or_rev,
+        force,
+        editor: editor_cfg,
+        globals:
+            GlobalOpts {
+                remote,
+                upstream_remote,
+                verbose: _,
+                quiet: _,
+                log_level: _,
+                gh_askpass: _,
+                askpass_timeout_secs: _,
+            },
+    } = args;
 
-    let (owner, repo, pr_number) = resolve_pr_target(jj, gh, config, &args.number_or_rev).await?;
+    let editor_argv = resolve_editor_argv(editor_cfg.as_deref(), env)?;
+
+    let (owner, repo, pr_number) =
+        resolve_pr_target(jj, gh, remote, upstream_remote, number_or_rev).await?;
     let details = gh
         .get_pr(&owner, &repo, pr_number)
         .await
@@ -78,7 +87,7 @@ where
     } = details;
 
     if body.is_empty() {
-        if args.force {
+        if *force {
             log::warn!("PR body is empty, but `--force` was passed");
         } else {
             bail!(
@@ -111,7 +120,7 @@ where
     if after_fm.base.trim().is_empty() {
         bail!("base is empty");
     }
-    if after_body.trim().is_empty() && !args.force {
+    if after_body.trim().is_empty() && !force {
         bail!("body is empty; pass `--force` to confirm");
     }
 
@@ -137,15 +146,16 @@ where
 async fn resolve_pr_target<J: Jj, G: Gh>(
     jj: &J,
     gh: &G,
-    config: &Config,
+    default_remote: &str,
+    upstream_remote: &str,
     number_or_rev: &str,
 ) -> Result<(String, String, u64)> {
     if let Ok(num) = number_or_rev.parse::<u64>() {
         let origin_url = jj
-            .remote_url(&config.default_remote)
+            .remote_url(default_remote)
             .await?
-            .ok_or_else(|| anyhow!("`{}` remote is not configured", config.default_remote))?;
-        let upstream_url = jj.remote_url(&config.upstream_remote).await?;
+            .ok_or_else(|| anyhow!("`{default_remote}` remote is not configured"))?;
+        let upstream_url = jj.remote_url(upstream_remote).await?;
         let target = crate::gh::remote::target(&origin_url, upstream_url.as_deref())?;
         return Ok((target.owner, target.repo, num));
     }
@@ -154,7 +164,7 @@ async fn resolve_pr_target<J: Jj, G: Gh>(
         head_spec,
         summary,
         ..
-    } = pr::resolve_pr_for_rev(jj, gh, config, number_or_rev).await?;
+    } = pr::resolve_pr_for_rev(jj, gh, default_remote, upstream_remote, number_or_rev).await?;
     let summary = summary
         .ok_or_else(|| anyhow!("no open PR for revision `{number_or_rev}` (head `{head_spec}`)"))?;
     Ok((owner, repo, summary.number))

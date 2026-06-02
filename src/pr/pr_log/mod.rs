@@ -10,7 +10,7 @@
 //! didn't pass their own `-T` / `--template`.
 
 use crate::{
-    config::Config,
+    cli::GlobalOpts,
     gh::{CiStatus, Gh, PrWithCiStatus},
     git,
     jj::{
@@ -20,7 +20,7 @@ use crate::{
     ui::Spinner,
 };
 use anyhow::{Context, Result, anyhow};
-use serde::Serialize;
+use jj_gh_config_derive::subcommand_args;
 use std::collections::HashMap;
 use tokio::process::Command;
 
@@ -59,52 +59,80 @@ if(root,
 )
 "#;
 
-#[derive(Debug, clap::Args, Serialize)]
-pub struct PrLogArgs {
-    /// Arguments forwarded verbatim to the underlying `jj log` invocation.
-    /// Pass after `--`, e.g. `jj-gh pr log -- -r 'mine()' -T builtin_log_compact`.
-    /// If you pass `-T` / `--template`, the default PR-aware template is not
-    /// applied; the following per-commit aliases are then available in your
-    /// own template, each keyed on `commit_id`:
-    ///
-    /// - `pr_number`: PR number as a string, or empty for commits without a
-    ///   PR.
-    /// - `pr_url`: PR URL, or empty.
-    /// - `pr_ci_status`: `SUCCESS`, `FAILED`, `PENDING`, or empty.
-    /// - `pr_merge_status`: merged / in-merge-queue / auto-merge label, or
-    ///   empty.
-    /// - `pr_meta`: pre-formatted hyperlinked PR number plus colored CI icon
-    ///   plus merge status (empty for commits without a PR).
-    #[arg(last = true, allow_hyphen_values = true, value_name = "JJ_LOG_ARGS")]
-    #[serde(skip)]
-    pub jj_log_args: Vec<String>,
+subcommand_args! {
+    pub struct PrLogArgs {
+        /// Arguments forwarded verbatim to the underlying `jj log` invocation.
+        /// Pass after `--`, e.g. `jj-gh pr log -- -r 'mine()' -T builtin_log_compact`.
+        /// If you pass `-T` / `--template`, the default PR-aware template is not
+        /// applied.
+        ///
+        /// All standard jj template builtins are available (`description`,
+        /// `commit_id`, `author`, etc.). The following template aliases are also
+        /// injected:
+        ///
+        /// - `pr_number`: PR number as a string, or empty for commits without a PR.
+        ///
+        /// - `pr_url`: PR URL, or empty.
+        ///
+        /// - `pr_ci_status`: `SUCCESS`, `FAILED`, `PENDING`, or empty.
+        ///
+        /// - `pr_merge_status`: merged / in-merge-queue / auto-merge label, or empty.
+        ///
+        /// - `pr_meta`: pre-formatted hyperlinked PR number plus colored CI icon plus merge status.
+        #[arg(last = true, allow_hyphen_values = true, value_name = "JJ_LOG_ARGS")]
+        pub jj_log_args: Vec<String>,
 
-    /// Force enable the use of nerdfont icons in the default
-    /// `pr log` template. Overrides config. Use `--no-nerdfonts` to disable.
-    #[arg(
-        long,
-        num_args = 0,
-        default_missing_value = "true",
-        default_value_if("no_nerdfonts", "true", Some("false"))
-    )]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub nerdfonts: Option<bool>,
+        /// Force enable the use of nerdfont icons in the default
+        /// `pr log` template. Overrides config. Use `--no-nerdfonts` to disable.
+        #[arg(
+            long,
+            num_args = 0,
+            default_missing_value = "true",
+            default_value_if("no_nerdfonts", "true", Some("false"))
+        )]
+        #[config]
+        pub nerdfonts: bool,
 
-    /// Force the default `pr log` template not to use nerdfont icons.
-    /// Overrides config.
-    #[arg(long = "no-nerdfonts", conflicts_with = "nerdfonts")]
-    #[serde(skip)]
-    pub no_nerdfonts: bool,
+        /// Force the default `pr log` template not to use nerdfont icons.
+        /// Overrides config.
+        #[arg(long, conflicts_with = "nerdfonts")]
+        pub no_nerdfonts: bool,
+
+        /// Override `pr_log_template` from config for this invocation.
+        /// Sets the body of the default `pr_log` template alias jj-gh
+        /// injects. Has no effect if you pass your own `-T` / `--template`
+        /// in forwarded `jj log` args (after `--`).
+        #[arg(short = 'T', value_name = "TEMPLATE")]
+        #[config(maps_to = "pr_log_template")]
+        pub template: Option<String>,
+    }
 }
 
-pub async fn run(args: &PrLogArgs, config: &Config, gh: &impl Gh, jj: &impl Jj) -> Result<()> {
+pub async fn run(gh: &impl Gh, jj: &impl Jj, args: &PrLogArgs) -> Result<()> {
+    let PrLogArgs {
+        jj_log_args,
+        nerdfonts,
+        no_nerdfonts: _,
+        template,
+        globals:
+            GlobalOpts {
+                remote,
+                verbose: _,
+                quiet: _,
+                log_level: _,
+                upstream_remote: _,
+                gh_askpass: _,
+                askpass_timeout_secs: _,
+            },
+    } = args;
+
     let origin_url = jj
-        .remote_url(&config.default_remote)
+        .remote_url(remote)
         .await?
-        .ok_or_else(|| anyhow!("`{}` remote is not configured", config.default_remote))?;
+        .ok_or_else(|| anyhow!("`{remote}` remote is not configured"))?;
     let (owner, repo) = git::url::parse_owner_repo(&origin_url)?;
     let spinner = Spinner::start("Resolving local PRs");
-    let bookmarks = jj.pushed_bookmarks(&config.default_remote).await?;
+    let bookmarks = jj.pushed_bookmarks(remote).await?;
     let branch_to_local: HashMap<String, String> = bookmarks
         .iter()
         .map(|b| (b.name.clone(), b.local_commit_id.clone()))
@@ -113,15 +141,15 @@ pub async fn run(args: &PrLogArgs, config: &Config, gh: &impl Gh, jj: &impl Jj) 
     let prs = gh.local_pulls(&owner, &repo, &names).await?;
     spinner.stop().await;
 
-    let aliases = build_aliases(&prs, &branch_to_local, config);
+    let aliases = build_aliases(&prs, &branch_to_local, *nerdfonts, template.as_deref());
     let tmp = aliases.write_temp_config()?;
 
     let mut cmd = Command::new("jj");
     cmd.arg("--config-file").arg(tmp.path()).arg("log");
-    if !user_set_template(&args.jj_log_args) {
+    if !user_set_template(jj_log_args) {
         cmd.args(["-T", "pr_log"]);
     }
-    cmd.args(&args.jj_log_args);
+    cmd.args(jj_log_args);
 
     let status = cmd.status().await.context("failed to spawn `jj log`")?;
     if !status.success() {
@@ -156,7 +184,8 @@ fn user_set_template(args: &[String]) -> bool {
 pub(crate) fn build_aliases(
     prs: &[PrWithCiStatus],
     branch_to_local: &HashMap<String, String>,
-    config: &Config,
+    nerdfonts: bool,
+    pr_log_template: Option<&str>,
 ) -> TemplateAliases {
     let number = if_chain_alias(prs, branch_to_local, |pr| format!(r#""{}""#, pr.number));
     let url = if_chain_alias(prs, branch_to_local, |pr| {
@@ -166,11 +195,13 @@ pub(crate) fn build_aliases(
         format!(r#""{}""#, ci_status_str(pr.ci_status))
     });
     let merge_status = if_chain_alias(prs, branch_to_local, |pr| {
-        format!(r#""{}""#, merge_status(pr, config).unwrap_or_default())
+        format!(r#""{}""#, merge_status(pr, nerdfonts).unwrap_or_default())
     });
-    let meta = if_chain_alias(prs, branch_to_local, |pr| render_pr_meta_body(pr, config));
+    let meta = if_chain_alias(prs, branch_to_local, |pr| {
+        render_pr_meta_body(pr, nerdfonts)
+    });
 
-    let pr_log_body = config.pr_log_template.as_deref().unwrap_or(PR_LOG_TEMPLATE);
+    let pr_log_body = pr_log_template.unwrap_or(PR_LOG_TEMPLATE);
     TemplateAliases::builder()
         .alias("pr_number", number)
         .alias("pr_url", url)
@@ -186,8 +217,8 @@ pub(crate) fn build_aliases(
 
 /// Render the body of a single `pr_meta` if-chain arm: the full template
 /// fragment for one PR (hyperlinked number plus colored CI-status icon).
-fn render_pr_meta_body(pr: &PrWithCiStatus, config: &Config) -> String {
-    let github_icon = if config.nerdfonts { " " } else { "" };
+fn render_pr_meta_body(pr: &PrWithCiStatus, nerdfonts: bool) -> String {
+    let github_icon = if nerdfonts { " " } else { "" };
     let url = escape_jj_string(&pr.url);
     let mut template = format!(
         r##""{github_icon}" ++ hyperlink("{url}", "#{n}")"##,
@@ -199,7 +230,7 @@ fn render_pr_meta_body(pr: &PrWithCiStatus, config: &Config) -> String {
         None => template,
     };
 
-    template = match merge_status(pr, config) {
+    template = match merge_status(pr, nerdfonts) {
         Some(metadata) => {
             format!(
                 r#"{template} ++ " " ++ label("{COLOR_PR_MERGE_STATUS}", "(") ++ {metadata} ++ label("{COLOR_PR_MERGE_STATUS}", ")")"#
@@ -211,19 +242,19 @@ fn render_pr_meta_body(pr: &PrWithCiStatus, config: &Config) -> String {
     template
 }
 
-fn merge_status(pr: &PrWithCiStatus, config: &Config) -> Option<String> {
+fn merge_status(pr: &PrWithCiStatus, nerdfonts: bool) -> Option<String> {
     if pr.merged {
-        let icon = if config.nerdfonts { " " } else { "" };
+        let icon = if nerdfonts { " " } else { "" };
         Some(format!(
             r#"label("{COLOR_PR_MERGE_STATUS}", "{icon}merged")"#
         ))
     } else if pr.is_in_merge_queue {
-        let icon = if config.nerdfonts { " " } else { "" };
+        let icon = if nerdfonts { " " } else { "" };
         Some(format!(
             r#"label("{COLOR_PR_MERGE_STATUS}", "{icon}in merge queue")"#
         ))
     } else if pr.auto_merge_enabled {
-        let icon = if config.nerdfonts { "󰾨 " } else { "" };
+        let icon = if nerdfonts { "󰾨 " } else { "" };
         Some(format!(
             r#"label("{COLOR_PR_MERGE_STATUS}", "{icon}auto-merge enabled")"#
         ))
@@ -426,7 +457,7 @@ mod tests {
     fn config_contains_alias_for_each_pr() {
         let prs = vec![pr("a".repeat(40).as_str(), 42, CiStatus::Success)];
         let map = local_map_from(&prs);
-        let cfg = build_aliases(&prs, &map, &Config::default()).to_toml();
+        let cfg = build_aliases(&prs, &map, true, None).to_toml();
         assert!(
             cfg.contains(r#"commit_id.short(40) == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa""#)
         );
@@ -440,17 +471,17 @@ mod tests {
     fn default_template_shows_merge_metadata() {
         let prs = vec![pr_merge_status(1, true, false, false)];
         let map = local_map_from(&prs);
-        let cfg = build_aliases(&prs, &map, &Config::default()).to_toml();
+        let cfg = build_aliases(&prs, &map, true, None).to_toml();
         assert!(cfg.contains(" merged"));
 
         let prs = vec![pr_merge_status(2, false, true, false)];
         let map = local_map_from(&prs);
-        let cfg = build_aliases(&prs, &map, &Config::default()).to_toml();
+        let cfg = build_aliases(&prs, &map, true, None).to_toml();
         assert!(cfg.contains(" in merge queue"), "{}", cfg);
 
         let prs = vec![pr_merge_status(3, false, false, true)];
         let map = local_map_from(&prs);
-        let cfg = build_aliases(&prs, &map, &Config::default()).to_toml();
+        let cfg = build_aliases(&prs, &map, true, None).to_toml();
         assert!(cfg.contains("󰾨 auto-merge enabled"));
     }
 
@@ -458,7 +489,7 @@ mod tests {
     fn merge_status_labels_use_pr_merge_color_const() {
         let prs = vec![pr_merge_status(1, true, false, false)];
         let map = local_map_from(&prs);
-        let cfg = build_aliases(&prs, &map, &Config::default()).to_toml();
+        let cfg = build_aliases(&prs, &map, true, None).to_toml();
         assert!(
             cfg.contains(r#"label("gh-pr-merge-status""#),
             "expected gh-pr-merge-status color label, got: {cfg}"

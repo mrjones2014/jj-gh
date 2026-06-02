@@ -12,8 +12,8 @@ mod validation;
 
 use crate::{
     auth::{self, OsEnv},
-    cli::GlobalOpts,
-    config::{self, Config},
+    cli::{GlobalOpts, GlobalOptsInput},
+    config,
     fs::RealFs,
     gh::{self, Gh, PrDetails, PrSummary, remote},
     git::real::RealGit,
@@ -22,12 +22,15 @@ use crate::{
         inject::{TemplateAliases, escape_jj_string},
     },
     pr::{
-        auto_merge::AutoMergeArgs,
-        editor::{TempfileEditor, edit::EditArgs},
-        fetch::FetchArgs,
-        pr_log::PrLogArgs,
-        restack::RestackArgs,
-        retry_failed::RetryFailedArgs,
+        auto_merge::{AutoMergeArgs, AutoMergeArgsInput},
+        editor::{
+            TempfileEditor,
+            edit::{EditArgs, EditArgsInput},
+        },
+        fetch::{FetchArgs, FetchArgsInput},
+        pr_log::{PrLogArgs, PrLogArgsInput},
+        restack::{RestackArgs, RestackArgsInput},
+        retry_failed::{RetryFailedArgs, RetryFailedArgsInput},
         template::TemplateSource,
     },
 };
@@ -35,7 +38,7 @@ use anyhow::{Context, Result, anyhow};
 use clap::Subcommand;
 use figment::providers::Serialized;
 
-pub use editor::create::CreateArgs;
+pub use editor::create::{CreateArgs, CreateArgsInput};
 
 #[derive(Debug, Subcommand)]
 pub enum PrAction {
@@ -46,7 +49,7 @@ pub enum PrAction {
     /// This supports stacked PRs; by default the base branch is set to the closest ancestor bookmark
     /// if one exists, otherwise `trunk()`.
     #[command(visible_alias = "c")]
-    Create(CreateArgs),
+    Create(CreateArgsInput),
     /// Fetch a pull request into a local bookmark.
     ///
     /// This command accepts either a revision ID or a PR number. If given a revision ID, the
@@ -55,13 +58,13 @@ pub enum PrAction {
     ///
     /// See: <https://github.com/jj-vcs/jj/issues/4388>
     #[command(visible_alias = "f")]
-    Fetch(FetchArgs),
+    Fetch(FetchArgsInput),
     /// Enable auto-merge on a PR.
     ///
     /// Accepts either a PR number or a revision; with a revision, the PR is looked up by the rev's
     /// local bookmark. Fails if the repo does not allow auto-merge.
     #[command(visible_alias = "am")]
-    AutoMerge(AutoMergeArgs),
+    AutoMerge(AutoMergeArgsInput),
     /// Edit an existing PR's title, body, base, labels, reviewers, draft state,
     /// and auto-merge settings via the markdown frontmatter editor flow.
     ///
@@ -69,7 +72,7 @@ pub enum PrAction {
     /// fetches its current state, opens your editor, and applies only the diffs:
     /// labels you didn't touch keep whatever others (CI bots, etc.) set.
     #[command(visible_alias = "e")]
-    Edit(EditArgs),
+    Edit(EditArgsInput),
 
     /// Like `jj log`, but injects PR metadata (e.g. number, CI status, URL).
     ///
@@ -78,14 +81,8 @@ pub enum PrAction {
     /// `--` are forwarded to the underlying `jj log` invocation, e.g. `jj-gh pr log -- -r 'mine()'`.
     /// A default template that mirror's `jj`'s default template is provided, but you may provide
     /// your own with the `-T|--template` argument and use the injected template aliases.
-    ///
-    /// The following template aliases are available for use if you pass your
-    /// own template instead of using the default:
-    ///
-    /// `pr_number`, `pr_url`, `pr_ci_status`, `pr_merge_status`, `pr_meta` (formatted string
-    /// containing all PR information).
     #[command(visible_alias = "l")]
-    Log(PrLogArgs),
+    Log(PrLogArgsInput),
 
     /// Push the current `jj` stack shape up to GitHub by updating each PR's
     /// base branch to match its closest stacked ancestor bookmark.
@@ -96,7 +93,7 @@ pub enum PrAction {
     /// default. Pass `--dry-run` or `--json` to print the proposed plan
     /// without making any API calls.
     #[command(visible_alias = "rs")]
-    Restack(RestackArgs),
+    Restack(RestackArgsInput),
 
     /// Re-run failed CI jobs on a PR.
     ///
@@ -108,7 +105,7 @@ pub enum PrAction {
     /// With `--cancel`, in-progress runs are cancelled first; once they
     /// finalize, every workflow run is re-run (full pipeline restart).
     #[command(visible_alias = "rerun")]
-    RetryFailed(RetryFailedArgs),
+    RetryFailed(RetryFailedArgsInput),
 }
 
 /// Dispatch the `pr` subcommand to the matching handler.
@@ -118,8 +115,8 @@ pub enum PrAction {
 /// Propagates errors from config loading, auth resolution, jj/GitHub API
 /// calls, the editor round-trip, or any sub-handler (`create`, `fetch`,
 /// `auto-merge`).
-pub async fn dispatch(global: &GlobalOpts, action: PrAction) -> Result<()> {
-    let mut fig = config::load_figment().merge(Serialized::defaults(global));
+pub async fn dispatch(global: GlobalOptsInput, action: PrAction) -> Result<()> {
+    let mut fig = config::load_figment().merge(Serialized::defaults(&global));
     fig = match &action {
         PrAction::Create(a) => fig.merge(Serialized::defaults(a)),
         PrAction::Fetch(a) => fig.merge(Serialized::defaults(a)),
@@ -130,26 +127,42 @@ pub async fn dispatch(global: &GlobalOpts, action: PrAction) -> Result<()> {
         PrAction::RetryFailed(a) => fig.merge(Serialized::defaults(a)),
     };
     let config = config::extract(&fig)?;
+    let globals = GlobalOpts::resolve(global, &config);
 
     let token = auth::resolve_token(&config).await?;
     let jj = jj::real::JjCli::new().await?;
     let gh = gh::real::OctocrabGh::new(&token)?;
     let editor = TempfileEditor;
     match action {
-        PrAction::Create(args) => {
-            editor::create::run(&jj, &gh, &OsEnv, &editor, &config, &args).await?;
+        PrAction::AutoMerge(input) => {
+            let args = AutoMergeArgs::resolve(input, &config, &globals);
+            auto_merge::run(&jj, &gh, &args).await?;
         }
-        PrAction::Fetch(args) => {
+        PrAction::Create(input) => {
+            let args = CreateArgs::resolve(input, &config, &globals);
+            editor::create::run(&jj, &gh, &OsEnv, &editor, &args).await?;
+        }
+        PrAction::Edit(input) => {
+            let args = EditArgs::resolve(input, &config, &globals);
+            editor::edit::run(&jj, &gh, &OsEnv, &editor, &args).await?;
+        }
+        PrAction::Fetch(input) => {
             let git = RealGit::new(jj.repo().clone());
-            fetch::run_with(&jj, &gh, &git, &config, &args).await?;
+            let args = FetchArgs::resolve(input, &config, &globals);
+            fetch::run(&jj, &gh, &git, &args).await?;
         }
-        PrAction::AutoMerge(args) => auto_merge::run(&jj, &gh, &config, &args).await?,
-        PrAction::Edit(args) => {
-            editor::edit::run(&jj, &gh, &OsEnv, &editor, &config, &args).await?;
+        PrAction::Log(input) => {
+            let args = PrLogArgs::resolve(input, &config, &globals);
+            pr_log::run(&gh, &jj, &args).await?;
         }
-        PrAction::Log(args) => pr_log::run(&args, &config, &gh, &jj).await?,
-        PrAction::Restack(args) => restack::run(&jj, &gh, &config, &args).await?,
-        PrAction::RetryFailed(args) => retry_failed::run(&jj, &gh, &config, &args).await?,
+        PrAction::Restack(input) => {
+            let args = RestackArgs::resolve(input, &config, &globals);
+            restack::run(&jj, &gh, &args).await?;
+        }
+        PrAction::RetryFailed(input) => {
+            let args = RetryFailedArgs::resolve(input, &config, &globals);
+            retry_failed::run(&jj, &gh, &args).await?;
+        }
     }
     Ok(())
 }
@@ -178,12 +191,15 @@ pub struct PrLookup {
 pub async fn get_pr<J: Jj, G: Gh>(
     jj: &J,
     gh: &G,
-    config: &Config,
+    default_remote: &str,
+    upstream_remote: &str,
     number_or_rev: &str,
 ) -> Result<PrDetails> {
-    Ok(resolve_pr_with_target(jj, gh, config, number_or_rev)
-        .await?
-        .0)
+    Ok(
+        resolve_pr_with_target(jj, gh, default_remote, upstream_remote, number_or_rev)
+            .await?
+            .0,
+    )
 }
 
 /// Same as [`get_pr`] but also returns the resolved [`remote::Target`] so
@@ -196,20 +212,22 @@ pub async fn get_pr<J: Jj, G: Gh>(
 pub async fn resolve_pr_with_target<J: Jj, G: Gh>(
     jj: &J,
     gh: &G,
-    config: &Config,
+    default_remote: &str,
+    upstream_remote: &str,
     number_or_rev: &str,
 ) -> Result<(PrDetails, remote::Target)> {
     if let Ok(num) = number_or_rev.parse::<u64>() {
         let origin_url = jj
-            .remote_url(&config.default_remote)
+            .remote_url(default_remote)
             .await?
-            .ok_or_else(|| anyhow!("`{}` remote is not configured", config.default_remote))?;
-        let upstream_url = jj.remote_url(&config.upstream_remote).await?;
+            .ok_or_else(|| anyhow!("`{default_remote}` remote is not configured"))?;
+        let upstream_url = jj.remote_url(upstream_remote).await?;
         let target = remote::target(&origin_url, upstream_url.as_deref())?;
         let pr = gh.get_pr(&target.owner, &target.repo, num).await?;
         Ok((pr, target))
     } else {
-        let lookup = resolve_pr_for_rev(jj, gh, config, number_or_rev).await?;
+        let lookup =
+            resolve_pr_for_rev(jj, gh, default_remote, upstream_remote, number_or_rev).await?;
         let summary = lookup.summary.ok_or_else(|| {
             anyhow!(
                 "no open PR for revision `{number_or_rev}` (head `{}`)",
@@ -234,7 +252,8 @@ pub async fn resolve_pr_with_target<J: Jj, G: Gh>(
 pub async fn resolve_pr_for_rev<J: Jj, G: Gh>(
     jj: &J,
     gh: &G,
-    config: &Config,
+    default_remote: &str,
+    upstream_remote: &str,
     rev: &str,
 ) -> Result<PrLookup> {
     let info = jj.resolve_rev(rev).await?;
@@ -245,10 +264,10 @@ pub async fn resolve_pr_for_rev<J: Jj, G: Gh>(
         .ok_or_else(|| anyhow!("no local bookmark on `{rev}`; nothing to look up"))?;
 
     let origin_url = jj
-        .remote_url(&config.default_remote)
+        .remote_url(default_remote)
         .await?
-        .ok_or_else(|| anyhow!("`{}` remote is not configured", config.default_remote))?;
-    let upstream_url = jj.remote_url(&config.upstream_remote).await?;
+        .ok_or_else(|| anyhow!("`{default_remote}` remote is not configured"))?;
+    let upstream_url = jj.remote_url(upstream_remote).await?;
     let target = remote::target(&origin_url, upstream_url.as_deref())?;
     let head_spec = target.head_spec(&branch);
 
@@ -268,13 +287,6 @@ pub async fn resolve_pr_for_rev<J: Jj, G: Gh>(
         default_base,
         summary,
     })
-}
-
-fn resolve_base(args: &CreateArgs, ancestor: Option<&str>, detected: &str) -> String {
-    args.base
-        .clone()
-        .or_else(|| ancestor.map(str::to_string))
-        .unwrap_or_else(|| detected.to_string())
 }
 
 async fn load_template_for<J: Jj>(
@@ -324,35 +336,32 @@ fn quote_jj(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        config::AutoMergeMethod,
-        pr::{auto_merge::AutoMergeArgs, fetch::FetchArgs},
-    };
+    use crate::config::{AutoMergeMethod, Config};
     use clap::Parser;
 
     #[derive(clap::Parser, Debug)]
     #[command(no_binary_name = true)]
     struct CreateArgsParser {
         #[command(flatten)]
-        args: CreateArgs,
+        args: CreateArgsInput,
     }
 
     #[derive(clap::Parser, Debug)]
     #[command(no_binary_name = true)]
     struct PrLogArgsParser {
         #[command(flatten)]
-        args: PrLogArgs,
+        args: PrLogArgsInput,
     }
 
-    fn parse_create(argv: &[&str]) -> CreateArgs {
+    fn parse_create(argv: &[&str]) -> CreateArgsInput {
         CreateArgsParser::try_parse_from(argv.iter().copied())
-            .expect("CreateArgs failed to parse")
+            .expect("CreateArgsInput failed to parse")
             .args
     }
 
-    fn parse_pr_log(argv: &[&str]) -> PrLogArgs {
+    fn parse_pr_log(argv: &[&str]) -> PrLogArgsInput {
         PrLogArgsParser::try_parse_from(argv.iter().copied())
-            .expect("PrLogArgs failed to parse")
+            .expect("PrLogArgsInput failed to parse")
             .args
     }
 
@@ -370,33 +379,6 @@ mod tests {
             .merge(config::JjConfProvider::from_memory("test", toml_config))
             .merge(Serialized::defaults(&argv));
         config::extract(&fig).unwrap()
-    }
-
-    fn args_with_base(base: Option<&str>) -> CreateArgs {
-        let mut a = parse_create(&["@-"]);
-        a.base = base.map(str::to_string);
-        a
-    }
-
-    #[test]
-    fn base_cli_wins_over_ancestor_and_detected() {
-        assert_eq!(
-            resolve_base(&args_with_base(Some("release")), Some("ancestor"), "main"),
-            "release"
-        );
-    }
-
-    #[test]
-    fn base_ancestor_wins_over_detected() {
-        assert_eq!(
-            resolve_base(&args_with_base(None), Some("ancestor"), "main"),
-            "ancestor"
-        );
-    }
-
-    #[test]
-    fn base_falls_back_to_detected() {
-        assert_eq!(resolve_base(&args_with_base(None), None, "main"), "main");
     }
 
     #[test]
@@ -518,7 +500,7 @@ mod tests {
 
     #[test]
     fn fetch_cli_template_overrides_config() {
-        let args = FetchArgs {
+        let input = FetchArgsInput {
             pr: 1,
             template: Some("cli-{number}".into()),
             force: false,
@@ -528,7 +510,7 @@ mod tests {
                 "pr_fetch_bookmark_template",
                 "cfg-{number}",
             ))
-            .merge(Serialized::defaults(&args));
+            .merge(Serialized::defaults(&input));
         let c = config::extract(&fig).unwrap();
         assert_eq!(
             c.pr_fetch_bookmark_template.as_deref(),
@@ -538,30 +520,30 @@ mod tests {
 
     #[test]
     fn auto_merge_args_method_overrides_config_via_rename() {
-        let args = AutoMergeArgs {
+        let input = AutoMergeArgsInput {
             number_or_rev: "1".into(),
-            method: Some(AutoMergeMethod::Squash),
+            auto_merge_method: Some(AutoMergeMethod::Squash),
         };
         let fig = config::defaults_figment()
             .merge(Serialized::default(
                 "auto_merge_method",
                 AutoMergeMethod::Rebase,
             ))
-            .merge(Serialized::defaults(&args));
+            .merge(Serialized::defaults(&input));
         let c = config::extract(&fig).unwrap();
         assert_eq!(c.auto_merge_method, AutoMergeMethod::Squash);
     }
 
     #[test]
     fn global_remote_overrides_default_remote_config() {
-        use crate::cli::GlobalOpts;
+        use crate::cli::GlobalOptsInput;
         use clap::Parser;
 
         #[derive(clap::Parser, Debug)]
         #[command(no_binary_name = true)]
         struct GlobalParser {
             #[command(flatten)]
-            opts: GlobalOpts,
+            opts: GlobalOptsInput,
         }
 
         let global =
@@ -585,14 +567,14 @@ mod tests {
 
     #[test]
     fn config_remote_used_when_global_not_set() {
-        use crate::cli::GlobalOpts;
+        use crate::cli::GlobalOptsInput;
         use clap::Parser;
 
         #[derive(clap::Parser, Debug)]
         #[command(no_binary_name = true)]
         struct GlobalParser {
             #[command(flatten)]
-            opts: GlobalOpts,
+            opts: GlobalOptsInput,
         }
 
         let global = GlobalParser::try_parse_from::<[&str; 0], _>([])

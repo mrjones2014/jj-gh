@@ -9,7 +9,7 @@
 mod interactive;
 
 use crate::{
-    config::Config,
+    cli::GlobalOpts,
     gh::{Gh, PrWithCiStatus, UpdatePr},
     git,
     jj::{Jj, PushedBookmark},
@@ -17,36 +17,52 @@ use crate::{
 };
 use anyhow::{Result, anyhow};
 use futures::{StreamExt, stream::FuturesUnordered};
+use jj_gh_config_derive::subcommand_args;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::io::IsTerminal;
 
-#[derive(Debug, clap::Args, Serialize)]
-pub struct RestackArgs {
-    /// PR number or revision ID to position the cursor on when the TUI opens;
-    /// if omitted the cursor starts on the first PR in the stack.
-    #[arg(value_name = "PR_NUM|REV")]
-    #[serde(skip)]
-    pub number_or_rev: Option<String>,
+subcommand_args! {
+    pub struct RestackArgs {
+        /// PR number or revision ID to position the cursor on when the TUI opens;
+        /// if omitted the cursor starts on the first PR in the stack.
+        #[arg(value_name = "PR_NUM|REV")]
+        pub number_or_rev: Option<String>,
 
-    /// Print the proposed plan and exit without launching the TUI. No PR is
-    /// updated. Auto-enabled when stdout is not a terminal.
-    #[arg(long)]
-    #[serde(skip)]
-    pub dry_run: bool,
+        /// Print the proposed plan and exit without launching the TUI. No PR is
+        /// updated. Auto-enabled when stdout is not a terminal.
+        #[arg(long)]
+        pub dry_run: bool,
 
-    /// Emit the proposed plan as JSON. Implies `--dry-run`.
-    #[arg(long)]
-    #[serde(skip)]
-    pub json: bool,
+        /// Emit the proposed plan as JSON. Implies `--dry-run`.
+        #[arg(long)]
+        pub json: bool,
 
-    /// Template to use in interactive mode; conflicts with `--json` and `--dry-run`.
-    #[arg(long, short = 'T', conflicts_with_all = ["json", "dry_run"])]
-    #[serde(
-        rename = "pr_restack_template",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub template: Option<String>,
+        /// Template to use in interactive mode; conflicts with `--json` and `--dry-run`.
+        /// The same template aliases as `pr log` are injected here. See `jj-gh pr log --help`.
+        #[arg(long, short = 'T', conflicts_with_all = ["json", "dry_run"])]
+        #[config(maps_to = "pr_restack_template")]
+        pub template: Option<String>,
+
+        #[config]
+        pub pr_log_template: Option<String>,
+
+        /// Force enable nerdfont icons in the default restack/log template.
+        /// Overrides config. Use `--no-nerdfonts` to disable.
+        #[arg(
+            long,
+            num_args = 0,
+            default_missing_value = "true",
+            default_value_if("no_nerdfonts", "true", Some("false"))
+        )]
+        #[config]
+        pub nerdfonts: bool,
+
+        /// Force the default restack/log template not to use nerdfont icons.
+        /// Overrides config.
+        #[arg(long, conflicts_with = "nerdfonts")]
+        pub no_nerdfonts: bool,
+    }
 }
 
 /// One PR's proposed base-ref transition. Computed up-front so the TUI and
@@ -96,12 +112,22 @@ impl Decision {
     }
 }
 
-pub async fn run<J, G>(jj: &J, gh: &G, config: &Config, args: &RestackArgs) -> Result<()>
+pub async fn run<J, G>(jj: &J, gh: &G, args: &RestackArgs) -> Result<()>
 where
     J: Jj,
     G: Gh,
 {
-    let ctx = gather_context(jj, gh, config).await?;
+    let GlobalOpts {
+        remote,
+        verbose: _,
+        quiet: _,
+        log_level: _,
+        upstream_remote: _,
+        gh_askpass: _,
+        askpass_timeout_secs: _,
+    } = &args.globals;
+
+    let ctx = gather_context(jj, gh, remote).await?;
     let force_dry = args.dry_run
         || args.json
         || !std::io::stdout().is_terminal()
@@ -126,7 +152,7 @@ where
         return Ok(());
     }
 
-    let decisions = interactive::run(jj, &ctx, config, args).await?;
+    let decisions = interactive::run(jj, &ctx, args).await?;
     submit(gh, &ctx, &decisions).await
 }
 
@@ -138,15 +164,19 @@ pub(crate) struct RestackContext {
     pub bookmarks: Vec<PushedBookmark>,
 }
 
-async fn gather_context<J: Jj, G: Gh>(jj: &J, gh: &G, config: &Config) -> Result<RestackContext> {
+async fn gather_context<J: Jj, G: Gh>(
+    jj: &J,
+    gh: &G,
+    default_remote: &str,
+) -> Result<RestackContext> {
     let origin_url = jj
-        .remote_url(&config.default_remote)
+        .remote_url(default_remote)
         .await?
-        .ok_or_else(|| anyhow!("`{}` remote is not configured", config.default_remote))?;
+        .ok_or_else(|| anyhow!("`{default_remote}` remote is not configured"))?;
     let (owner, repo) = git::url::parse_owner_repo(&origin_url)?;
 
     let spinner = Spinner::start("Resolving local PRs");
-    let bookmarks = jj.pushed_bookmarks(&config.default_remote).await?;
+    let bookmarks = jj.pushed_bookmarks(default_remote).await?;
     let branch_to_local: HashMap<String, String> = bookmarks
         .iter()
         .map(|b| (b.name.clone(), b.local_commit_id.clone()))

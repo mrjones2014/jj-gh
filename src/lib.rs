@@ -11,6 +11,7 @@ mod git;
 mod jj;
 mod pr;
 mod ui;
+mod util;
 
 pub mod logging;
 
@@ -28,8 +29,8 @@ pub async fn dispatch(bin_name: &str) -> anyhow::Result<()> {
     let _logger = logging::init(args.global.resolve_log_level())?;
     let global = args.global;
     match args.command {
-        Command::Pr { action } => pr::dispatch(&global, action).await?,
-        Command::Debug { action } => debug::dispatch(&global, action).await?,
+        Command::Pr { action } => pr::dispatch(global, action).await?,
+        Command::Debug { action } => debug::dispatch(global, action).await?,
         Command::Completions {
             shell,
             jj_alias,
