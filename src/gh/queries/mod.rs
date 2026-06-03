@@ -4,7 +4,6 @@ mod convert_to_draft;
 mod create_pr;
 mod disable_auto_merge;
 mod enable_auto_merge;
-mod enqueue_pr;
 mod find_open_pr;
 mod get_pr;
 mod lookup_base;
@@ -24,7 +23,6 @@ pub use enable_auto_merge::{
     EnableAutoMergeInternal, EnableAutoMergeResponseData, EnableAutoMergeVariables,
     PullRequestMergeMethod,
 };
-pub use enqueue_pr::{EnqueuePrInternal, EnqueuePrResponseData, EnqueuePrVariables};
 pub use find_open_pr::{
     FindOpenPrInternal, FindOpenPrResponseData, FindOpenPrVariables, PullRequestState,
 };

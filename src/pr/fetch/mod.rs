@@ -347,7 +347,6 @@ mod tests {
         async fn enable_auto_merge(
             &self,
             _node_id: &str,
-            _has_merge_queue: bool,
             _method: crate::config::AutoMergeMethod,
         ) -> Result<()> {
             unimplemented!("fetch does not call enable_auto_merge")

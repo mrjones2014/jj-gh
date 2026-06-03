@@ -11,7 +11,7 @@ use crate::{
     gh::{Gh, Reviewer, UpdatePr},
     pr::frontmatter::Frontmatter,
 };
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use std::collections::HashMap;
 use tokio::process::Command;
 
@@ -160,20 +160,31 @@ pub async fn apply_frontmatter_diff<G: Gh>(
     // method on an already-enabled PR.
     match (before.auto_merge, after.auto_merge) {
         (false, true) => {
-            gh.enable_auto_merge(ctx.pr_node_id, ctx.has_merge_queue, after.auto_merge_method)
+            ensure_not_merge_queue(ctx)?;
+            gh.enable_auto_merge(ctx.pr_node_id, after.auto_merge_method)
                 .await?;
         }
         (true, false) => {
             gh.disable_auto_merge(ctx.pr_node_id).await?;
         }
         (true, true) if before.auto_merge_method != after.auto_merge_method => {
+            ensure_not_merge_queue(ctx)?;
             gh.disable_auto_merge(ctx.pr_node_id).await?;
-            gh.enable_auto_merge(ctx.pr_node_id, ctx.has_merge_queue, after.auto_merge_method)
+            gh.enable_auto_merge(ctx.pr_node_id, after.auto_merge_method)
                 .await?;
         }
         _ => {}
     }
 
+    Ok(())
+}
+
+fn ensure_not_merge_queue(ctx: &ApplyChangesCtx<'_>) -> Result<()> {
+    if ctx.has_merge_queue {
+        bail!(
+            "auto-merge not supported for repos with merge queues enabled; this is a limitation of the GitHub API. See https://github.com/mrjones2014/jj-gh/issues/103"
+        );
+    }
     Ok(())
 }
 

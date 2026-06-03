@@ -1,5 +1,5 @@
 use crate::{cli::GlobalOpts, config::AutoMergeMethod, gh::Gh, jj::Jj, pr};
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use jj_gh_config_derive::subcommand_args;
 
 subcommand_args! {
@@ -38,7 +38,13 @@ where
 
     let pr = pr::get_pr(jj, gh, remote, upstream_remote, number_or_rev).await?;
 
-    gh.enable_auto_merge(&pr.graphql_node_id, pr.in_merge_queue, *auto_merge_method)
+    if pr.in_merge_queue {
+        bail!(
+            "auto-merge not supported for repos with merge queues enabled; this is a limitation of the GitHub API. See https://github.com/mrjones2014/jj-gh/issues/103"
+        );
+    }
+
+    gh.enable_auto_merge(&pr.graphql_node_id, *auto_merge_method)
         .await
         .with_context(|| format!("enabling auto-merge on #{}", pr.number))?;
 
