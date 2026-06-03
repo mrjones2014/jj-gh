@@ -133,16 +133,25 @@ mod tests {
     fn args() -> CreateArgs {
         CreateArgs {
             rev: "@-".into(),
-            base: None,
-            draft: None,
+            base: crate::util::EvalWithCfgFallback::new(None, None),
+            draft: false,
             no_draft: false,
-            auto_merge: None,
+            auto_merge: false,
             no_auto_merge: false,
-            auto_merge_method: None,
+            auto_merge_method: crate::config::AutoMergeMethod::Merge,
             template: None,
             template_file: None,
             no_template: false,
             editor: None,
+            globals: crate::cli::GlobalOpts {
+                verbose: 0,
+                quiet: false,
+                log_level: None,
+                remote: "origin".into(),
+                upstream_remote: "upstream".into(),
+                gh_askpass: None,
+                askpass_timeout_secs: 20,
+            },
         }
     }
 

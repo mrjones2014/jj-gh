@@ -20,7 +20,11 @@ include = [
 ]
 
 [workspace]
-members = ["tools/gen-docs", "tools/print-config-schema"]
+members = [
+  "tools/gen-docs",
+  "tools/jj-gh-config-derive",
+  "tools/print-config-schema",
+]
 
 [features]
 schema-validation = ["dep:schemars"]
@@ -47,6 +51,7 @@ gix = { version = "0.84", default-features = false, features = [
 ] }
 graphql_client = "0.16"
 http = "1"
+jj-gh-config-derive = { path = "tools/jj-gh-config-derive" }
 log = "0.4"
 octocrab = "0.51"
 schemars = { version = "1", optional = true }

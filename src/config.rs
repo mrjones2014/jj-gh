@@ -24,54 +24,69 @@ use figment::{
     providers::Serialized,
     value::{Dict, Map},
 };
+use jj_gh_config_derive::config_schema;
 use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-#[derive(Debug, Deserialize)]
-#[cfg_attr(feature = "schema-validation", derive(schemars::JsonSchema))]
-#[serde(default)]
-pub struct Config {
-    pub gh_askpass: Option<Vec<String>>,
-    pub askpass_timeout_secs: u64,
-    #[cfg_attr(feature = "schema-validation", schemars(with = "Option<String>"))]
-    pub gh_token: Option<SecretString>,
-    pub default_base_branch: String,
-    pub default_remote: String,
-    pub upstream_remote: String,
-    pub pr_create_template_file: Option<PathBuf>,
-    pub pr_create_template: Option<String>,
-    pub draft: bool,
-    pub auto_merge: bool,
-    pub auto_merge_method: AutoMergeMethod,
-    pub editor: Option<Vec<String>>,
-    pub pr_fetch_bookmark_template: Option<String>,
-    pub pr_log_template: Option<String>,
-    pub pr_restack_template: Option<String>,
-    pub nerdfonts: bool,
-}
+config_schema! {
+    /// Askpass helper command that prints a GitHub token on stdout.
+    #[env("GH_ASKPASS", argv)]
+    gh_askpass: Option<Vec<String>> = None,
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            gh_askpass: None,
-            askpass_timeout_secs: 20,
-            gh_token: None,
-            default_base_branch: "master".into(),
-            default_remote: "origin".into(),
-            upstream_remote: "upstream".into(),
-            pr_create_template_file: None,
-            pr_create_template: None,
-            draft: false,
-            auto_merge: false,
-            auto_merge_method: AutoMergeMethod::default(),
-            editor: None,
-            pr_fetch_bookmark_template: None,
-            pr_log_template: None,
-            pr_restack_template: None,
-            nerdfonts: true,
-        }
-    }
+    /// Timeout in seconds for the askpass helper.
+    askpass_timeout_secs: u64 = 20,
+
+    /// GitHub auth token. Never logged. Resolved via askpass when absent.
+    /// `SecretString` does not impl `Serialize` (intentional; we never emit
+    /// it back to figment), so the serde skip is per-field rather than via
+    /// the macro's default `skip_serializing_if = "Option::is_none"`.
+    #[serde(skip_serializing)]
+    #[forward(cfg_attr(feature = "schema-validation", schemars(with = "Option<String>")))]
+    gh_token: Option<SecretString> = None,
+
+    /// Fallback base branch when neither `--base` nor an ancestor bookmark
+    /// nor jj `trunk()` resolves. If none of the above resolve, and this
+    /// option is not set, an error will occur.
+    default_base_branch: Option<String> = None,
+
+    /// Git remote used for the user's own pushes and PR head lookups.
+    default_remote: String = "origin".into(),
+
+    /// Git remote used as the PR target in fork workflows.
+    upstream_remote: String = "upstream".into(),
+
+    /// Path to a markdown template file used as the PR body.
+    #[env("JJ_GH_TEMPLATE_FILE", path)]
+    pr_create_template_file: Option<PathBuf> = None,
+
+    /// jj template string used to render the PR body.
+    #[env("JJ_GH_TEMPLATE", string)]
+    pr_create_template: Option<String> = None,
+
+    /// Open new PRs as drafts.
+    draft: bool = false,
+
+    /// Enable auto-merge on newly created PRs.
+    auto_merge: bool = false,
+
+    /// Merge method used when auto-merge is enabled.
+    auto_merge_method: AutoMergeMethod = AutoMergeMethod::Merge,
+
+    /// Editor command for the PR editor flow.
+    editor: Option<Vec<String>> = None,
+
+    /// jj template used to render the bookmark name in `pr fetch`.
+    pr_fetch_bookmark_template: Option<String> = None,
+
+    /// jj template used by `pr log`.
+    pr_log_template: Option<String> = None,
+
+    /// jj template used by `pr restack`. Falls back to `pr_log_template`.
+    pr_restack_template: Option<String> = None,
+
+    /// Render Nerd-Fonts glyphs in TUI output.
+    nerdfonts: bool = true,
 }
 
 /// GitHub merge method used when enabling auto-merge on a PR.
@@ -95,14 +110,14 @@ pub fn load_figment() -> Figment {
     for path in discover_layers() {
         fig = fig.merge(JjConfProvider::from_file(path));
     }
-    fig.merge(Serialized::defaults(EnvOverlay::from_env()))
+    fig.merge(Serialized::defaults(env_overlay()))
 }
 
-/// A [`Figment`] preloaded with the built-in defaults. Compose [`JjToolsProvider`]s
+/// A [`Figment`] preloaded with the built-in defaults. Compose [`JjConfProvider`]s
 /// onto this for hermetic tests, then hand to [`extract`].
 #[must_use]
 pub fn defaults_figment() -> Figment {
-    Figment::from(Serialized::defaults(DefaultsOverlay::from_defaults()))
+    Figment::from(Serialized::defaults(Config::default()))
 }
 
 /// PR-body template values resolved against a single jj config layer (or a
@@ -305,86 +320,6 @@ fn extract_jj_gh_subtree(contents: &str) -> Result<Option<toml::Table>, SourceEr
     Ok(Some(table))
 }
 
-#[derive(Serialize)]
-struct DefaultsOverlay {
-    askpass_timeout_secs: u64,
-    default_base_branch: String,
-    default_remote: String,
-    upstream_remote: String,
-    draft: bool,
-    auto_merge: bool,
-    auto_merge_method: AutoMergeMethod,
-    nerdfonts: bool,
-}
-
-impl DefaultsOverlay {
-    fn from_defaults() -> Self {
-        let Config {
-            askpass_timeout_secs,
-            auto_merge,
-            auto_merge_method,
-            default_base_branch,
-            default_remote,
-            upstream_remote,
-            draft,
-            nerdfonts,
-            editor: _,
-            gh_askpass: _,
-            gh_token: _,
-            pr_fetch_bookmark_template: _,
-            pr_log_template: _,
-            pr_restack_template: _,
-            pr_create_template: _,
-            pr_create_template_file: _,
-        } = Config::default();
-        Self {
-            askpass_timeout_secs,
-            default_base_branch,
-            default_remote,
-            upstream_remote,
-            draft,
-            auto_merge,
-            auto_merge_method,
-            nerdfonts,
-        }
-    }
-}
-
-#[derive(Serialize)]
-struct EnvOverlay {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    gh_askpass: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pr_create_template: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pr_create_template_file: Option<PathBuf>,
-}
-
-impl EnvOverlay {
-    fn from_env() -> Self {
-        Self {
-            gh_askpass: read_argv_env("GH_ASKPASS"),
-            pr_create_template: read_string_env("JJ_GH_TEMPLATE"),
-            pr_create_template_file: read_path_env("JJ_GH_TEMPLATE_FILE"),
-        }
-    }
-}
-
-fn read_path_env(key: &str) -> Option<PathBuf> {
-    std::env::var_os(key)
-        .filter(|s| !s.is_empty())
-        .map(PathBuf::from)
-}
-
-fn read_string_env(key: &str) -> Option<String> {
-    std::env::var(key).ok().filter(|s| !s.is_empty())
-}
-
-fn read_argv_env(key: &str) -> Option<Vec<String>> {
-    let raw = std::env::var(key).ok().filter(|s| !s.is_empty())?;
-    shell_words::split(&raw).ok().filter(|v| !v.is_empty())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -402,7 +337,7 @@ mod tests {
     fn defaults_when_no_layers() {
         let config = from_layers([]).unwrap();
         assert_eq!(config.askpass_timeout_secs, 20);
-        assert_eq!(config.default_base_branch, "master");
+        assert_eq!(config.default_base_branch, None);
         assert!(!config.draft);
         assert!(config.gh_token.is_none());
     }
@@ -410,7 +345,7 @@ mod tests {
     #[test]
     fn absent_source_is_non_fatal() {
         let config = from_layers([JjConfProvider::from_absent("global")]).unwrap();
-        assert_eq!(config.default_base_branch, "master");
+        assert_eq!(config.default_base_branch, None);
     }
 
     #[test]
@@ -433,7 +368,7 @@ mod tests {
             ),
         ])
         .unwrap();
-        assert_eq!(config.default_base_branch, "trunk");
+        assert_eq!(config.default_base_branch.as_deref(), Some("trunk"));
         assert_eq!(config.askpass_timeout_secs, 5);
     }
 
@@ -471,7 +406,7 @@ mod tests {
             "#,
         )])
         .unwrap();
-        assert_eq!(config.default_base_branch, "main");
+        assert_eq!(config.default_base_branch.as_deref(), Some("main"));
     }
 
     #[test]

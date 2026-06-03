@@ -7,50 +7,47 @@
 //! re-runs every workflow run (full pipeline restart).
 
 use crate::{
-    config::Config,
+    cli::GlobalOpts,
     gh::{Gh, WorkflowRun, WorkflowRunStatus},
     jj::Jj,
     pr,
     ui::Spinner,
 };
 use anyhow::{Context, Result, bail};
-use serde::Serialize;
+use jj_gh_config_derive::subcommand_args;
 use std::time::{Duration, Instant};
 
-#[derive(Debug, clap::Args, Serialize)]
-pub struct RetryFailedArgs {
-    /// PR number, or revision ID to look up a PR from.
-    #[arg(value_name = "PR_NUM|REV")]
-    #[serde(skip)]
-    pub number_or_rev: String,
+subcommand_args! {
+    pub struct RetryFailedArgs {
+        /// PR number, or revision ID to look up a PR from.
+        #[arg(value_name = "PR_NUM|REV")]
+        pub number_or_rev: String,
 
-    /// Cancel any in-progress runs and restart the entire pipeline.
-    /// Without this flag, the command fails if CI has not yet completed.
-    #[arg(long)]
-    #[serde(skip)]
-    pub cancel: bool,
+        /// Cancel any in-progress runs and restart the entire pipeline.
+        /// Without this flag, the command fails if CI has not yet completed.
+        #[arg(long)]
+        pub cancel: bool,
 
-    /// Seconds to wait for cancelled runs to finalize before re-running.
-    /// Only meaningful with --cancel.
-    #[arg(long, value_name = "SECS", default_value_t = 30, requires = "cancel")]
-    #[serde(skip)]
-    pub cancel_timeout: u64,
+        /// Seconds to wait for cancelled runs to finalize before re-running.
+        /// Only meaningful with --cancel.
+        #[arg(long, value_name = "SECS", default_value_t = 30, requires = "cancel")]
+        pub cancel_timeout: u64,
+    }
 }
 
 const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
-pub async fn run<J, G>(jj: &J, gh: &G, config: &Config, args: &RetryFailedArgs) -> Result<()>
+pub async fn run<J, G>(jj: &J, gh: &G, args: &RetryFailedArgs) -> Result<()>
 where
     J: Jj,
     G: Gh,
 {
-    run_with(jj, gh, config, args, DEFAULT_POLL_INTERVAL).await
+    run_with(jj, gh, args, DEFAULT_POLL_INTERVAL).await
 }
 
 async fn run_with<J, G>(
     jj: &J,
     gh: &G,
-    config: &Config,
     args: &RetryFailedArgs,
     poll_interval: Duration,
 ) -> Result<()>
@@ -62,9 +59,20 @@ where
         number_or_rev,
         cancel,
         cancel_timeout,
+        globals:
+            GlobalOpts {
+                remote,
+                upstream_remote,
+                verbose: _,
+                quiet: _,
+                log_level: _,
+                gh_askpass: _,
+                askpass_timeout_secs: _,
+            },
     } = args;
 
-    let (pr, target) = pr::resolve_pr_with_target(jj, gh, config, number_or_rev).await?;
+    let (pr, target) =
+        pr::resolve_pr_with_target(jj, gh, remote, upstream_remote, number_or_rev).await?;
     let owner = &target.owner;
     let repo = &target.repo;
 
@@ -258,7 +266,6 @@ async fn poll_until_completed<G: Gh>(
 mod tests {
     use super::*;
     use crate::{
-        config::{self, Config},
         gh::{
             BaseLookup, CreatePrRequest, Label, PrCreated, PrDetails, PrSummary, PrWithCiStatus,
             UpdatePr, WorkflowRun, WorkflowRunConclusion, WorkflowRunStatus,
@@ -267,11 +274,6 @@ mod tests {
     };
     use std::path::{Path, PathBuf};
     use std::sync::Mutex;
-
-    fn default_config() -> Config {
-        let fig = config::defaults_figment();
-        config::extract(&fig).unwrap()
-    }
 
     fn pr_details(number: u64, sha: &str) -> PrDetails {
         PrDetails {
@@ -483,6 +485,15 @@ mod tests {
             number_or_rev: number.into(),
             cancel,
             cancel_timeout: timeout,
+            globals: GlobalOpts {
+                verbose: 0,
+                quiet: false,
+                log_level: None,
+                remote: "origin".into(),
+                upstream_remote: "upstream".into(),
+                gh_askpass: None,
+                askpass_timeout_secs: 20,
+            },
         }
     }
 
@@ -514,15 +525,9 @@ mod tests {
         let gh = FakeGh::new(pr, vec![runs]);
         let jj = FakeJj::new();
 
-        run_with(
-            &jj,
-            &gh,
-            &default_config(),
-            &args("42", false, 30),
-            Duration::from_millis(5),
-        )
-        .await
-        .expect("default path should succeed");
+        run_with(&jj, &gh, &args("42", false, 30), Duration::from_millis(5))
+            .await
+            .expect("default path should succeed");
 
         let calls = gh.calls.lock().unwrap();
         assert_eq!(calls.rerun_failed, vec![2, 3]);
@@ -544,15 +549,9 @@ mod tests {
         let gh = FakeGh::new(pr, vec![runs]);
         let jj = FakeJj::new();
 
-        let err = run_with(
-            &jj,
-            &gh,
-            &default_config(),
-            &args("7", false, 30),
-            Duration::from_millis(5),
-        )
-        .await
-        .expect_err("should refuse while CI in progress");
+        let err = run_with(&jj, &gh, &args("7", false, 30), Duration::from_millis(5))
+            .await
+            .expect_err("should refuse while CI in progress");
         let msg = format!("{err:#}");
         assert!(msg.contains("still in progress"), "msg: {msg}");
 
@@ -580,15 +579,9 @@ mod tests {
         let gh = FakeGh::new(pr, vec![runs]);
         let jj = FakeJj::new();
 
-        run_with(
-            &jj,
-            &gh,
-            &default_config(),
-            &args("9", false, 30),
-            Duration::from_millis(5),
-        )
-        .await
-        .unwrap();
+        run_with(&jj, &gh, &args("9", false, 30), Duration::from_millis(5))
+            .await
+            .unwrap();
 
         let calls = gh.calls.lock().unwrap();
         assert!(calls.rerun_failed.is_empty());
@@ -643,15 +636,9 @@ mod tests {
         let gh = FakeGh::new(pr, vec![initial, still_running, all_done, post_poll]);
         let jj = FakeJj::new();
 
-        run_with(
-            &jj,
-            &gh,
-            &default_config(),
-            &args("11", true, 5),
-            Duration::from_millis(1),
-        )
-        .await
-        .expect("cancel path should succeed once runs settle");
+        run_with(&jj, &gh, &args("11", true, 5), Duration::from_millis(1))
+            .await
+            .expect("cancel path should succeed once runs settle");
 
         let calls = gh.calls.lock().unwrap();
         assert_eq!(calls.cancelled, vec![2, 3]);
@@ -669,7 +656,6 @@ mod tests {
         let err = run_with(
             &jj,
             &gh,
-            &default_config(),
             // 0s timeout: the very first poll iteration sees elapsed >= timeout and errors.
             &args("13", true, 0),
             Duration::from_millis(1),
@@ -703,15 +689,9 @@ mod tests {
         let gh = FakeGh::new(pr, vec![runs.clone(), runs]);
         let jj = FakeJj::new();
 
-        run_with(
-            &jj,
-            &gh,
-            &default_config(),
-            &args("21", true, 30),
-            Duration::from_millis(1),
-        )
-        .await
-        .unwrap();
+        run_with(&jj, &gh, &args("21", true, 30), Duration::from_millis(1))
+            .await
+            .unwrap();
 
         let calls = gh.calls.lock().unwrap();
         assert!(calls.cancelled.is_empty());

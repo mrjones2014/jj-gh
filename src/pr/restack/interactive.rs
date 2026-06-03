@@ -25,7 +25,6 @@
 
 use super::{Decision, PrPlan, RestackContext};
 use crate::{
-    config::Config,
     jj::Jj,
     pr::{
         pr_log::{PR_LOG_TEMPLATE, build_aliases},
@@ -91,10 +90,9 @@ struct UiState {
 pub async fn run<J: Jj>(
     jj: &J,
     ctx: &RestackContext,
-    config: &Config,
     args: &RestackArgs,
 ) -> Result<HashMap<u64, Decision>> {
-    let stdout_bytes = capture_log(ctx, config, args).await?;
+    let stdout_bytes = capture_log(ctx, args).await?;
     let (log_lines, commit_to_line) = parse_sentinel_lines(&stdout_bytes);
     let pr_to_line = commit_map_to_pr_map(&commit_to_line, &ctx.plans);
     let pr_order = order_prs_topologically(jj, &ctx.plans).await?;
@@ -808,7 +806,7 @@ pub(crate) fn build_base_candidates(ctx: &RestackContext) -> Vec<String> {
 /// The wrapper sits outside the user body so anything the user templates
 /// renders as-is; we only consume the markers when post-processing the
 /// captured stream.
-async fn capture_log(ctx: &RestackContext, config: &Config, args: &RestackArgs) -> Result<String> {
+async fn capture_log(ctx: &RestackContext, args: &RestackArgs) -> Result<String> {
     let branch_to_local: HashMap<String, String> = ctx
         .bookmarks
         .iter()
@@ -817,13 +815,18 @@ async fn capture_log(ctx: &RestackContext, config: &Config, args: &RestackArgs) 
     let user_body = args
         .template
         .as_deref()
-        .or(config.pr_restack_template.as_deref())
-        .or(config.pr_log_template.as_deref())
+        .or(args.pr_log_template.as_deref())
         .unwrap_or(PR_LOG_TEMPLATE);
     let wrapped = format!(
         "\"{SENTINEL_OPEN}\" ++ commit_id.short(40) ++ \"{SENTINEL_CLOSE}\" ++ ({user_body})"
     );
-    let aliases = build_aliases(&ctx.prs, &branch_to_local, config).alias("pr_log", wrapped);
+    let aliases = build_aliases(
+        &ctx.prs,
+        &branch_to_local,
+        args.nerdfonts,
+        args.pr_log_template.as_deref(),
+    )
+    .alias("pr_log", wrapped);
     let tmp = aliases.write_temp_config()?;
 
     let mut cmd = Command::new("jj");
