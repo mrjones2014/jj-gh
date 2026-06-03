@@ -283,6 +283,9 @@ mod tests {
             });
             Ok(self.eval_template_return.clone())
         }
+        async fn diff(&self, _revset: &str) -> Result<String> {
+            unimplemented!("fetch does not call diff")
+        }
     }
 
     struct FakeGh {

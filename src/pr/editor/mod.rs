@@ -63,6 +63,10 @@ pub fn resolve_editor_argv<E: EnvReader>(
 /// edited buffer back into `(Frontmatter, body)`. The buffer round-trip is the
 /// only thing `pr create` and `pr edit` share verbatim.
 ///
+/// When `preview` is `Some`, append a sentinel marker heading + fenced
+/// `diff` block after the body. The parser strips everything from
+/// the marker onward, so the preview never lands in the submitted PR body.
+///
 /// # Errors
 ///
 /// Propagates render, IO/process, and parse errors.
@@ -71,8 +75,9 @@ pub async fn round_trip<E: Editor>(
     argv: &[String],
     fm: &Frontmatter,
     body: &str,
+    preview: Option<&str>,
 ) -> Result<(Frontmatter, String)> {
-    let initial = fm.render(body)?;
+    let initial = fm.render(body, preview)?;
     let edited = editor.edit(argv, &initial).await?;
     Frontmatter::parse(&edited).context("parsing PR frontmatter")
 }

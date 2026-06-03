@@ -1,7 +1,7 @@
 //! YAML frontmatter for the PR editor buffer.
 //!
 //! Layout:
-//! ```text
+//! ````text
 //! ---
 //! title: ...
 //! base: main
@@ -10,11 +10,24 @@
 //! ---
 //!
 //! <body>
+//!
+//! # 8< jj-gh: below this line removed on submit >8
+//!
+//! ```diff
+//! - line removed
+//! + line added
 //! ```
+//! ````
 
 use crate::{config::AutoMergeMethod, gh::Reviewer};
 use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
+
+/// Sentinel heading that marks the start of the read-only diff preview in the
+/// `pr create` editor buffer. The marker line and everything after it are
+/// stripped on parse. Whole-line exact match (after trimming trailing
+/// whitespace).
+pub const PREVIEW_MARKER: &str = "# 8< jj-gh: below this line removed on submit >8";
 
 fn is_default<T: Default + PartialEq>(val: &T) -> bool {
     *val == T::default()
@@ -42,11 +55,27 @@ impl Frontmatter {
     /// # Errors
     ///
     /// Returns an error if the YAML serializer fails (unlikely for our fields).
-    pub fn render(&self, body: &str) -> Result<String> {
+    pub fn render(&self, body: &str, preview: Option<&str>) -> Result<String> {
         let yaml = serde_yml::to_string(self).context("could not serialize frontmatter")?;
+        let orig_body_empty = body.trim().is_empty();
         let body = body.trim_start_matches('\n');
         let body = if body.is_empty() { "\n" } else { body };
-        Ok(format!("---\n{yaml}\n---\n\n{body}"))
+        let body = format!("---\n{yaml}\n---\n\n{body}");
+        let Some(diff) = preview else {
+            return Ok(body);
+        };
+
+        // apply some extra `\n` for comfort in the editor
+        if orig_body_empty {
+            Ok(format!(
+                "{body}\n\n\n\n{PREVIEW_MARKER}\n\n```diff\n{diff}\n```\n"
+            ))
+        } else {
+            let trimmed = body.trim_end();
+            Ok(format!(
+                "{trimmed}\n\n\n\n\n{PREVIEW_MARKER}\n\n```diff\n{diff}\n```\n"
+            ))
+        }
     }
 
     /// Parse a frontmatter-prefixed markdown buffer back into `(meta, body)`.
@@ -56,7 +85,8 @@ impl Frontmatter {
     /// Returns an error if the document is missing or has an unterminated
     /// frontmatter block, or if the YAML fails to deserialize.
     pub fn parse(buffer: &str) -> Result<(Self, String)> {
-        let rest = buffer
+        let trimmed = strip_preview(buffer);
+        let rest = trimmed
             .strip_prefix("---\n")
             .ok_or_else(|| anyhow!("missing leading `---` frontmatter delimiter"))?;
         let (yaml, body) = rest
@@ -65,14 +95,27 @@ impl Frontmatter {
             .ok_or_else(|| anyhow!("unterminated frontmatter; expected closing `---`"))?;
         let fm: Frontmatter =
             serde_yml::from_str(yaml).context("could not parse YAML frontmatter")?;
-        let body = body.trim_start_matches('\n').to_string();
+        let body = body.trim_start_matches('\n').trim_end().to_string();
         Ok((fm, body))
     }
+}
+
+/// Truncate `buffer` at the first line equal to [`PREVIEW_MARKER`] (after
+/// trimming trailing whitespace). Returns the original buffer if absent.
+fn strip_preview(buffer: &str) -> &str {
+    let user_body_len = buffer
+        .split_inclusive('\n')
+        .take_while(|line| line.trim() != PREVIEW_MARKER)
+        .map(str::len)
+        .sum();
+    &buffer[..user_body_len]
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pr::editor::{self, Editor};
+    use std::sync::Mutex;
 
     fn fm(title: &str) -> Frontmatter {
         Frontmatter {
@@ -90,7 +133,7 @@ mod tests {
     fn render_round_trips_through_parse() {
         let original = fm("Fix the thing");
         let body = "This PR does X and Y.\n";
-        let rendered = original.render(body).unwrap();
+        let rendered = original.render(body, None).unwrap();
 
         let (parsed, parsed_body) = Frontmatter::parse(&rendered).unwrap();
         assert_eq!(parsed.title, original.title);
@@ -103,7 +146,7 @@ mod tests {
     #[test]
     fn render_quotes_titles_containing_yaml_specials() {
         let original = fm("feat(thing): do the thing");
-        let rendered = original.render("body").unwrap();
+        let rendered = original.render("body", None).unwrap();
         let (parsed, _) = Frontmatter::parse(&rendered).unwrap();
         assert_eq!(parsed.title, "feat(thing): do the thing");
     }
@@ -118,13 +161,13 @@ mod tests {
         assert!(!fm.draft);
         assert!(!fm.auto_merge);
         assert_eq!(fm.auto_merge_method, AutoMergeMethod::Merge);
-        assert_eq!(body, "body text\n");
+        assert_eq!(body, "body text");
     }
 
     #[test]
     fn render_omits_auto_merge_behavior_by_default() {
         let data = fm("feat: hi :)");
-        let rendered = data.render("").unwrap();
+        let rendered = data.render("", None).unwrap();
         assert!(!rendered.contains("auto_merge_method:"));
     }
 
@@ -150,7 +193,7 @@ mod tests {
 
     #[test]
     fn rendered_block_starts_with_delimiter_and_has_blank_line_before_body() {
-        let rendered = fm("t").render("body").unwrap();
+        let rendered = fm("t").render("body", None).unwrap();
         assert!(rendered.starts_with("---\n"));
         assert!(rendered.ends_with("\n---\n\nbody"));
         assert!(!rendered.contains("\n---\n\n\n"));
@@ -158,7 +201,114 @@ mod tests {
 
     #[test]
     fn non_empty_body_has_exactly_one_blank_line_after_frontmatter() {
-        let rendered = fm("t").render("body here\n").unwrap();
+        let rendered = fm("t").render("body here\n", None).unwrap();
         assert!(rendered.ends_with("\n---\n\nbody here\n"));
+    }
+
+    #[test]
+    fn parse_strips_preview_marker_and_diff() {
+        let buffer = format!(
+            "---\ntitle: hello\nbase: main\n---\n\nuser body\n\n{PREVIEW_MARKER}\n\n```diff\n- a\n+ b\n```\n"
+        );
+        let (fm, body) = Frontmatter::parse(&buffer).unwrap();
+        assert_eq!(fm.title, "hello");
+        assert_eq!(body, "user body");
+    }
+
+    #[test]
+    fn parse_strips_with_blank_template_skeleton() {
+        let buffer = format!(
+            "---\ntitle: hello\nbase: main\n---\n\n\n\n{PREVIEW_MARKER}\n\n```diff\ndiff content\n```\n"
+        );
+        let (_, body) = Frontmatter::parse(&buffer).unwrap();
+        assert_eq!(body, "");
+    }
+
+    #[test]
+    fn parse_marker_absent_is_unchanged() {
+        let buffer = "---\ntitle: hi\nbase: main\n---\n\nplain body without marker\n";
+        let (_, body) = Frontmatter::parse(buffer).unwrap();
+        assert_eq!(body, "plain body without marker");
+    }
+
+    #[test]
+    fn parse_strips_at_first_marker_occurrence() {
+        let buffer = format!(
+            "---\ntitle: x\nbase: main\n---\n\nfirst body\n{PREVIEW_MARKER}\n\nmiddle\n{PREVIEW_MARKER}\n\nlast\n"
+        );
+        let (_, body) = Frontmatter::parse(&buffer).unwrap();
+        assert_eq!(body, "first body");
+    }
+
+    #[test]
+    fn parse_marker_with_trailing_whitespace_still_matches() {
+        let with_trailing = format!("{PREVIEW_MARKER}   ");
+        let buffer = format!("---\ntitle: x\nbase: main\n---\n\nbody\n{with_trailing}\n\nstuff\n");
+        let (_, body) = Frontmatter::parse(&buffer).unwrap();
+        assert_eq!(body, "body");
+    }
+
+    struct CaptureEditor(Mutex<Option<String>>);
+    impl Editor for CaptureEditor {
+        async fn edit(&self, _argv: &[String], initial: &str) -> Result<String> {
+            *self.0.lock().unwrap() = Some(initial.to_string());
+            Ok(initial.to_string())
+        }
+    }
+    #[tokio::test]
+    async fn round_trip_without_preview_does_not_inject_marker() {
+        let fm = sample_fm();
+        let editor = CaptureEditor(Mutex::new(None));
+        editor::round_trip(&editor, &["x".into()], &fm, "body\n", None)
+            .await
+            .unwrap();
+        let buf = editor.0.lock().unwrap().clone().unwrap();
+        assert!(!buf.contains(PREVIEW_MARKER));
+    }
+
+    fn sample_fm() -> Frontmatter {
+        Frontmatter {
+            title: "t".into(),
+            base: "main".into(),
+            labels: vec![],
+            reviewers: vec![],
+            draft: false,
+            auto_merge: false,
+            auto_merge_method: AutoMergeMethod::Merge,
+        }
+    }
+
+    struct EchoEditor;
+    impl Editor for EchoEditor {
+        async fn edit(&self, _argv: &[String], initial: &str) -> Result<String> {
+            Ok(initial.to_string())
+        }
+    }
+
+    #[tokio::test]
+    async fn round_trip_with_preview_strips_diff_on_parse() {
+        let fm = sample_fm();
+        let editor = EchoEditor;
+        let (parsed_fm, parsed_body) = editor::round_trip(
+            &editor,
+            &["x".into()],
+            &fm,
+            "real body content\n",
+            Some("- a\n+ b\n"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(parsed_fm.title, "t");
+        assert_eq!(parsed_body, "real body content");
+    }
+
+    #[tokio::test]
+    async fn round_trip_blank_body_with_preview_yields_empty_body() {
+        let fm = sample_fm();
+        let editor = EchoEditor;
+        let (_, body) = editor::round_trip(&editor, &["x".into()], &fm, "", Some("diff"))
+            .await
+            .unwrap();
+        assert_eq!(body, "");
     }
 }

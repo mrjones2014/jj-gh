@@ -134,6 +134,17 @@ pub trait Jj {
         config_file: Option<&Path>,
         reversed: bool,
     ) -> Result<String>;
+
+    /// Git-format diff of the commits selected by `revset`. Used to render a
+    /// read-only preview in the `pr create` editor buffer.
+    ///
+    /// Returns raw stdout with no color codes (suitable for embedding in a
+    /// markdown `diff` fence).
+    ///
+    /// # Errors
+    ///
+    /// Propagates jj failures.
+    async fn diff(&self, revset: &str) -> Result<String>;
 }
 
 /// Compose the revset used to compute the default PR title.
