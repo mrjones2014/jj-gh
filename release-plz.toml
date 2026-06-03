@@ -13,3 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [[package]]
 name = "jj-gh"
 changelog_update = true
+# this is a CLI not a library, so the semver checks
+# do not really buy anything; for example it thinks
+# adding a field to the `Config` struct is a breaking
+# change but it isn't, and it would not detect certain
+# real breaking changes like removing a subcommand anyway.
+# keep this under `[[package]]` in case a library is
+# introduced in the future.
+semver_check = false
