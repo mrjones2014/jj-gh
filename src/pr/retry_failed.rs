@@ -440,7 +440,6 @@ mod tests {
         async fn enable_auto_merge(
             &self,
             _id: &str,
-            _q: bool,
             _m: crate::config::AutoMergeMethod,
         ) -> Result<()> {
             unimplemented!()

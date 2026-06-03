@@ -272,23 +272,19 @@ pub trait Gh {
     /// Returns a clear "not found" error on 404; propagates other API errors.
     async fn get_pr(&self, owner: &str, repo: &str, number: u64) -> Result<PrDetails>;
 
-    /// Enable "merge when ready" on a PR. Dispatches to either
-    /// `enablePullRequestAutoMerge` or `enqueuePullRequest` based on
-    /// `has_merge_queue` (callers get this from [`PrDetails::has_merge_queue`]
-    /// or [`PrCreated::has_merge_queue`]). `method` is ignored when the queue
-    /// path is taken; the queue's own config decides the merge method.
+    /// Enable "merge when ready" on a PR via `enablePullRequestAutoMerge`.
+    /// Callers must check [`PrDetails::in_merge_queue`] /
+    /// [`PrCreated::has_merge_queue`] beforehand: GitHub's public API has no
+    /// equivalent of the web UI's merge-queue auto-merge, so this call would
+    /// fail on those repos. See
+    /// <https://github.com/mrjones2014/jj-gh/issues/103>.
     ///
     /// # Errors
     ///
     /// Propagates API errors. Common failures: the repo does not have
     /// auto-merge enabled, required branch protections are missing, or the PR
     /// is already mergeable.
-    async fn enable_auto_merge(
-        &self,
-        pr_node_id: &str,
-        has_merge_queue: bool,
-        method: AutoMergeMethod,
-    ) -> Result<()>;
+    async fn enable_auto_merge(&self, pr_node_id: &str, method: AutoMergeMethod) -> Result<()>;
 
     /// Fetch open PRs with head commit SHA and CI status, scoped to the given
     /// `branches` (head ref names). Used by `pr log` to build a `commit_id` →

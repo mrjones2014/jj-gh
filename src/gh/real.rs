@@ -10,15 +10,15 @@ use crate::{
         ConvertToDraftInternal, ConvertToDraftResponseData, ConvertToDraftVariables,
         CreatePrInternal, CreatePrResponseData, CreatePrVariables, DisableAutoMergeInternal,
         DisableAutoMergeResponseData, DisableAutoMergeVariables, EnableAutoMergeInternal,
-        EnableAutoMergeResponseData, EnableAutoMergeVariables, EnqueuePrInternal,
-        EnqueuePrResponseData, EnqueuePrVariables, FindOpenPrInternal, FindOpenPrResponseData,
-        FindOpenPrVariables, GetPrInternal, GetPrInternalRepositoryPullRequest, GetPrResponseData,
-        GetPrVariables, LookupBaseInternal, LookupBaseResponseData, LookupBaseVariables,
-        MarkReadyForReviewInternal, MarkReadyForReviewResponseData, MarkReadyForReviewVariables,
-        PrWithCiStatus, PrsWithCiStatusInternal, PrsWithCiStatusResponseData,
-        PrsWithCiStatusVariables, PullRequestMergeMethod, PullRequestState, RemoveLabelsInternal,
-        RemoveLabelsResponseData, RemoveLabelsVariables, RequestedReviewer, UpdatePrInternal,
-        UpdatePrResponseData, UpdatePrVariables,
+        EnableAutoMergeResponseData, EnableAutoMergeVariables, FindOpenPrInternal,
+        FindOpenPrResponseData, FindOpenPrVariables, GetPrInternal,
+        GetPrInternalRepositoryPullRequest, GetPrResponseData, GetPrVariables, LookupBaseInternal,
+        LookupBaseResponseData, LookupBaseVariables, MarkReadyForReviewInternal,
+        MarkReadyForReviewResponseData, MarkReadyForReviewVariables, PrWithCiStatus,
+        PrsWithCiStatusInternal, PrsWithCiStatusResponseData, PrsWithCiStatusVariables,
+        PullRequestMergeMethod, PullRequestState, RemoveLabelsInternal, RemoveLabelsResponseData,
+        RemoveLabelsVariables, RequestedReviewer, UpdatePrInternal, UpdatePrResponseData,
+        UpdatePrVariables,
     },
 };
 use anyhow::{Context, Result, anyhow};
@@ -375,34 +375,17 @@ impl Gh for OctocrabGh {
         })
     }
 
-    async fn enable_auto_merge(
-        &self,
-        pr_node_id: &str,
-        has_merge_queue: bool,
-        method: AutoMergeMethod,
-    ) -> Result<()> {
-        if has_merge_queue {
-            let vars = EnqueuePrVariables {
-                pr_id: pr_node_id.to_string(),
-            };
-            let body = EnqueuePrInternal::build_query(vars);
-            self.octo
-                .graphql::<EnqueuePrResponseData>(&body)
-                .await
-                .map_err(humanize)
-                .context("enqueuing PR for merge")?;
-        } else {
-            let vars = EnableAutoMergeVariables {
-                pr_id: pr_node_id.to_string(),
-                method: to_graphql_method(method),
-            };
-            let body = EnableAutoMergeInternal::build_query(vars);
-            self.octo
-                .graphql::<EnableAutoMergeResponseData>(&body)
-                .await
-                .map_err(humanize)
-                .context("enabling auto-merge")?;
-        }
+    async fn enable_auto_merge(&self, pr_node_id: &str, method: AutoMergeMethod) -> Result<()> {
+        let vars = EnableAutoMergeVariables {
+            pr_id: pr_node_id.to_string(),
+            method: to_graphql_method(method),
+        };
+        let body = EnableAutoMergeInternal::build_query(vars);
+        self.octo
+            .graphql::<EnableAutoMergeResponseData>(&body)
+            .await
+            .map_err(humanize)
+            .context("enabling auto-merge")?;
         Ok(())
     }
 
