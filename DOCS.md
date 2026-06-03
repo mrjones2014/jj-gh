@@ -13,6 +13,7 @@ This document contains the help content for the `jj-gh` command-line program.
 - [`jj-gh pr auto-merge`↴](#jj-gh-pr-auto-merge)
 - [`jj-gh pr edit`↴](#jj-gh-pr-edit)
 - [`jj-gh pr log`↴](#jj-gh-pr-log)
+- [`jj-gh pr restack`↴](#jj-gh-pr-restack)
 - [`jj-gh pr retry-failed`↴](#jj-gh-pr-retry-failed)
 - [`jj-gh debug`↴](#jj-gh-debug)
 - [`jj-gh debug config`↴](#jj-gh-debug-config)
@@ -56,6 +57,7 @@ Commands to work with PRs
 - `auto-merge` — Enable auto-merge on a PR
 - `edit` — Edit an existing PR's title, body, base, labels, reviewers, draft state, and auto-merge settings via the markdown frontmatter editor flow
 - `log` — Like `jj log`, but injects PR metadata (e.g. number, CI status, URL)
+- `restack` — Push the current `jj` stack shape up to GitHub by updating each PR's base branch to match its closest stacked ancestor bookmark
 - `retry-failed` — Re-run failed CI jobs on a PR
 
 ## `jj-gh pr create`
@@ -181,6 +183,26 @@ The following template aliases are available for use if you pass your own templa
 
 - `--nerdfonts <NERDFONTS>` — Force enable the use of nerdfont icons in the default `pr log` template. Overrides config. Use `--no-nerdfonts` to disable
 - `--no-nerdfonts` — Force the default `pr log` template not to use nerdfont icons. Overrides config
+
+## `jj-gh pr restack`
+
+Push the current `jj` stack shape up to GitHub by updating each PR's base branch to match its closest stacked ancestor bookmark.
+
+Restack does not rewrite the jj graph; the user shapes the graph first (e.g. via `jj rebase`) and then runs `jj-gh pr restack` to set each PR's `baseRefName` on the remote. Launches an interactive TUI by default. Pass `--dry-run` or `--json` to print the proposed plan without making any API calls.
+
+**Usage:** `jj-gh pr restack [OPTIONS] [PR_NUM|REV]`
+
+**Command Alias:** `rs`
+
+###### **Arguments:**
+
+- `<PR_NUM|REV>` — PR number or revision ID to position the cursor on when the TUI opens; if omitted the cursor starts on the first PR in the stack
+
+###### **Options:**
+
+- `--dry-run` — Print the proposed plan and exit without launching the TUI. No PR is updated. Auto-enabled when stdout is not a terminal
+- `--json` — Emit the proposed plan as JSON. Implies `--dry-run`
+- `-T`, `--template <TEMPLATE>` — Template to use in interactive mode; conflicts with `--json` and `--dry-run`
 
 ## `jj-gh pr retry-failed`
 

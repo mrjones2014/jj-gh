@@ -7,6 +7,7 @@
 - Enable auto-merge for a PR by its revision ID, without having to know/find its PR number (e.g. `jj pr auto-merge zqxy`)
 - Create local bookmarks for PRs, including across forks (e.g. `jj pr fetch 1234 && jj new pr-1234/...`, useful for testing PRs to OSS repos)
 - Show PR metadata like number and CI status in commit graph (e.g. `jj pr log`)
+- Interactively re-stack PRs (update PR base branch based on local revision graph shape)
 
 all from the comfort of your terminal, without touching GitHub's clunky web UI.
 Works great when combined with the [jj megamerge](https://isaaccorbrey.com/notes/jujutsu-megamerges-for-fun-and-profit) workflow!
@@ -182,6 +183,16 @@ pr_create_template_file = ".github/PULL_REQUEST_TEMPLATE.md"
 # the full list.
 pr_fetch_bookmark_template = '"pr-" ++ pr_number ++ "/" ++ pr_branch'
 
+# default template to use for `jj pr log`, a jj template string.
+# the default template mimics jj's default template with PR metadata
+# added inline.
+pr_log_template = 'format_short_commit_header(self) ++ "#" ++ surround(" ", "", pr_number)'
+
+# default template to be used in interactive `jj pr restack` UI;
+# by default, it re-uses the `jj pr log` template, but may also be customized
+# separately
+pr_restack_template = 'format_short_commit_header(self) ++ "#" ++ surround(" ", "", pr_number)'
+
 # Editor command, shell-words split. Falls back to $VISUAL, then $EDITOR.
 editor = [
   "nvim",
@@ -287,6 +298,10 @@ a matching open PR:
 - `pr_merge_status`: merged / in-merge-queue / auto-merge label.
 - `pr_meta`: pre-formatted hyperlinked PR number, colored CI icon, and merge
   status.
+
+### `pr restack`
+
+Same aliases available as `pr log`. By default, `pr restack` uses the same template as `pr log`.
 
 ## PR body template resolution
 

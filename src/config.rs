@@ -46,6 +46,8 @@ pub struct Config {
     pub auto_merge_method: AutoMergeMethod,
     pub editor: Option<Vec<String>>,
     pub pr_fetch_bookmark_template: Option<String>,
+    pub pr_log_template: Option<String>,
+    pub pr_restack_template: Option<String>,
     pub nerdfonts: bool,
 }
 
@@ -65,6 +67,8 @@ impl Default for Config {
             auto_merge_method: AutoMergeMethod::default(),
             editor: None,
             pr_fetch_bookmark_template: None,
+            pr_log_template: None,
+            pr_restack_template: None,
             nerdfonts: true,
         }
     }
@@ -328,6 +332,8 @@ impl DefaultsOverlay {
             gh_askpass: _,
             gh_token: _,
             pr_fetch_bookmark_template: _,
+            pr_log_template: _,
+            pr_restack_template: _,
             pr_create_template: _,
             pr_create_template_file: _,
         } = Config::default();

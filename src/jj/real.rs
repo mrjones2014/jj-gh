@@ -216,7 +216,11 @@ impl Jj for JjCli {
             ("name", "name"),
             ("local_commit_id", "normal_target.commit_id()"),
         ]);
-        let template = format!(r#"if(remote, "", {record} ++ "\n")"#);
+        // Skip the remote-side row, and skip local rows whose normal_target
+        // is missing (e.g. the remote bookmark was deleted); calling
+        // `commit_id()` on an absent target leaks jj's
+        // `<Error: No Commit available>` literal into the JSON stream.
+        let template = format!(r#"if(remote, "", if(normal_target, {record} ++ "\n", ""))"#);
         let stdout = run_jj(&[
             "bookmark",
             "list",

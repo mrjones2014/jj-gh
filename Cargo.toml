@@ -30,6 +30,8 @@ anstyle = "1"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
+crossterm = "0.29"
+futures = "0.3"
 figment = { version = "0.10", features = ["toml"] }
 flexi_logger = { version = "0.31", default-features = false, features = [
   "colors",
