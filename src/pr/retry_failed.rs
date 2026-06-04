@@ -364,6 +364,9 @@ mod tests {
         ) -> Result<String> {
             unimplemented!()
         }
+        async fn diff(&self, _revset: &str) -> Result<String> {
+            unimplemented!()
+        }
     }
 
     #[derive(Default)]

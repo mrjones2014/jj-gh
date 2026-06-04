@@ -211,11 +211,17 @@ where
     let raw_template_body = raw_template.clone().unwrap_or_default();
 
     let editor_argv = resolve_editor_argv(args.editor.as_deref(), env)?;
+    let diff_preview = jj.diff(&title_revset).await.log_err().ok();
+    let preview = diff_preview
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
     let (final_fm, body) = editor::round_trip(
         editor,
         &editor_argv,
         &initial_fm,
         raw_template.as_deref().unwrap_or_default(),
+        preview,
     )
     .await?;
     validation::validate(&final_fm, &body, &raw_template_body)?;

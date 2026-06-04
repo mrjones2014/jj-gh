@@ -112,7 +112,7 @@ where
     };
 
     let (after_fm, after_body) =
-        editor::round_trip(editor, &editor_argv, &before_fm, &before_body).await?;
+        editor::round_trip(editor, &editor_argv, &before_fm, &before_body, None).await?;
 
     if after_fm.title.trim().is_empty() {
         bail!("title is empty");
