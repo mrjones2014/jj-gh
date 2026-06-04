@@ -1,10 +1,10 @@
-name: Update flake dependencies
+name: Update GitHub GraphQL schema
 on:
   schedule:
     - cron: '0 16 * * 5'
-  workflow_dispatch: # for allowing manual triggers of the workflow
+  workflow_dispatch:
 jobs:
-  update-dependencies:
+  update-schema:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -12,13 +12,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: cachix/install-nix-action@v27
-      - name: update flake.lock
-        run: nix flake update
       - name: update GitHub GraphQL schema
         run: nix run .#fetch-schema
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v8
         with:
-          commit-message: "flake: update dependencies"
-          title: "[automation] update flake dependencies"
-          branch: "automation/update-flake-dependencies"
+          commit-message: "schema: update GitHub GraphQL schema"
+          title: "[automation] update GitHub GraphQL schema"
+          branch: "automation/update-graphql-schema"
