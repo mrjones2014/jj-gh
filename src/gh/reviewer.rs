@@ -139,16 +139,16 @@ mod tests {
     #[test]
     fn serde_round_trips_via_at_form() {
         let r = Reviewer::parse("john").unwrap();
-        let yaml = serde_yml::to_string(&r).unwrap();
+        let yaml = noyalib::to_string(&r).unwrap();
         // serde_yml wraps anything starting with `@` (a YAML reserved indicator).
         assert!(yaml.contains("@john"), "yaml was {yaml:?}");
-        let back: Reviewer = serde_yml::from_str(&yaml).unwrap();
+        let back: Reviewer = noyalib::from_str(&yaml).unwrap();
         assert_eq!(back, r);
     }
 
     #[test]
     fn deserialize_accepts_bare_slug() {
-        let r: Reviewer = serde_yml::from_str("john").unwrap();
+        let r: Reviewer = noyalib::from_str("john").unwrap();
         assert_eq!(r.slug(), "john");
     }
 }

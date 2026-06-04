@@ -56,7 +56,7 @@ impl Frontmatter {
     ///
     /// Returns an error if the YAML serializer fails (unlikely for our fields).
     pub fn render(&self, body: &str, preview: Option<&str>) -> Result<String> {
-        let yaml = serde_yml::to_string(self).context("could not serialize frontmatter")?;
+        let yaml = noyalib::to_string(self).context("could not serialize frontmatter")?;
         let orig_body_empty = body.trim().is_empty();
         let body = body.trim_start_matches('\n');
         let body = if body.is_empty() { "\n" } else { body };
@@ -94,7 +94,7 @@ impl Frontmatter {
             .or_else(|| rest.split_once("\n---"))
             .ok_or_else(|| anyhow!("unterminated frontmatter; expected closing `---`"))?;
         let fm: Frontmatter =
-            serde_yml::from_str(yaml).context("could not parse YAML frontmatter")?;
+            noyalib::from_str(yaml).context("could not parse YAML frontmatter")?;
         let body = body.trim_start_matches('\n').trim_end().to_string();
         Ok((fm, body))
     }

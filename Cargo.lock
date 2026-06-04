@@ -2228,12 +2228,12 @@ dependencies = [
  "http",
  "jj-gh-config-derive",
  "log",
+ "noyalib",
  "octocrab",
  "schemars",
  "secrecy",
  "serde",
  "serde_json",
- "serde_yml",
  "shell-words",
  "tempfile",
  "thiserror 2.0.18",
@@ -2424,14 +2424,17 @@ checksum = "9737e026353e5cd0736f98eddae28665118eb6f6600902a7f50db585621fecb6"
 
 [[package]]
 name = "noyalib"
-version = "0.0.5"
+version = "0.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e493c05128df7a83b9676b709d590e0ebc285c7ed3152bc679668e8c1e506af5"
+checksum = "aaecb583890b00deddd413f1c9522cc3537e893cd3845dec578ed6c85de653f7"
 dependencies = [
  "indexmap",
+ "itoa",
  "memchr",
  "rustc-hash",
+ "ryu",
  "serde",
+ "serde_ignored",
  "smallvec",
 ]
 
@@ -3213,6 +3216,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_ignored"
+version = "0.1.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "115dffd5f3853e06e746965a20dcbae6ee747ae30b543d91b0e089668bb07798"
+dependencies = [
+ "serde",
+ "serde_core",
+]
+
+[[package]]
 name = "serde_json"
 version = "1.0.150"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3263,16 +3276,6 @@ dependencies = [
  "form_urlencoded",
  "itoa",
  "ryu",
- "serde",
-]
-
-[[package]]
-name = "serde_yml"
-version = "0.0.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "909764a65f86829ccdb5eea9ab355843aa02c019a7bfd47465092953565caa05"
-dependencies = [
- "noyalib",
  "serde",
 ]
 
