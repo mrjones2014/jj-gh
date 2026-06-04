@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3](https://github.com/mrjones2014/jj-gh/compare/jj-gh-v0.2.2...jj-gh-v0.2.3) - 2026-06-04
+
+### Added
+
+- *(pr-create)* Show diffs in editor and strip on submit
+- *(pr)* Add `restack` subcommand to interactively update PR base refs
+
+### Fixed
+
+- *(deps)* `serde_yml` -> `noyalib`
+- *(ci)* Don't bother running semver checks on CLI crate
+- *(auto-merge)* Produce an error when merge queues are enabled on repo
+- *(cli)* Use spinner for `pr log`
+
+### Other
+
+- *(config)* Refactor/simplify config/args layering with proc macro
+
 ## [0.2.2](https://github.com/mrjones2014/jj-gh/compare/jj-gh-v0.2.1...jj-gh-v0.2.2) - 2026-06-01
 
 ### Fixed
