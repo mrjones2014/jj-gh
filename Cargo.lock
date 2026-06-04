@@ -2244,7 +2244,7 @@ dependencies = [
 
 [[package]]
 name = "jj-gh-config-derive"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "proc-macro2",
  "quote",
