@@ -10,7 +10,7 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: cachix/install-nix-action@v27
       - name: update GitHub GraphQL schema
         run: nix run .#fetch-schema
