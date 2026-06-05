@@ -126,12 +126,12 @@ pub async fn run(gh: &impl Gh, jj: &impl Jj, args: &PrLogArgs) -> Result<()> {
             },
     } = args;
 
+    let spinner = Spinner::start("Resolving local PRs");
     let origin_url = jj
         .remote_url(remote)
         .await?
         .ok_or_else(|| anyhow!("`{remote}` remote is not configured"))?;
     let (owner, repo) = git::url::parse_owner_repo(&origin_url)?;
-    let spinner = Spinner::start("Resolving local PRs");
     let bookmarks = jj.pushed_bookmarks(remote).await?;
     let branch_to_local: HashMap<String, String> = bookmarks
         .iter()
@@ -139,7 +139,7 @@ pub async fn run(gh: &impl Gh, jj: &impl Jj, args: &PrLogArgs) -> Result<()> {
         .collect();
     let names = bookmarks.into_iter().map(|b| b.name).collect::<Vec<_>>();
     let prs = gh.local_pulls(&owner, &repo, &names).await?;
-    spinner.stop().await;
+    spinner.stop();
 
     let aliases = build_aliases(&prs, &branch_to_local, *nerdfonts, template.as_deref());
     let tmp = aliases.write_temp_config()?;

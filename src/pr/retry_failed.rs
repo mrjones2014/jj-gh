@@ -94,7 +94,7 @@ where
             ));
             let cancel_result = cancel_each(gh, owner, repo, pr.number, &in_progress).await;
             if let Err(e) = cancel_result {
-                spinner.stop().await;
+                spinner.stop();
                 return Err(e);
             }
             let poll_result = poll_until_completed(
@@ -106,7 +106,7 @@ where
                 poll_interval,
             )
             .await;
-            spinner.stop().await;
+            spinner.stop();
             poll_result?;
         }
 
@@ -121,7 +121,7 @@ where
             let spinner =
                 Spinner::start(format!("restarting {} workflow run(s)", final_runs.len()));
             let result = rerun_each(gh, owner, repo, pr.number, &final_runs).await;
-            spinner.stop().await;
+            spinner.stop();
             result?;
 
             log::info!(
@@ -174,7 +174,7 @@ async fn retry_failed_jobs<G: Gh>(
         failed.len()
     ));
     let result = retry_each(gh, owner, repo, pr_number, &failed).await;
-    spinner.stop().await;
+    spinner.stop();
     result?;
 
     log::info!(
