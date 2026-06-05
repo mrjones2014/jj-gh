@@ -19,8 +19,8 @@ jobs:
         id: create-pr
         uses: peter-evans/create-pull-request@v8
         with:
-          commit-message: "schema: update GitHub GraphQL schema"
-          title: "[automation] update GitHub GraphQL schema"
+          commit-message: "chore(dpes): update GitHub GraphQL schema"
+          title: "chore(deps): update GitHub GraphQL schema"
           branch: "automation/update-graphql-schema"
       - name: Trigger CI
         if: ${{ steps.create-pr.outputs.pull-request-number }}
