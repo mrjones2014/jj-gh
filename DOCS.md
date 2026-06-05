@@ -92,7 +92,7 @@ Opens your editor to a markdown file where you can write the PR description, and
   All standard jj template builtins are available (`description`, `commit_id`, `author`, etc.). The following template aliases are also injected:
   - `pr_title`: default title (first-line description of the oldest commit on the stack).
 
-  - `pr_base`: resolved base branch.
+  - `pr_base`: resolved base branch; owner-qualified (`owner:branch`) for cross-fork PRs.
 
   - `pr_head_branch`: existing local bookmark on the rev, or empty if the rev is unpushed.
 

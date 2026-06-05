@@ -284,6 +284,7 @@ mod tests {
             title: "t".into(),
             html_url: format!("https://github.com/o/r/pull/{number}"),
             head_ref: "feat".into(),
+            base_ref: "main".into(),
             head_sha: sha.into(),
             head_user_login: Some("o".into()),
             head_repo_name: Some("r".into()),

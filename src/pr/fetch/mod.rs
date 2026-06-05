@@ -415,6 +415,7 @@ mod tests {
             title: "Add the feature".into(),
             html_url: "https://github.com/o/r/pull/1234".into(),
             head_ref: "feature/foo".into(),
+            base_ref: "main".into(),
             head_sha: "abc123".into(),
             head_user_login: Some("octocat".into()),
             head_repo_name: Some("r".into()),

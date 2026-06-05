@@ -251,7 +251,8 @@ work (`description`, `commit_id`, `author`, etc.). Injected aliases:
 
 - `pr_title`: default title (first-line description of the oldest commit on
   the stack).
-- `pr_base`: resolved base branch.
+- `pr_base`: resolved base branch; owner-qualified (`owner:branch`) for
+  cross-fork PRs.
 - `pr_head_branch`: existing local bookmark on the rev, or empty if the rev
   is unpushed.
 - `pr_oldest_rev_id`: 40-char hex commit SHA of the oldest commit in the
@@ -325,7 +326,7 @@ files when contributing to OSS.
 
 ```yaml
 title: "" # required, non-empty
-base: "main" # required; pre-filled with the resolved base branch
+base: "main" # required; pre-filled with resolved base branch, or "owner:main" for cross-fork PRs
 labels: [] # list of strings, applied via a follow-up API call after creation
 draft: false # bool
 auto_merge: false # bool; enable GitHub auto-merge once required checks pass
