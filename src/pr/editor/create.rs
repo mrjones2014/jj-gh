@@ -77,7 +77,7 @@ subcommand_args! {
         ///
         /// - `pr_title`: default title (first-line description of the oldest commit on the stack).
         ///
-        /// - `pr_base`: resolved base branch.
+        /// - `pr_base`: resolved base branch; owner-qualified (`owner:branch`) for cross-fork PRs.
         ///
         /// - `pr_head_branch`: existing local bookmark on the rev, or empty if the rev is unpushed.
         ///
@@ -195,7 +195,7 @@ where
     }
 
     let ancestor = jj.stacked_ancestor_bookmark(rev).await?;
-    let base = base
+    let base_branch = base
         .resolve_or(
             || async {
                 if let Some(a) = &ancestor {
@@ -209,14 +209,17 @@ where
         )
         .await?;
 
-    let base_lookup = gh.lookup_base(&target.owner, &target.repo, &base).await?;
+    let base_lookup = gh
+        .lookup_base(&target.owner, &target.repo, &base_branch)
+        .await?;
     if !base_lookup.branch_exists {
         return Err(anyhow!(
-            "base branch `{base}` does not exist on {}/{}",
+            "base branch `{base_branch}` does not exist on {}/{}",
             target.owner,
             target.repo,
         ));
     }
+    let base_display = target.base_spec(&base_branch);
 
     let title_revset = jj::title_base_revset(rev, ancestor.as_deref());
     let default_title = jj.first_commit_description(&title_revset).await?;
@@ -226,13 +229,13 @@ where
         jj,
         &title_revset,
         &default_title,
-        &base,
+        &base_display,
         existing_branch.as_deref(),
     )
     .await?;
     let initial_fm = Frontmatter {
         title: default_title,
-        base: base.clone(),
+        base: base_display,
         labels: vec![],
         reviewers: vec![],
         draft: *draft,
@@ -260,6 +263,22 @@ where
     )
     .await?;
     validation::validate(&final_fm, &body, &raw_template_body)?;
+    let final_base_branch = remote::branch_from_base_spec(&target.owner, &final_fm.base)?;
+    let final_base_lookup = if final_base_branch == base_branch {
+        base_lookup
+    } else {
+        let lookup = gh
+            .lookup_base(&target.owner, &target.repo, &final_base_branch)
+            .await?;
+        if !lookup.branch_exists {
+            return Err(anyhow!(
+                "base branch `{final_base_branch}` does not exist on {}/{}",
+                target.owner,
+                target.repo,
+            ));
+        }
+        lookup
+    };
 
     jj.push(rev).await?;
 
@@ -280,9 +299,9 @@ where
             title: final_fm.title.clone(),
             body: body.clone(),
             draft: final_fm.draft,
-            repo_node_id: base_lookup.repo_node_id,
+            repo_node_id: final_base_lookup.repo_node_id,
             head: head_spec,
-            base: final_fm.base.clone(),
+            base: final_base_branch,
         })
         .await?;
 

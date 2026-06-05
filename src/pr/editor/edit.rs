@@ -64,17 +64,17 @@ where
 
     let editor_argv = resolve_editor_argv(editor_cfg.as_deref(), env)?;
 
-    let (owner, repo, pr_number) =
+    let (target, pr_number) =
         resolve_pr_target(jj, gh, remote, upstream_remote, number_or_rev).await?;
     let details = gh
-        .get_pr(&owner, &repo, pr_number)
+        .get_pr(&target.owner, &target.repo, pr_number)
         .await
         .context("fetching PR from GitHub")?;
     let PrDetails {
         number,
         title,
         html_url,
-        head_ref,
+        base_ref,
         graphql_node_id,
         in_merge_queue,
         labels,
@@ -103,7 +103,7 @@ where
         .collect();
     let before_fm = Frontmatter {
         title,
-        base: head_ref,
+        base: target.base_spec(&base_ref),
         labels: labels.into_iter().map(|l| l.name).collect(),
         reviewers,
         draft: is_draft,
@@ -125,8 +125,8 @@ where
     }
 
     let ctx = ApplyChangesCtx {
-        owner: &owner,
-        repo: &repo,
+        owner: &target.owner,
+        repo: &target.repo,
         pr_number: number,
         pr_node_id: &graphql_node_id,
         has_merge_queue: in_merge_queue,
@@ -141,7 +141,7 @@ where
     Ok(())
 }
 
-/// Resolve the `(owner, repo, pr_number)` tuple from either a numeric PR or a
+/// Resolve the target repo plus PR number from either a numeric PR or a
 /// revision whose local bookmark has an open PR.
 async fn resolve_pr_target<J: Jj, G: Gh>(
     jj: &J,
@@ -149,7 +149,7 @@ async fn resolve_pr_target<J: Jj, G: Gh>(
     default_remote: &str,
     upstream_remote: &str,
     number_or_rev: &str,
-) -> Result<(String, String, u64)> {
+) -> Result<(Target, u64)> {
     if let Ok(num) = number_or_rev.parse::<u64>() {
         let origin_url = jj
             .remote_url(default_remote)
@@ -157,15 +157,15 @@ async fn resolve_pr_target<J: Jj, G: Gh>(
             .ok_or_else(|| anyhow!("`{default_remote}` remote is not configured"))?;
         let upstream_url = jj.remote_url(upstream_remote).await?;
         let target = crate::gh::remote::target(&origin_url, upstream_url.as_deref())?;
-        return Ok((target.owner, target.repo, num));
+        return Ok((target, num));
     }
     let PrLookup {
-        target: Target { owner, repo, .. },
+        target,
         head_spec,
         summary,
         ..
     } = pr::resolve_pr_for_rev(jj, gh, default_remote, upstream_remote, number_or_rev).await?;
     let summary = summary
         .ok_or_else(|| anyhow!("no open PR for revision `{number_or_rev}` (head `{head_spec}`)"))?;
-    Ok((owner, repo, summary.number))
+    Ok((target, summary.number))
 }

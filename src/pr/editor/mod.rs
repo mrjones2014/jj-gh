@@ -8,7 +8,7 @@ pub(crate) mod edit;
 
 use crate::{
     auth::EnvReader,
-    gh::{Gh, Reviewer, UpdatePr},
+    gh::{Gh, Reviewer, UpdatePr, remote},
     pr::frontmatter::Frontmatter,
 };
 use anyhow::{Context, Result, anyhow, bail};
@@ -114,11 +114,13 @@ pub async fn apply_frontmatter_diff<G: Gh>(
     after: &Frontmatter,
     after_body: &str,
 ) -> Result<()> {
+    let before_base = remote::branch_from_base_spec(ctx.owner, &before.base)?;
+    let after_base = remote::branch_from_base_spec(ctx.owner, &after.base)?;
     gh.update_pr(UpdatePr {
         pr_node_id: ctx.pr_node_id.to_string(),
         title: (before.title != after.title).then(|| after.title.clone()),
         body: (before_body != after_body).then(|| after_body.to_string()),
-        base_ref_name: (before.base != after.base).then(|| after.base.clone()),
+        base_ref_name: (before_base != after_base).then_some(after_base),
     })
     .await?;
 

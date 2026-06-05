@@ -35,6 +35,7 @@ pub struct PrDetails {
     pub title: String,
     pub html_url: String,
     pub head_ref: String,
+    pub base_ref: String,
     /// In GraphQL this is called `headRefOid`
     pub head_sha: String,
     pub head_user_login: Option<String>,
