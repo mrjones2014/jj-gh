@@ -1,10 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": [
-    "config:recommended",
-    ":semanticCommits",
-    ":dependencyDashboard"
-  ],
+  "extends": ["config:recommended", ":semanticCommits", ":dependencyDashboard"],
   "schedule": ["before 6am on friday"],
   "timezone": "UTC",
   "lockFileMaintenance": {
