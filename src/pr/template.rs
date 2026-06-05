@@ -143,6 +143,8 @@ mod tests {
             template_file: None,
             no_template: false,
             editor: None,
+            show_diffs: true,
+            no_diffs: false,
             globals: crate::cli::GlobalOpts {
                 verbose: 0,
                 quiet: false,
