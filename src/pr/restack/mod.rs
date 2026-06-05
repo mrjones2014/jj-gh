@@ -128,6 +128,7 @@ where
     } = &args.globals;
 
     let ctx = gather_context(jj, gh, remote).await?;
+
     let force_dry = args.dry_run
         || args.json
         || !std::io::stdout().is_terminal()
@@ -169,13 +170,13 @@ async fn gather_context<J: Jj, G: Gh>(
     gh: &G,
     default_remote: &str,
 ) -> Result<RestackContext> {
+    let spinner = Spinner::start("Resolving local PRs");
     let origin_url = jj
         .remote_url(default_remote)
         .await?
         .ok_or_else(|| anyhow!("`{default_remote}` remote is not configured"))?;
     let (owner, repo) = git::url::parse_owner_repo(&origin_url)?;
 
-    let spinner = Spinner::start("Resolving local PRs");
     let bookmarks = jj.pushed_bookmarks(default_remote).await?;
     let branch_to_local: HashMap<String, String> = bookmarks
         .iter()
@@ -185,7 +186,7 @@ async fn gather_context<J: Jj, G: Gh>(
     let prs = gh.local_pulls(&owner, &repo, &names).await?;
     let trunk = jj.trunk_branch().await?;
     let plans = propose_plans(jj, &prs, &branch_to_local, trunk.as_deref()).await?;
-    spinner.stop().await;
+    spinner.stop();
 
     Ok(RestackContext {
         plans,
@@ -331,7 +332,7 @@ async fn submit<G: Gh>(
         results.push((num, res));
         spinner.set_message(format!("Updating PRs ({}/{total})", results.len()));
     }
-    spinner.stop().await;
+    spinner.stop();
 
     results.sort_by_key(|(n, _)| *n);
     let mut had_failure = false;

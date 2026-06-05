@@ -8,6 +8,7 @@ use crate::{
         editor::{self, ApplyChangesCtx, Editor, resolve_editor_argv},
         frontmatter::Frontmatter,
     },
+    ui::Spinner,
 };
 use anyhow::{Context, Result, anyhow, bail};
 use jj_gh_config_derive::subcommand_args;
@@ -64,12 +65,17 @@ where
 
     let editor_argv = resolve_editor_argv(editor_cfg.as_deref(), env)?;
 
+    let spinner = Spinner::start("Resolving PR");
+
     let (target, pr_number) =
         resolve_pr_target(jj, gh, remote, upstream_remote, number_or_rev).await?;
     let details = gh
         .get_pr(&target.owner, &target.repo, pr_number)
         .await
         .context("fetching PR from GitHub")?;
+
+    spinner.stop();
+
     let PrDetails {
         number,
         title,
@@ -85,16 +91,6 @@ where
         body,
         ..
     } = details;
-
-    if body.is_empty() {
-        if *force {
-            log::warn!("PR body is empty, but `--force` was passed");
-        } else {
-            bail!(
-                "PR body is empty when attempting to edit. Refusing to edit to avoid data loss. Pass `--force` to override."
-            );
-        }
-    }
 
     let before_body = body;
     let before_label_ids: HashMap<String, String> = labels
@@ -114,14 +110,31 @@ where
     let (after_fm, after_body) =
         editor::round_trip(editor, &editor_argv, &before_fm, &before_body, None).await?;
 
+    if after_body.is_empty() {
+        if *force {
+            log::warn!("PR body is empty, but `--force` was passed");
+        } else {
+            bail!(
+                "PR body is empty when attempting to edit. Refusing to edit to avoid data loss. Pass `--force` to override."
+            );
+        }
+    }
+
     if after_fm.title.trim().is_empty() {
         bail!("title is empty");
     }
     if after_fm.base.trim().is_empty() {
         bail!("base is empty");
     }
-    if after_body.trim().is_empty() && !force {
-        bail!("body is empty; pass `--force` to confirm");
+
+    if after_body.trim().is_empty() {
+        if *force {
+            log::warn!("PR body is empty, but `--force` was passed");
+        } else {
+            bail!(
+                "PR body is empty when attempting to edit. Refusing to edit to avoid data loss. Pass `--force` to override."
+            );
+        }
     }
 
     let ctx = ApplyChangesCtx {

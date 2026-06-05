@@ -16,6 +16,7 @@ use crate::{
         Jj,
         inject::{TemplateAliases, escape_jj_string},
     },
+    ui::Spinner,
 };
 use anyhow::{Context, Result, anyhow};
 use jj_gh_config_derive::subcommand_args;
@@ -119,6 +120,8 @@ pub async fn run<J: Jj, G: Gh, GO: GitOps>(
     let workspace_root = jj.workspace_root().await?;
     ensure_colocated(workspace_root)?;
 
+    let spinner = Spinner::start("Resolving PR");
+
     let origin_url = jj
         .remote_url(remote)
         .await?
@@ -157,6 +160,7 @@ pub async fn run<J: Jj, G: Gh, GO: GitOps>(
 
     git.fetch_pr(remote, *pr_num, &bookmark, *force).await?;
     jj.git_import().await?;
+    spinner.stop();
 
     log::info!("PR #{}: {}", pr.number, pr.title);
     log::info!("head: {} ({})", pr.head_sha, pr.html_url);
