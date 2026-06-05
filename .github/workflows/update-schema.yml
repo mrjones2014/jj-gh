@@ -9,14 +9,21 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      actions: write
     steps:
       - uses: actions/checkout@v6
       - uses: cachix/install-nix-action@v31
       - name: update GitHub GraphQL schema
         run: nix run .#fetch-schema
       - name: Create Pull Request
+        id: create-pr
         uses: peter-evans/create-pull-request@v8
         with:
           commit-message: "schema: update GitHub GraphQL schema"
           title: "[automation] update GitHub GraphQL schema"
           branch: "automation/update-graphql-schema"
+      - name: Trigger CI
+        if: ${{ steps.create-pr.outputs.pull-request-number }}
+        run: gh workflow run ci.yml --ref automation/update-graphql-schema
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
