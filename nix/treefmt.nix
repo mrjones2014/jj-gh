@@ -11,6 +11,7 @@
       includes = [
         "*.md"
         "*.gql"
+        "*.json"
       ];
       excludes = [ "CHANGELOG.md" ];
     };
