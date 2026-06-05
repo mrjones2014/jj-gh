@@ -2128,7 +2128,13 @@ input CreateProjectV2IssueFieldInput {
     clientMutationId: String
     issueFieldId: ID!
     @possibleTypes(
-      concreteTypes: ["IssueFieldDate", "IssueFieldNumber", "IssueFieldSingleSelect", "IssueFieldText"]
+      concreteTypes: [
+        "IssueFieldDate"
+        "IssueFieldMultiSelect"
+        "IssueFieldNumber"
+        "IssueFieldSingleSelect"
+        "IssueFieldText"
+      ]
       abstractType: "IssueFields"
     )
     projectId: ID! @possibleTypes(concreteTypes: ["ProjectV2"])
@@ -2503,7 +2509,13 @@ input DeleteIssueFieldInput {
     clientMutationId: String
     fieldId: ID!
     @possibleTypes(
-      concreteTypes: ["IssueFieldDate", "IssueFieldNumber", "IssueFieldSingleSelect", "IssueFieldText"]
+      concreteTypes: [
+        "IssueFieldDate"
+        "IssueFieldMultiSelect"
+        "IssueFieldNumber"
+        "IssueFieldSingleSelect"
+        "IssueFieldText"
+      ]
       abstractType: "IssueFields"
     )
 }
@@ -5045,6 +5057,7 @@ input IssueFieldCreateOrUpdateInput @docsCategory(name: "issues") {
     dateValue: String
     delete: Boolean
     fieldId: ID!
+    multiSelectOptionIds: [ID!]
     numberValue: Float
     singleSelectOptionId: ID
     textValue: String
@@ -5069,6 +5082,22 @@ type IssueFieldDateValue implements IssueFieldValueCommon & Node @docsCategory(n
     field: IssueFields
     id: ID!
     value: String!
+}
+type IssueFieldMultiSelect implements IssueFieldCommon & Node @docsCategory(name: "issues") {
+    createdAt: DateTime!
+    dataType: IssueFieldDataType!
+    description: String
+    fullDatabaseId: BigInt
+    id: ID!
+    name: String!
+    options: [IssueFieldSingleSelectOption!]!
+    visibility: IssueFieldVisibility!
+}
+type IssueFieldMultiSelectValue implements IssueFieldValueCommon & Node @docsCategory(name: "issues") {
+    field: IssueFields
+    id: ID!
+    options: [IssueFieldSingleSelectOption!]!
+    value: String
 }
 type IssueFieldNumber implements IssueFieldCommon & Node @docsCategory(name: "issues") {
     createdAt: DateTime!
@@ -5158,6 +5187,7 @@ type IssueFieldTextValue implements IssueFieldValueCommon & Node @docsCategory(n
 }
 union IssueFieldValue @docsCategory(name: "issues") =
   | IssueFieldDateValue
+  | IssueFieldMultiSelectValue
   | IssueFieldNumberValue
   | IssueFieldSingleSelectValue
   | IssueFieldTextValue
@@ -5180,6 +5210,7 @@ enum IssueFieldVisibility @docsCategory(name: "issues") {
 }
 union IssueFields @docsCategory(name: "issues") =
   | IssueFieldDate
+  | IssueFieldMultiSelect
   | IssueFieldNumber
   | IssueFieldSingleSelect
   | IssueFieldText
@@ -11377,6 +11408,7 @@ input ProjectV2Filters @docsCategory(name: "projects") {
 }
 union ProjectV2IssueFieldValues @docsCategory(name: "projects") =
   | IssueFieldDateValue
+  | IssueFieldMultiSelectValue
   | IssueFieldNumberValue
   | IssueFieldSingleSelectValue
   | IssueFieldTextValue
@@ -19019,7 +19051,13 @@ input UpdateIssueFieldInput {
     description: String
     id: ID!
     @possibleTypes(
-      concreteTypes: ["IssueFieldDate", "IssueFieldNumber", "IssueFieldSingleSelect", "IssueFieldText"]
+      concreteTypes: [
+        "IssueFieldDate"
+        "IssueFieldMultiSelect"
+        "IssueFieldNumber"
+        "IssueFieldSingleSelect"
+        "IssueFieldText"
+      ]
       abstractType: "IssueFields"
     )
     name: String
