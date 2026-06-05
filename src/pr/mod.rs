@@ -390,11 +390,13 @@ mod tests {
             draft = true
             auto_merge = true
             auto_merge_method = "squash"
+            pr_create_show_diffs = false
             "#,
         );
         assert!(c.draft);
         assert!(c.auto_merge);
         assert_eq!(c.auto_merge_method, AutoMergeMethod::Squash);
+        assert!(!c.pr_create_show_diffs);
 
         let c = merged_create(
             &["@-"],
@@ -403,11 +405,13 @@ mod tests {
             draft = false
             auto_merge = false
             auto_merge_method = "rebase"
+            pr_create_show_diffs = true
             "#,
         );
         assert!(!c.draft);
         assert!(!c.auto_merge);
         assert_eq!(c.auto_merge_method, AutoMergeMethod::Rebase);
+        assert!(c.pr_create_show_diffs);
     }
 
     #[test]
@@ -417,6 +421,7 @@ mod tests {
                 "@-",
                 "--draft",
                 "--auto-merge",
+                "--diffs",
                 "--auto-merge-method",
                 "rebase",
             ],
@@ -425,25 +430,29 @@ mod tests {
             draft = false
             auto_merge = false
             auto_merge_method = "merge"
+            pr_create_show_diffs = false
             "#,
         );
         assert!(c.draft);
         assert!(c.auto_merge);
         assert_eq!(c.auto_merge_method, AutoMergeMethod::Rebase);
+        assert!(c.pr_create_show_diffs);
     }
 
     #[test]
     fn create_negative_flags_override_config() {
         let c = merged_create(
-            &["@-", "--no-draft", "--no-auto-merge"],
+            &["@-", "--no-draft", "--no-auto-merge", "--no-diffs"],
             "\
             [jj-gh]\n\
             draft = true\n\
             auto_merge = true\n\
+            pr_create_show_diffs = true\n\
             ",
         );
         assert!(!c.draft);
         assert!(!c.auto_merge);
+        assert!(!c.pr_create_show_diffs);
     }
 
     #[test]

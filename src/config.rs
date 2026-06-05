@@ -76,6 +76,9 @@ config_schema! {
     /// Editor command for the PR editor flow.
     editor: Option<Vec<String>> = None,
 
+    /// Show a preview of the PR diffs while creating PR body.
+    pr_create_show_diffs: bool = true,
+
     /// jj template used to render the bookmark name in `pr fetch`.
     pr_fetch_bookmark_template: Option<String> = None,
 

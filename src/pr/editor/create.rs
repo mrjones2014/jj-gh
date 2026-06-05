@@ -100,6 +100,21 @@ subcommand_args! {
         #[arg(short = 'e', long, value_name = "CMD", value_parser = shell_words::split)]
         #[config]
         pub editor: Option<Vec<String>>,
+
+        /// Show a preview of the PR diffs while creating the PR body.
+        /// Overrides `pr_create_show_diffs` configuration. Use `--no-diffs` to disable.
+        #[arg(
+            long = "diffs",
+            num_args = 0,
+            default_missing_value = "true",
+            default_value_if("no_diffs", "true", Some("false"))
+        )]
+        #[config(maps_to = "pr_create_show_diffs")]
+        pub show_diffs: bool,
+
+        /// Hide the PR diff preview while creating the PR body. Overrides config.
+        #[arg(long = "no-diffs", conflicts_with = "show_diffs")]
+        pub no_diffs: bool,
     }
 }
 
@@ -122,17 +137,34 @@ where
     E: Editor,
     ENV: EnvReader,
 {
-    let GlobalOpts {
-        remote,
-        upstream_remote,
-        verbose: _,
-        quiet: _,
-        log_level: _,
-        gh_askpass: _,
-        askpass_timeout_secs: _,
-    } = &args.globals;
+    let args @ CreateArgs {
+        globals:
+            GlobalOpts {
+                remote,
+                upstream_remote,
+                verbose: _,
+                quiet: _,
+                log_level: _,
+                gh_askpass: _,
+                askpass_timeout_secs: _,
+            },
+        rev,
+        base,
+        draft,
+        auto_merge,
+        editor: editor_argv,
+        auto_merge_method,
+        template: _,
+        show_diffs,
+        template_file: _,
+        // these are resolved by clap/macro into positive fields or standalone control flags
+        no_diffs: _,
+        no_auto_merge: _,
+        no_draft: _,
+        no_template: _,
+    } = args;
 
-    let info = jj.resolve_rev(&args.rev).await?;
+    let info = jj.resolve_rev(rev).await?;
     let existing_branch = info.bookmarks.first().cloned();
 
     let origin_url = jj
@@ -162,9 +194,8 @@ where
         }
     }
 
-    let ancestor = jj.stacked_ancestor_bookmark(&args.rev).await?;
-    let base = args
-        .base
+    let ancestor = jj.stacked_ancestor_bookmark(rev).await?;
+    let base = base
         .resolve_or(
             || async {
                 if let Some(a) = &ancestor {
@@ -187,7 +218,7 @@ where
         ));
     }
 
-    let title_revset = jj::title_base_revset(&args.rev, ancestor.as_deref());
+    let title_revset = jj::title_base_revset(rev, ancestor.as_deref());
     let default_title = jj.first_commit_description(&title_revset).await?;
 
     let raw_template = load_template_for(
@@ -204,14 +235,18 @@ where
         base: base.clone(),
         labels: vec![],
         reviewers: vec![],
-        draft: args.draft,
-        auto_merge: args.auto_merge,
-        auto_merge_method: args.auto_merge_method,
+        draft: *draft,
+        auto_merge: *auto_merge,
+        auto_merge_method: *auto_merge_method,
     };
     let raw_template_body = raw_template.clone().unwrap_or_default();
 
-    let editor_argv = resolve_editor_argv(args.editor.as_deref(), env)?;
-    let diff_preview = jj.diff(&title_revset).await.log_err().ok();
+    let editor_argv = resolve_editor_argv(editor_argv.as_deref(), env)?;
+    let diff_preview = if *show_diffs {
+        jj.diff(&title_revset).await.log_err().ok()
+    } else {
+        None
+    };
     let preview = diff_preview
         .as_deref()
         .map(str::trim)
@@ -226,17 +261,17 @@ where
     .await?;
     validation::validate(&final_fm, &body, &raw_template_body)?;
 
-    jj.push(&args.rev).await?;
+    jj.push(rev).await?;
 
     let branch = if let Some(b) = existing_branch {
         b
     } else {
-        let refreshed = jj.resolve_rev(&args.rev).await?;
+        let refreshed = jj.resolve_rev(rev).await?;
         refreshed
             .bookmarks
             .into_iter()
             .next()
-            .ok_or_else(|| anyhow!("`jj git push -c {}` did not create a bookmark", args.rev))?
+            .ok_or_else(|| anyhow!("`jj git push -c {rev}` did not create a bookmark"))?
     };
     let head_spec = target.head_spec(&branch);
 

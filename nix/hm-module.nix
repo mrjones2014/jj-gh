@@ -117,6 +117,12 @@ in
         description = "Default git remote used for cross-fork PR target.";
       };
 
+      pr_create_show_diffs = mkOption {
+        type = types.nullOr types.bool;
+        default = null;
+        description = "Whether or not to show a preview of the PR diffs while creating the PR body by default.";
+      };
+
       pr_create_template_file = mkOption {
         type = types.nullOr types.path;
         default = null;
