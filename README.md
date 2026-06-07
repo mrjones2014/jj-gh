@@ -121,9 +121,47 @@ pr = ["util", "exec", "--", "jj-gh", "pr"]
 Now `jj pr create <rev>` (and the alias `jj pr c <rev>`) and `jj pr fetch <pr-num>` (alias `jj pr f <pr-num>`) work like any other `jj`
 subcommand.
 
+### Usage
+
+```sh
+# Show `jj log` enriched with PR metadata
+jj pr log
+# create a new PR from `rev-id`, supports stacked bookmarks
+jj pr create rev-id
+# edit an existing PR who's head ref is `rev-id`
+jj pr edit rev-id
+# enable auto-merge for PR who's head ref is `rev-id`;
+# does not work if merge queues are enabled, this is
+# a limitation in the GitHub API, see:
+# https://github.com/mrjones2014/jj-gh/issues/103
+jj pr auto-merge rev-id
+```
+
+#### Tips and Tricks
+
+If you're a Neovim user you can use a plugin like [blink-cmp-git](https://github.com/Kaiser-Yang/blink-cmp-git) or
+[cmp-git](https://github.com/petertriho/cmp-git) (for `nvim-cmp`) to get completions for GitHub issues and collaborators (for reviewers).
+
+If you want to customize settings in your editor based on it being part of a `jj-gh` flow, you can use the `env` command
+as part of your editor command configuration:
+
+```toml
+[jj-gh]
+editor = [
+  "env",
+  "JJ_GH=1",
+  "nvim",
+  "+10",     # skip cursor past frontmatter
+]
+```
+
+then check, in Neovim for example, `vim.env.JJ_GH` in Lua to make customizations specific to when you're editing PRs with `jj-gh`.
+
 ### Shell completions
 
-`jj-gh completions <shell>` prints a standard completion script for the `jj-gh` binary. For the more common case where you invoke `jj-gh` through a `jj` alias (e.g. `jj pr <tab>`), pass `--jj-alias <NAME> --subcommand <NAME>` (both required together) to emit an overlay that adds completions for the alias on top of jj's own completion script.
+`jj-gh completions <shell>` prints a standard completion script for the `jj-gh` binary. For the more common case where you
+invoke `jj-gh` through a `jj` alias (e.g. `jj pr <tab>`), pass `--jj-alias <NAME> --subcommand <NAME>` (both required together)
+to emit an overlay that adds completions for the alias on top of jj's own completion script.
 
 ```sh
 # fish
@@ -141,7 +179,9 @@ source <(jj-gh completions zsh --jj-alias pr --subcommand pr)
 
 The overlay must be sourced _after_ `jj util completion <shell>` so it can chain to jj's completer when the alias is not the one being completed.
 
-If you use the `home-manager` module with `programs.fish.enable` / `programs.bash.enable` / `programs.zsh.enable` set, the matching overlay is wired up automatically for every entry in `programs.jujutsu.gh.aliases`. You only need the manual steps above when installing via `cargo install` or from source.
+If you use the `home-manager` module with `programs.fish.enable` / `programs.bash.enable` / `programs.zsh.enable` set, the matching overlay is
+wired up automatically for every entry in `programs.jujutsu.gh.aliases`. You only need the manual steps above when installing via
+`cargo install` or from source.
 
 ## Config
 
