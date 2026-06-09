@@ -67,6 +67,7 @@ toml = "1"
 url = "2"
 
 [lints.clippy]
+allow_attributes = "deny"
 pedantic = { level = "deny", priority = -1 }
 
 [profile.release]

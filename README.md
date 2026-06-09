@@ -200,7 +200,10 @@ default_base_branch = "main" # default "master"
 draft = false                # default false
 auto_merge = false           # default false; enable auto-merge on PR after creation
 auto_merge_method = "merge"  # default "merge"; one of "merge", "squash", "rebase"
-default_remote = "origin"    # default remote to use
+
+# DEPRECATED: this is now auto-detected from the repo, will be removed in a future version
+default_remote = "origin" # default remote to use
+
 upstream_remote = "upstream" # default remote to use for cross-fork PR fetching
 
 # PR body template. `pr_create_template` is a jj template string, evaluated

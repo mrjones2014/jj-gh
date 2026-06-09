@@ -31,6 +31,13 @@ pub struct PushedBookmark {
 }
 
 pub trait Jj {
+    /// Resolve the default push remote for the repository.
+    ///
+    /// # Errors
+    ///
+    /// Propagates errors from the embedded git store query.
+    async fn default_remote(&self) -> Result<String>;
+
     /// Resolve a single revision into commit metadata.
     ///
     /// # Errors
@@ -68,12 +75,12 @@ pub trait Jj {
     /// Propagates jj errors.
     async fn remote_bookmark_sha(&self, bookmark: &str, remote: &str) -> Result<Option<String>>;
 
-    /// `jj git push -c <rev>`. Pushes the change and creates a bookmark if needed.
+    /// `jj git push --remote <remote> -c <rev>`. Pushes the change and creates a bookmark if needed.
     ///
     /// # Errors
     ///
     /// Propagates jj failures.
-    async fn push(&self, rev: &str) -> Result<()>;
+    async fn push(&self, rev: &str, remote: String) -> Result<()>;
 
     /// Bookmark at jj's `trunk()` revset, or `Ok(None)` if `trunk()` is empty.
     ///
@@ -145,6 +152,23 @@ pub trait Jj {
     ///
     /// Propagates jj failures.
     async fn diff(&self, revset: &str) -> Result<String>;
+}
+
+pub trait JjExt {
+    /// Return the given remote if `Some`, else look up the repository default.
+    async fn resolve_default_remote(&self, remote: Option<&String>) -> Result<String>;
+}
+
+impl<T> JjExt for T
+where
+    T: Jj,
+{
+    async fn resolve_default_remote(&self, remote: Option<&String>) -> Result<String> {
+        match remote {
+            Some(remote) => Ok(remote.clone()),
+            None => self.default_remote().await,
+        }
+    }
 }
 
 /// Compose the revset used to compute the default PR title.

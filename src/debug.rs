@@ -6,7 +6,7 @@ use crate::{
     config::{self, Config},
     gh::{Gh, real::OctocrabGh},
     git::url::parse_owner_repo,
-    jj::{self, CommitInfo, Jj, real::JjCli},
+    jj::{self, CommitInfo, Jj, JjExt, real::JjCli},
     pr,
     ui::Spinner,
 };
@@ -56,6 +56,7 @@ async fn print_rev(globals: &GlobalOpts, _config: &Config, rev: &str) -> Result<
         askpass_timeout_secs: _,
     } = globals;
     let jj = JjCli::new().await?;
+    let remote = jj.resolve_default_remote(remote.as_ref()).await?;
 
     let spinner = Spinner::start("Resolving revision metadata");
 
@@ -69,11 +70,11 @@ async fn print_rev(globals: &GlobalOpts, _config: &Config, rev: &str) -> Result<
     let title_revset = jj::title_base_revset(rev, ancestor.as_deref());
     let default_title = jj.first_commit_description(&title_revset).await?;
 
-    let origin_url = jj.remote_url(remote).await?;
+    let origin_url = jj.remote_url(&remote).await?;
     let upstream_url = jj.remote_url(upstream_remote).await?;
     let default_branch = jj.trunk_branch().await?;
     let default_branch_sha = match &default_branch {
-        Some(branch) => jj.remote_bookmark_sha(branch, remote).await?,
+        Some(branch) => jj.remote_bookmark_sha(branch, &remote).await?,
         None => None,
     };
 
@@ -112,10 +113,11 @@ async fn print_pr_lookup(globals: &GlobalOpts, config: &Config, rev: &str) -> Re
     } = globals;
     let spinner = Spinner::start("Resolving PR");
     let jj = JjCli::new().await?;
+    let remote = jj.resolve_default_remote(remote.as_ref()).await?;
     let token = auth::resolve_token(config).await?;
     let gh = OctocrabGh::new(&token)?;
 
-    let lookup = pr::resolve_pr_for_rev(&jj, &gh, remote, upstream_remote, rev).await?;
+    let lookup = pr::resolve_pr_for_rev(&jj, &gh, &remote, upstream_remote, rev).await?;
     let base = gh
         .lookup_base(
             &lookup.target.owner,

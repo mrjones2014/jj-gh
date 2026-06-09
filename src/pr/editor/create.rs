@@ -3,7 +3,7 @@ use crate::{
     cli::GlobalOpts,
     config::AutoMergeMethod,
     gh::{CreatePrRequest, Gh, remote},
-    jj::{self, Jj},
+    jj::{self, Jj, JjExt},
     logging::ResultExt,
     pr::{
         editor::{self, ApplyChangesCtx, Editor, resolve_editor_argv},
@@ -164,11 +164,12 @@ where
         no_template: _,
     } = args;
 
+    let remote = jj.resolve_default_remote(remote.as_ref()).await?;
     let info = jj.resolve_rev(rev).await?;
     let existing_branch = info.bookmarks.first().cloned();
 
     let origin_url = jj
-        .remote_url(remote)
+        .remote_url(&remote)
         .await?
         .ok_or_else(|| anyhow!("`{remote}` remote is not configured"))?;
     let upstream_url = jj.remote_url(upstream_remote).await?;
@@ -280,7 +281,7 @@ where
         lookup
     };
 
-    jj.push(rev).await?;
+    jj.push(rev, remote).await?;
 
     let branch = if let Some(b) = existing_branch {
         b

@@ -12,7 +12,7 @@ use crate::{
     cli::GlobalOpts,
     gh::{Gh, PrWithCiStatus, UpdatePr},
     git,
-    jj::{Jj, PushedBookmark},
+    jj::{Jj, JjExt, PushedBookmark},
     ui::Spinner,
 };
 use anyhow::{Result, anyhow};
@@ -127,7 +127,8 @@ where
         askpass_timeout_secs: _,
     } = &args.globals;
 
-    let ctx = gather_context(jj, gh, remote).await?;
+    let remote = jj.resolve_default_remote(remote.as_ref()).await?;
+    let ctx = gather_context(jj, gh, &remote).await?;
 
     let force_dry = args.dry_run
         || args.json

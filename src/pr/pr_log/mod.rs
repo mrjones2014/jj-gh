@@ -14,7 +14,7 @@ use crate::{
     gh::{CiStatus, Gh, PrWithCiStatus},
     git,
     jj::{
-        Jj,
+        Jj, JjExt,
         inject::{TemplateAliases, escape_jj_string},
     },
     ui::Spinner,
@@ -127,12 +127,13 @@ pub async fn run(gh: &impl Gh, jj: &impl Jj, args: &PrLogArgs) -> Result<()> {
     } = args;
 
     let spinner = Spinner::start("Resolving local PRs");
+    let remote = jj.resolve_default_remote(remote.as_ref()).await?;
     let origin_url = jj
-        .remote_url(remote)
+        .remote_url(&remote)
         .await?
         .ok_or_else(|| anyhow!("`{remote}` remote is not configured"))?;
     let (owner, repo) = git::url::parse_owner_repo(&origin_url)?;
-    let bookmarks = jj.pushed_bookmarks(remote).await?;
+    let bookmarks = jj.pushed_bookmarks(&remote).await?;
     let branch_to_local: HashMap<String, String> = bookmarks
         .iter()
         .map(|b| (b.name.clone(), b.local_commit_id.clone()))

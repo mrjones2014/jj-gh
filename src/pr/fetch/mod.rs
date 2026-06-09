@@ -13,7 +13,7 @@ use crate::{
     gh::{Gh, PrDetails},
     git::{real::GitOps, url::parse_owner_repo},
     jj::{
-        Jj,
+        Jj, JjExt,
         inject::{TemplateAliases, escape_jj_string},
     },
     ui::Spinner,
@@ -122,8 +122,9 @@ pub async fn run<J: Jj, G: Gh, GO: GitOps>(
 
     let spinner = Spinner::start("Resolving PR");
 
+    let remote = jj.resolve_default_remote(remote.as_ref()).await?;
     let origin_url = jj
-        .remote_url(remote)
+        .remote_url(&remote)
         .await?
         .ok_or_else(|| anyhow!("`{remote}` remote is not configured"))?;
     let (owner, repo) = parse_owner_repo(&origin_url)?;
@@ -158,7 +159,7 @@ pub async fn run<J: Jj, G: Gh, GO: GitOps>(
         ));
     }
 
-    git.fetch_pr(remote, *pr_num, &bookmark, *force).await?;
+    git.fetch_pr(&remote, *pr_num, &bookmark, *force).await?;
     jj.git_import().await?;
     spinner.stop();
 
@@ -241,6 +242,10 @@ mod tests {
     }
 
     impl Jj for FakeJj {
+        async fn default_remote(&self) -> Result<String> {
+            Ok("origin".into())
+        }
+
         async fn resolve_rev(&self, _rev: &str) -> Result<CommitInfo> {
             unimplemented!("fetch does not call resolve_rev")
         }
@@ -257,7 +262,7 @@ mod tests {
         async fn remote_bookmark_sha(&self, _: &str, _: &str) -> Result<Option<String>> {
             unimplemented!("fetch does not call remote_bookmark_sha")
         }
-        async fn push(&self, _rev: &str) -> Result<()> {
+        async fn push(&self, _rev: &str, _remote: String) -> Result<()> {
             unimplemented!("fetch does not call push")
         }
         async fn trunk_branch(&self) -> Result<Option<String>> {
@@ -447,7 +452,7 @@ mod tests {
                 verbose: 0,
                 quiet: false,
                 log_level: None,
-                remote: remote.into(),
+                remote: Some(remote.into()),
                 upstream_remote: "upstream".into(),
                 gh_askpass: None,
                 askpass_timeout_secs: 20,

@@ -21,15 +21,14 @@
 //!   stored for [`subcommand_args!`] to consume (not used yet).
 //! - `#[env("ENV_KEY", string | path | argv)]`: env-var binding for the
 //!   `env_overlay()` helper.
-//! - `#[forward(meta)]`: splat an arbitrary attribute onto the emitted Config
-//!   field. Used for `cfg_attr(feature = "schema-validation",
-//!   schemars(with = "Option<String>"))` and similar.
+//! - Any other attribute: forwarded verbatim to the emitted Config field.
 
 use proc_macro::TokenStream;
-use proc_macro2::TokenStream as TokenStream2;
+use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::quote;
+use std::fmt::Write as _;
 use syn::{
-    Attribute, Expr, Ident, LitStr, Token, Type,
+    Attribute, Expr, Ident, LitStr, Meta, Token, Type,
     parse::{Parse, ParseStream},
     parse_macro_input,
 };
@@ -40,13 +39,20 @@ struct Schema {
 
 struct SchemaField {
     docs: Vec<Attribute>,
-    forwards: Vec<TokenStream2>,
+    passthrough_attrs: Vec<Attribute>,
+    deprecation: Option<Deprecation>,
     serde_attrs: Vec<TokenStream2>,
     _cli: Option<TokenStream2>,
     env: Option<EnvSpec>,
     name: Ident,
     ty: Type,
     default: Expr,
+}
+
+#[derive(Default)]
+struct Deprecation {
+    since: Option<LitStr>,
+    note: Option<LitStr>,
 }
 
 struct EnvSpec {
@@ -94,7 +100,8 @@ impl Parse for SchemaField {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let raw_attrs = input.call(Attribute::parse_outer)?;
         let mut docs = Vec::new();
-        let mut forwards = Vec::new();
+        let mut passthrough_attrs = Vec::new();
+        let mut deprecation = None;
         let mut serde_attrs = Vec::new();
         let mut cli = None;
         let mut env = None;
@@ -103,18 +110,15 @@ impl Parse for SchemaField {
                 docs.push(attr);
             } else if attr.path().is_ident("serde") {
                 serde_attrs.push(attr.parse_args::<TokenStream2>()?);
-            } else if attr.path().is_ident("forward") {
-                forwards.push(attr.parse_args::<TokenStream2>()?);
             } else if attr.path().is_ident("cli") {
                 cli = Some(attr.parse_args::<TokenStream2>()?);
             } else if attr.path().is_ident("env") {
                 env = Some(attr.parse_args::<EnvSpec>()?);
             } else {
-                return Err(syn::Error::new_spanned(
-                    attr,
-                    "unknown config_schema attribute; expected #[serde(..)], \
-                     #[cli(..)], #[env(..)], #[forward(..)], or a doc comment",
-                ));
+                if attr.path().is_ident("deprecated") {
+                    deprecation = Some(parse_deprecation(&attr)?);
+                }
+                passthrough_attrs.push(attr);
             }
         }
         let name: Ident = input.parse()?;
@@ -125,7 +129,8 @@ impl Parse for SchemaField {
         let _trailing: Option<Token![,]> = input.parse()?;
         Ok(SchemaField {
             docs,
-            forwards,
+            passthrough_attrs,
+            deprecation,
             serde_attrs,
             _cli: cli,
             env,
@@ -134,6 +139,30 @@ impl Parse for SchemaField {
             default,
         })
     }
+}
+
+fn parse_deprecation(attr: &Attribute) -> syn::Result<Deprecation> {
+    let mut deprecation = Deprecation::default();
+    match &attr.meta {
+        Meta::Path(_) => {}
+        Meta::List(_) => attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("since") {
+                deprecation.since = Some(meta.value()?.parse()?);
+            } else if meta.path.is_ident("note") {
+                deprecation.note = Some(meta.value()?.parse()?);
+            } else {
+                return Err(meta.error("expected `since` or `note`"));
+            }
+            Ok(())
+        })?,
+        Meta::NameValue(_) => {
+            return Err(syn::Error::new_spanned(
+                attr,
+                "expected #[deprecated] or #[deprecated(since = \"...\", note = \"...\")]",
+            ));
+        }
+    }
+    Ok(deprecation)
 }
 
 fn is_option(ty: &Type) -> bool {
@@ -171,13 +200,34 @@ fn touches_skip_serializing(serde_attrs: &[TokenStream2]) -> bool {
         .any(|tt| tt.to_string().contains("skip_serializing"))
 }
 
+fn deprecated_key_entries(fields: &[SchemaField]) -> Vec<TokenStream2> {
+    fields
+        .iter()
+        .filter_map(|field| {
+            let deprecation = field.deprecation.as_ref()?;
+            let key_name = field.name.to_string();
+            let key = LitStr::new(&key_name, field.name.span());
+            let mut message = format!("`jj-gh.{key_name}` is deprecated");
+            if let Some(since) = &deprecation.since {
+                write!(message, " since {}", since.value()).expect("writing to String cannot fail");
+            }
+            if let Some(note) = &deprecation.note {
+                write!(message, ": {}", note.value()).expect("writing to String cannot fail");
+            }
+            let message = LitStr::new(&message, Span::call_site());
+            Some(quote!((#key, #message),))
+        })
+        .collect()
+}
+
 #[proc_macro]
+#[expect(clippy::too_many_lines)]
 pub fn config_schema(input: TokenStream) -> TokenStream {
     let schema = parse_macro_input!(input as Schema);
 
     let struct_fields = schema.fields.iter().map(|f| {
         let docs = &f.docs;
-        let forwards = f.forwards.iter().map(|tt| quote!(#[#tt]));
+        let passthrough_attrs = &f.passthrough_attrs;
         let mut serde_attrs: Vec<TokenStream2> = f
             .serde_attrs
             .iter()
@@ -190,7 +240,7 @@ pub fn config_schema(input: TokenStream) -> TokenStream {
         let ty = &f.ty;
         quote! {
             #(#docs)*
-            #(#forwards)*
+            #(#passthrough_attrs)*
             #(#serde_attrs)*
             pub #name: #ty,
         }
@@ -230,10 +280,12 @@ pub fn config_schema(input: TokenStream) -> TokenStream {
         let name = &f.name;
         let ty = &f.ty;
         quote! {
-            #[allow(non_camel_case_types)]
+            #[expect(non_camel_case_types)]
             pub type #name = #ty;
         }
     });
+
+    let deprecated_keys = deprecated_key_entries(&schema.fields);
 
     let expanded = quote! {
         #[derive(::std::fmt::Debug, ::serde::Deserialize, ::serde::Serialize)]
@@ -243,6 +295,7 @@ pub fn config_schema(input: TokenStream) -> TokenStream {
             #(#struct_fields)*
         }
 
+        #[allow(clippy::allow_attributes, deprecated)]
         impl ::std::default::Default for Config {
             fn default() -> Self {
                 Self {
@@ -260,6 +313,11 @@ pub fn config_schema(input: TokenStream) -> TokenStream {
             use super::*;
             #(#schema_aliases)*
         }
+
+        #[doc(hidden)]
+        pub static __DEPRECATED_CONFIG_KEYS: &[(&str, &str)] = &[
+            #(#deprecated_keys)*
+        ];
 
         /// Snapshot of env-var bindings declared in `config_schema!`.
         ///
@@ -447,7 +505,7 @@ fn schema_key_for(field: &ArgField) -> String {
 }
 
 #[proc_macro]
-#[allow(clippy::too_many_lines)]
+#[expect(clippy::too_many_lines)]
 pub fn subcommand_args(input: TokenStream) -> TokenStream {
     let SubcommandArgs {
         no_globals,
@@ -567,7 +625,7 @@ pub fn subcommand_args(input: TokenStream) -> TokenStream {
             f.name.to_string().to_uppercase()
         );
         Some(quote! {
-            #[allow(dead_code)]
+            #[expect(dead_code)]
             const #check_name: fn(#fty) -> crate::config::__schema::#key = ::std::convert::identity;
         })
     });
@@ -607,6 +665,7 @@ pub fn subcommand_args(input: TokenStream) -> TokenStream {
             /// Build the resolved args from the clap-parsed input plus the
             /// merged Config (and resolved globals, except on `#[no_globals]`
             /// structs like `GlobalOpts` itself).
+            #[allow(clippy::allow_attributes, deprecated)]
             pub fn resolve(
                 input: #input_name,
                 config: &crate::config::Config
