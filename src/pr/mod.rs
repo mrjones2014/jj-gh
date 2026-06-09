@@ -544,6 +544,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(deprecated)]
     fn global_remote_overrides_default_remote_config() {
         use crate::cli::GlobalOptsInput;
         use clap::Parser;
@@ -570,11 +571,12 @@ mod tests {
             ))
             .merge(Serialized::defaults(&global));
         let c = config::extract(&fig).unwrap();
-        assert_eq!(c.default_remote, "fork");
+        assert_eq!(c.default_remote, Some("fork".to_string()));
         assert_eq!(c.upstream_remote, "canonical");
     }
 
     #[test]
+    #[expect(deprecated)]
     fn config_remote_used_when_global_not_set() {
         use crate::cli::GlobalOptsInput;
         use clap::Parser;
@@ -600,7 +602,7 @@ mod tests {
             ))
             .merge(Serialized::defaults(&global));
         let c = config::extract(&fig).unwrap();
-        assert_eq!(c.default_remote, "cfg-origin");
+        assert_eq!(c.default_remote, Some("cfg-origin".to_string()));
         assert_eq!(c.upstream_remote, "cfg-upstream");
     }
 }

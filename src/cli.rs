@@ -48,7 +48,7 @@ subcommand_args! {
         /// Default: `origin` (or `default_remote` in config).
         #[arg(long, value_name = "NAME", global = true)]
         #[config(maps_to = "default_remote")]
-        pub remote: String,
+        pub remote: Option<String>,
 
         /// Git remote used as the PR target in fork workflows. Default:
         /// `upstream` (or `upstream_remote` in config).

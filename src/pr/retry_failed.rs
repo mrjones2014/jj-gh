@@ -9,7 +9,7 @@
 use crate::{
     cli::GlobalOpts,
     gh::{Gh, WorkflowRun, WorkflowRunStatus},
-    jj::Jj,
+    jj::{Jj, JjExt},
     pr,
     ui::Spinner,
 };
@@ -71,8 +71,9 @@ where
             },
     } = args;
 
+    let remote = jj.resolve_default_remote(remote.as_ref()).await?;
     let (pr, target) =
-        pr::resolve_pr_with_target(jj, gh, remote, upstream_remote, number_or_rev).await?;
+        pr::resolve_pr_with_target(jj, gh, &remote, upstream_remote, number_or_rev).await?;
     let owner = &target.owner;
     let repo = &target.repo;
 
@@ -321,6 +322,10 @@ mod tests {
     }
 
     impl crate::jj::Jj for FakeJj {
+        async fn default_remote(&self) -> Result<String> {
+            Ok("origin".into())
+        }
+
         async fn resolve_rev(&self, _rev: &str) -> Result<CommitInfo> {
             unimplemented!("retry-failed tests pass PR numbers, not revs")
         }
@@ -341,7 +346,7 @@ mod tests {
         async fn remote_bookmark_sha(&self, _: &str, _: &str) -> Result<Option<String>> {
             unimplemented!()
         }
-        async fn push(&self, _rev: &str) -> Result<()> {
+        async fn push(&self, _rev: &str, _remote: String) -> Result<()> {
             unimplemented!()
         }
         async fn trunk_branch(&self) -> Result<Option<String>> {
@@ -492,7 +497,7 @@ mod tests {
                 verbose: 0,
                 quiet: false,
                 log_level: None,
-                remote: "origin".into(),
+                remote: Some("origin".into()),
                 upstream_remote: "upstream".into(),
                 gh_askpass: None,
                 askpass_timeout_secs: 20,

@@ -2,7 +2,7 @@ use crate::{
     auth::EnvReader,
     cli::GlobalOpts,
     gh::{Gh, PrDetails, remote::Target},
-    jj::Jj,
+    jj::{Jj, JjExt},
     pr::{
         self, PrLookup,
         editor::{self, ApplyChangesCtx, Editor, resolve_editor_argv},
@@ -64,11 +64,12 @@ where
     } = args;
 
     let editor_argv = resolve_editor_argv(editor_cfg.as_deref(), env)?;
+    let remote = jj.resolve_default_remote(remote.as_ref()).await?;
 
     let spinner = Spinner::start("Resolving PR");
 
     let (target, pr_number) =
-        resolve_pr_target(jj, gh, remote, upstream_remote, number_or_rev).await?;
+        resolve_pr_target(jj, gh, &remote, upstream_remote, number_or_rev).await?;
     let details = gh
         .get_pr(&target.owner, &target.repo, pr_number)
         .await

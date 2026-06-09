@@ -42,7 +42,7 @@ config_schema! {
     /// it back to figment), so the serde skip is per-field rather than via
     /// the macro's default `skip_serializing_if = "Option::is_none"`.
     #[serde(skip_serializing)]
-    #[forward(cfg_attr(feature = "schema-validation", schemars(with = "Option<String>")))]
+    #[cfg_attr(feature = "schema-validation", schemars(with = "Option<String>"))]
     gh_token: Option<SecretString> = None,
 
     /// Fallback base branch when neither `--base` nor an ancestor bookmark
@@ -51,7 +51,8 @@ config_schema! {
     default_base_branch: Option<String> = None,
 
     /// Git remote used for the user's own pushes and PR head lookups.
-    default_remote: String = "origin".into(),
+    #[deprecated(since = "0.2.5", note = "jj-gh now auto-detects the default remote via the repository data.")]
+    default_remote: Option<String> = None,
 
     /// Git remote used as the PR target in fork workflows.
     upstream_remote: String = "upstream".into(),
@@ -299,6 +300,11 @@ impl Provider for JjConfProvider {
         let Some(table) = table else {
             return Ok(Map::new());
         };
+        for &(key, message) in __DEPRECATED_CONFIG_KEYS {
+            if table.contains_key(key) {
+                log::warn!("{message} Source: {}.", self.source_label());
+            }
+        }
         Serialized::defaults(table).data()
     }
 }
@@ -343,6 +349,17 @@ mod tests {
         assert_eq!(config.default_base_branch, None);
         assert!(!config.draft);
         assert!(config.gh_token.is_none());
+    }
+
+    #[test]
+    fn deprecated_config_keys_include_generated_messages() {
+        assert_eq!(
+            __DEPRECATED_CONFIG_KEYS,
+            &[(
+                "default_remote",
+                "`jj-gh.default_remote` is deprecated since 0.2.5: jj-gh now auto-detects the default remote via the repository data."
+            )]
+        );
     }
 
     #[test]

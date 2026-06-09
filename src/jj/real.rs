@@ -53,6 +53,15 @@ impl JjCli {
 }
 
 impl Jj for JjCli {
+    async fn default_remote(&self) -> Result<String> {
+        self.repo
+            .find_default_remote(gix::remote::Direction::Push)
+            .transpose()
+            .context("resolving default remote for repository")?
+            .and_then(|remote| remote.name().map(|remote| remote.as_ref().to_string()))
+            .context("resolving default remote for repository")
+    }
+
     async fn resolve_rev(&self, rev: &str) -> Result<CommitInfo> {
         let template = json_object_template(&[
             ("change_id", "change_id"),
@@ -124,14 +133,16 @@ impl Jj for JjCli {
         }))
     }
 
-    async fn push(&self, rev: &str) -> Result<()> {
+    async fn push(&self, rev: &str, remote: String) -> Result<()> {
         let status = Command::new("jj")
-            .args(["git", "push", "-c", rev])
+            .args(["git", "push", "--remote", &remote, "-c", rev])
             .status()
             .await
             .context("failed to spawn `jj`")?;
         if !status.success() {
-            return Err(anyhow!("`jj git push -c {rev}` failed with {status}"));
+            return Err(anyhow!(
+                "`jj git push --remote {remote} -c {rev}` failed with {status}"
+            ));
         }
         Ok(())
     }

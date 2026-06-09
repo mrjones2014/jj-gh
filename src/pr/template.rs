@@ -149,7 +149,7 @@ mod tests {
                 verbose: 0,
                 quiet: false,
                 log_level: None,
-                remote: "origin".into(),
+                remote: Some("origin".into()),
                 upstream_remote: "upstream".into(),
                 gh_askpass: None,
                 askpass_timeout_secs: 20,

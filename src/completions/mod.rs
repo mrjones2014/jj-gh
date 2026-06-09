@@ -153,7 +153,6 @@ pub(super) fn first_help_line(text: &str) -> String {
 #[cfg(test)]
 pub(super) fn fake_pr_command() -> Command {
     #[derive(Debug, clap::Args)]
-    #[allow(dead_code)]
     struct FakeCreateArgs {
         /// Open as draft.
         #[arg(long)]
@@ -164,7 +163,6 @@ pub(super) fn fake_pr_command() -> Command {
     }
 
     #[derive(Debug, Subcommand)]
-    #[allow(dead_code)]
     enum FakeAction {
         /// Create a thing.
         #[command(visible_alias = "c")]
