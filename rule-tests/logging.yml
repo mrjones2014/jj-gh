@@ -1,0 +1,39 @@
+id: no-log-error
+valid:
+  - |
+    log::warn!("recoverable problem: {error:#}");
+invalid:
+  - |
+    log::error!("fatal problem: {error:#}");
+---
+id: no-space-joined-argv-in-log
+valid:
+  - |
+    log::debug!("running {}", shell_words::join(args));
+invalid:
+  - |
+    log::debug!("running {}", args.join(" "));
+---
+id: no-raw-subprocess-stderr-in-error
+valid:
+  - |
+    return Err(anyhow!("{}", subprocess_error(&output.stderr)));
+invalid:
+  - |
+    return Err(anyhow!("{}", String::from_utf8_lossy(&output.stderr)));
+---
+id: no-status-for-jj-command
+valid:
+  - |
+    async fn run_editor() {
+        Command::new(editor).status().await?;
+    }
+  - |
+    async fn run_jj() {
+        Command::new("jj").output().await?;
+    }
+invalid:
+  - |
+    async fn run_jj() {
+        Command::new("jj").status().await?;
+    }

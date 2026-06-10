@@ -1,0 +1,8 @@
+id: no-log-error
+language: Rust
+severity: error
+message: Return fatal errors to the top-level handler; do not send them through filtered logging.
+note: >-
+  Return the error to main for fatal failures. For recoverable failures, choose warn! or debug! at the call site and add operation-specific context.
+rule:
+  pattern: log::error!($$$ARGS)

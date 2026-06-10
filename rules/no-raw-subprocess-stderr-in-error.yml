@@ -1,0 +1,9 @@
+id: no-raw-subprocess-stderr-in-error
+language: Rust
+severity: error
+message: Normalize subprocess stderr before returning it as an error.
+note: >-
+  Pass output.stderr to util::subprocess_error, then return that normalized message with anyhow! or bail!. Add operation context at the caller.
+rule:
+  kind: macro_invocation
+  regex: (?s)^(anyhow|bail)!\(.*String::from_utf8_lossy\(&[A-Za-z_][A-Za-z0-9_]*\.stderr\).*\)$
