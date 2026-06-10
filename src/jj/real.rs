@@ -5,7 +5,9 @@
 //! [`JjCli::new`] and reused for every subsequent gix operation.
 
 use super::{CommitInfo, Jj, PushedBookmark};
+use crate::util::subprocess_error;
 use anyhow::{Context, Result, anyhow};
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use tokio::process::Command;
 
@@ -134,17 +136,9 @@ impl Jj for JjCli {
     }
 
     async fn push(&self, rev: &str, remote: String) -> Result<()> {
-        let status = Command::new("jj")
-            .args(["git", "push", "--remote", &remote, "-c", rev])
-            .status()
+        run_jj_passthrough(&["git", "push", "--remote", &remote, "-c", rev])
             .await
-            .context("failed to spawn `jj`")?;
-        if !status.success() {
-            return Err(anyhow!(
-                "`jj git push --remote {remote} -c {rev}` failed with {status}"
-            ));
-        }
-        Ok(())
+            .context("pushing revision")
     }
 
     async fn trunk_branch(&self) -> Result<Option<String>> {
@@ -192,15 +186,9 @@ impl Jj for JjCli {
     }
 
     async fn git_import(&self) -> Result<()> {
-        let status = Command::new("jj")
-            .args(["git", "import"])
-            .status()
+        run_jj_passthrough(&["git", "import"])
             .await
-            .context("failed to spawn `jj`")?;
-        if !status.success() {
-            return Err(anyhow!("`jj git import` failed with {status}"));
-        }
-        Ok(())
+            .context("importing Git state")
     }
 
     async fn eval_template(
@@ -274,6 +262,7 @@ async fn workspace_root() -> Result<PathBuf> {
 }
 
 async fn run_jj(args: &[&str]) -> Result<Vec<u8>> {
+    log_jj_command(args);
     let output = Command::new("jj")
         .arg("--ignore-working-copy")
         .args(args)
@@ -281,10 +270,37 @@ async fn run_jj(args: &[&str]) -> Result<Vec<u8>> {
         .await
         .context("failed to spawn `jj`")?;
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(anyhow!("`jj {}` failed: {}", args.join(" "), stderr.trim()));
+        return Err(anyhow!("{}", subprocess_error(&output.stderr)));
     }
     Ok(output.stdout)
+}
+
+fn log_jj_command(args: &[&str]) {
+    let display_args = ["jj", "--ignore-working-copy"]
+        .into_iter()
+        .chain(args.iter().copied());
+    log::debug!("running {}", shell_words::join(display_args));
+}
+
+async fn run_jj_passthrough(args: &[&str]) -> Result<()> {
+    log_jj_command(args);
+    let output = Command::new("jj")
+        .arg("--ignore-working-copy")
+        .args(args)
+        .output()
+        .await
+        .context("failed to spawn `jj`")?;
+    if !output.status.success() {
+        return Err(anyhow!("{}", subprocess_error(&output.stderr)));
+    }
+    std::io::stdout()
+        .lock()
+        .write_all(&output.stdout)
+        .context("writing `jj` stdout")?;
+    std::io::stderr()
+        .lock()
+        .write_all(&output.stderr)
+        .context("writing `jj` stderr")
 }
 
 async fn run_jj_strs(args: &[String]) -> Result<Vec<u8>> {

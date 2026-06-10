@@ -4,7 +4,6 @@ use crate::{
     config::AutoMergeMethod,
     gh::{CreatePrRequest, Gh, remote},
     jj::{self, Jj, JjExt},
-    logging::ResultExt,
     pr::{
         editor::{self, ApplyChangesCtx, Editor, resolve_editor_argv},
         frontmatter::Frontmatter,
@@ -202,7 +201,11 @@ where
                 if let Some(a) = &ancestor {
                     return Some(a.clone());
                 }
-                jj.trunk_branch().await.log_err().ok().flatten()
+                jj.trunk_branch()
+                    .await
+                    .inspect_err(|e| log::debug!("could not detect trunk bookmark: {e:#}"))
+                    .ok()
+                    .flatten()
             },
             "could not detect base branch: `--base` not passed, no ancestor \
              bookmark on the stack, jj `trunk()` resolves to nothing, and \
@@ -247,7 +250,10 @@ where
 
     let editor_argv = resolve_editor_argv(editor_argv.as_deref(), env)?;
     let diff_preview = if *show_diffs {
-        jj.diff(&title_revset).await.log_err().ok()
+        jj.diff(&title_revset)
+            .await
+            .inspect_err(|e| log::debug!("could not render diff preview: {e:#}"))
+            .ok()
     } else {
         None
     };

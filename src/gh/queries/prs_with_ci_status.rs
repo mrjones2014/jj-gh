@@ -1,6 +1,3 @@
-use crate::logging::ResultExt;
-use anyhow::Context;
-
 // required to satisfy GraphQL interfaces for the `PullRequest` type
 type GitObjectID = String;
 type DateTime = String;
@@ -123,9 +120,7 @@ impl From<prs_with_ci_status_internal::ResponseData> for Vec<PrWithCiStatus> {
                     // PR numbers will always fit in a u64, this is fine.
                     number: number
                         .try_into()
-                        .context("Encountered invalid PR number")
-                        .log_err()
-                        .unwrap(),
+                        .expect("GitHub PR number should fit in u64"),
                     url,
                     title,
                     merged,

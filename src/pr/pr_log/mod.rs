@@ -18,6 +18,7 @@ use crate::{
         inject::{TemplateAliases, escape_jj_string},
     },
     ui::Spinner,
+    util::subprocess_error,
 };
 use anyhow::{Context, Result, anyhow};
 use jj_gh_config_derive::subcommand_args;
@@ -152,10 +153,14 @@ pub async fn run(gh: &impl Gh, jj: &impl Jj, args: &PrLogArgs) -> Result<()> {
     }
     cmd.args(jj_log_args);
 
-    let status = cmd.status().await.context("failed to spawn `jj log`")?;
-    if !status.success() {
-        return Err(anyhow!("`jj log` failed with {status}"));
+    let output = cmd.output().await.context("failed to spawn `jj log`")?;
+    std::io::Write::write_all(&mut std::io::stdout().lock(), &output.stdout)
+        .context("writing `jj log` output")?;
+    if !output.status.success() {
+        return Err(anyhow!("{}", subprocess_error(&output.stderr)));
     }
+    std::io::Write::write_all(&mut std::io::stderr().lock(), &output.stderr)
+        .context("writing `jj log` stderr")?;
     Ok(())
 }
 

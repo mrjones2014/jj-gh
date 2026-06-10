@@ -5,26 +5,37 @@ use flexi_logger::{
     AdaptiveFormat, DeferredNow, FlexiLoggerError, LogSpecification, Logger, LoggerHandle,
 };
 use log::Record;
-use std::fmt::Display;
+use std::{
+    fmt::Display,
+    io::{IsTerminal, Write as _},
+};
 
 pub use log::{LevelFilter, debug, error, info, warn};
 
 const ENV_FILTER: &str = "JJ_GH_LOG";
 
-pub trait ResultExt {
-    #[must_use]
-    fn log_err(self) -> Self;
-}
-
-impl<T, E> ResultExt for Result<T, E>
-where
-    E: Display,
-{
-    fn log_err(self) -> Self {
-        if let Err(e) = &self {
-            log::error!("{e}");
-        }
-        self
+/// Print a fatal error directly, bypassing log filters and logger startup.
+pub fn fatal(error: impl Display) {
+    let mut stderr = std::io::stderr().lock();
+    if std::io::stderr().is_terminal() {
+        let message = indent_continuations(&error.to_string(), 8);
+        let (tag, bg) = level_palette(log::Level::Error);
+        let tag_style = Style::new()
+            .fg_color(Some(Color::Ansi(AnsiColor::White)))
+            .bg_color(Some(Color::Ansi(bg)))
+            .bold();
+        let msg_style = Style::new().fg_color(Some(Color::Ansi(bg)));
+        let _ = writeln!(
+            stderr,
+            "{}{tag}{} {}{message}{}",
+            tag_style.render(),
+            tag_style.render_reset(),
+            msg_style.render(),
+            msg_style.render_reset(),
+        );
+    } else {
+        let message = indent_continuations(&error.to_string(), 6);
+        let _ = writeln!(stderr, "ERROR {message}");
     }
 }
 
@@ -63,6 +74,7 @@ fn pretty_format(
     record: &Record,
 ) -> std::io::Result<()> {
     let (tag, bg) = level_palette(record.level());
+    let message = indent_continuations(&record.args().to_string(), 8);
     let fg = if matches!(record.level(), log::Level::Warn) {
         AnsiColor::Black
     } else {
@@ -79,7 +91,7 @@ fn pretty_format(
         tag_style.render(),
         tag_style.render_reset(),
         msg_style.render(),
-        record.args(),
+        message,
         msg_style.render_reset(),
     )?;
     if matches!(record.level(), log::Level::Debug | log::Level::Trace)
@@ -96,5 +108,27 @@ fn plain_format(
     _now: &mut DeferredNow,
     record: &Record,
 ) -> std::io::Result<()> {
-    write!(w, "{:5} {}", record.level(), record.args())
+    write!(
+        w,
+        "{:5} {}",
+        record.level(),
+        indent_continuations(&record.args().to_string(), 6)
+    )
+}
+
+fn indent_continuations(message: &str, width: usize) -> String {
+    message.replace('\n', &format!("\n{}", " ".repeat(width)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::indent_continuations;
+
+    #[test]
+    fn continuation_lines_align_after_prefix() {
+        assert_eq!(
+            indent_continuations("first\nsecond\nthird", 6),
+            "first\n      second\n      third"
+        );
+    }
 }
