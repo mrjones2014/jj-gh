@@ -379,9 +379,26 @@ auto_merge_method: "merge" # one of "merge", "squash", "rebase"
 
 ## GitHub token permissions
 
-The token supplied via `gh_askpass`, `gh_token`, `$JJ_GH_TOKEN`, or `$GH_TOKEN` needs a few permissions to function.
+I recommend using either classic or OAuth tokens, as certain functionality is not possible with fine-grained tokens due to certain
+data behing behind permissions that do not exist for fine-grained tokens.
 
-**Fine-grained personal access token** (preferred), with access to the target repositories:
+**OAuth token:**
+
+Login with the browser flow, then no further configuration is needed; `jj-gh` will check `gh auth token` for a token source by default.
+
+```sh
+gh auth login
+```
+
+**Classic personal access token:**
+
+- Private repos: `repo` (full control).
+- Public repos only: `public_repo` is sufficient for `pr create` and `pr fetch`.
+
+**Fine-grained personal access token**, with access to the target repositories:
+
+Note that some functionality may not work with fine-grained tokens. Some data in the GitHub API are gated by permissions which
+are not possible to grant to fine-grained tokens. See: [#167](https://github.com/mrjones2014/jj-gh/issues/167) for more information.
 
 | Permission      | Level          | Used by                                                                                         |
 | --------------- | -------------- | ----------------------------------------------------------------------------------------------- |
@@ -390,11 +407,6 @@ The token supplied via `gh_askpass`, `gh_token`, `$JJ_GH_TOKEN`, or `$GH_TOKEN` 
 | Contents        | Read           | `pr create` (resolving the base branch ref), `pr fetch` (fetching `refs/pull/<n>/head` via git) |
 | Pull requests   | Read and write | `pr create` (list + create, enable auto-merge), `pr fetch` (get)                                |
 | Issues          | Read and write | `pr create` when applying labels (GitHub labels go through the Issues API)                      |
-
-**Classic personal access token:**
-
-- Private repos: `repo` (full control).
-- Public repos only: `public_repo` is sufficient for `pr create` and `pr fetch`.
 
 If you don't apply labels, you can drop the Issues permission. PRs are treated as Issues for the purposes of applying labels in GitHub's API.
 
