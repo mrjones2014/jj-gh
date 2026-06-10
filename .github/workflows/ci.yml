@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [jj-gh, clippy, nextest, treefmt, graphql-validate, hm-module-schema, docs, release-plz-patched]
+        target: [jj-gh, clippy, nextest, treefmt, ast-grep, graphql-validate, hm-module-schema, docs, release-plz-patched]
     steps:
       - uses: wimpysworld/nothing-but-nix@main
       - uses: actions/checkout@v6

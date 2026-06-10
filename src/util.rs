@@ -3,6 +3,19 @@
 use anyhow::{Result, anyhow};
 use std::future::Future;
 
+/// Normalize stderr from a subprocess for inclusion in a user-facing error.
+#[must_use]
+pub fn subprocess_error(stderr: &[u8]) -> String {
+    let message = String::from_utf8_lossy(stderr);
+    let message = message.trim();
+    let message = message.strip_prefix("Error: ").unwrap_or(message);
+    if message.is_empty() {
+        "command failed without error output".to_string()
+    } else {
+        message.to_string()
+    }
+}
+
 /// Pair of an explicit override (e.g. CLI flag) and a config-supplied
 /// last-resort default. Used by `subcommand_args!` for
 /// `#[config(fallback = "...")]` fields where intermediate runtime sources
@@ -60,6 +73,27 @@ impl<T: Clone> EvalWithCfgFallback<T> {
 mod tests {
     use super::*;
     use std::cell::Cell;
+
+    #[test]
+    fn subprocess_error_removes_rust_style_prefix() {
+        assert_eq!(
+            subprocess_error(b"Error: revision does not exist\nCaused by:\nother"),
+            "revision does not exist\nCaused by:\nother"
+        );
+    }
+
+    #[test]
+    fn subprocess_error_preserves_other_messages() {
+        assert_eq!(
+            subprocess_error(b"fatal: bad revision\n"),
+            "fatal: bad revision"
+        );
+    }
+
+    #[test]
+    fn subprocess_error_handles_empty_stderr() {
+        assert_eq!(subprocess_error(b""), "command failed without error output");
+    }
 
     fn pair(cli: Option<&str>, fallback: Option<&str>) -> EvalWithCfgFallback<String> {
         EvalWithCfgFallback::new(cli.map(str::to_string), fallback.map(str::to_string))

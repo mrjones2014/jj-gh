@@ -1,0 +1,9 @@
+id: no-space-joined-argv-in-log
+snapshots:
+  ? |
+    log::debug!("running {}", args.join(" "));
+  : labels:
+      - source: log::debug!("running {}", args.join(" "))
+        style: primary
+        start: 0
+        end: 41

@@ -30,6 +30,7 @@ use crate::{
         pr_log::{PR_LOG_TEMPLATE, build_aliases},
         restack::RestackArgs,
     },
+    util::subprocess_error,
 };
 use anyhow::{Context, Result, anyhow};
 use crossterm::{
@@ -841,10 +842,7 @@ async fn capture_log(ctx: &RestackContext, args: &RestackArgs) -> Result<String>
         .await
         .context("spawning `jj log` for restack")?;
     if !output.status.success() {
-        return Err(anyhow!(
-            "`jj log` failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
+        return Err(anyhow!("{}", subprocess_error(&output.stderr)));
     }
     drop(tmp);
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())

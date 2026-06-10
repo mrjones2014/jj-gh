@@ -1,0 +1,9 @@
+id: no-raw-subprocess-stderr-in-error
+snapshots:
+  ? |
+    return Err(anyhow!("{}", String::from_utf8_lossy(&output.stderr)));
+  : labels:
+      - source: anyhow!("{}", String::from_utf8_lossy(&output.stderr))
+        style: primary
+        start: 11
+        end: 65

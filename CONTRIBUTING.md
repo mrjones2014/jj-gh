@@ -6,6 +6,10 @@
 
 This is so that [release-plz](https://release-plz.dev/) can properly categorize things in `CHANGELOG.md`.
 
+## ast-grep
+
+We use [ast-grep](https://ast-grep.github.io) for some custom linting rules. I highly recommend setting up the [editor integration](https://ast-grep.github.io/guide/tools/editors.html).
+
 ## With Nix (recommended)
 
 **Requirements:**
@@ -71,5 +75,7 @@ treefmt               # format all files
 cargo nextest run           # run tests (or `cargo nt` alias)
 cargo clippy --all-targets  # run clippy lints
 cargo check --all-targets   # run checks
+ast-grep scan --error       # enforce structural hygiene rules
+ast-grep test               # test structural hygiene rules and diagnostics
 cargo run -- pr help        # run the CLI
 ```

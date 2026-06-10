@@ -122,6 +122,10 @@
             builtins.toJSON (builtins.sort builtins.lessThan names)
           );
         treefmtEval = treefmt-nix.lib.evalModule pkgs (import ./nix/treefmt.nix { inherit rustToolchain; });
+        astGrepSrc = pkgs.lib.fileset.toSource {
+          root = ./.;
+          fileset = ./.;
+        };
         gen-docs-app = pkgs.writeShellApplication {
           name = "gen-docs";
           runtimeInputs = [
@@ -200,6 +204,7 @@
             pkgs.cargo-nextest
             pkgs.cargo-semver-checks
             pkgs.cargo-udeps
+            pkgs.ast-grep
             pkgs.jujutsu
             pkgs.rust-analyzer
             treefmtEval.config.build.wrapper
@@ -224,6 +229,12 @@
             }
           );
           treefmt = treefmtEval.config.build.check self;
+          ast-grep = pkgs.runCommand "ast-grep-check" { nativeBuildInputs = [ pkgs.ast-grep ]; } ''
+            cd ${astGrepSrc}
+            ast-grep scan --error
+            ast-grep test
+            touch $out
+          '';
           graphql-validate =
             pkgs.runCommand "graphql-validate"
               {

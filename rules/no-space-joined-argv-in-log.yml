@@ -1,0 +1,9 @@
+id: no-space-joined-argv-in-log
+language: Rust
+severity: error
+message: Render logged argv with shell_words::join so quoting remains unambiguous.
+note: >-
+  Replace argv.join(" ") with shell_words::join(argv). Include the executable and all fixed arguments in argv before rendering.
+rule:
+  kind: macro_invocation
+  regex: (?s)^log::(debug|info|warn|error|trace)!\(.*\.join\(" "\).*\)$

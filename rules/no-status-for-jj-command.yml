@@ -1,0 +1,15 @@
+id: no-status-for-jj-command
+language: Rust
+severity: error
+message: Capture jj output and normalize failures; inherited stderr causes duplicate error messages.
+note: >-
+  Use Command::output(), return util::subprocess_error(&output.stderr) when status is unsuccessful, and deliberately forward stdout/stderr on success when passthrough behavior is required.
+rule:
+  all:
+    - pattern: $CMD.status()
+    - inside:
+        kind: function_item
+        has:
+          pattern: Command::new("jj")
+          stopBy: end
+        stopBy: end
