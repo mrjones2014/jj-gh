@@ -1,0 +1,9 @@
+id: prefer-turbofish-over-let-type-ascription
+language: Rust
+severity: error
+message: Put the type on the producing expression instead of the let binding.
+note: Prefer turbofish such as collect::<Vec<_>>(), parse::<Type>(), or typed constructors such as Vec::<Type>::new().
+rule:
+  any:
+    - pattern: 'let $BINDING: $TYPE = $VALUE;'
+    - pattern: 'let mut $BINDING: $TYPE = $VALUE;'
