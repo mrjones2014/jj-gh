@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.5](https://github.com/mrjones2014/jj-gh/compare/jj-gh-v0.2.4...jj-gh-v0.2.5) - 2026-06-11
+
+### Fixed
+
+- *(cli)* Clean up config loader and macro, improve responsiveness
+- *(cli)* Fix color regression by cleaning up & standardizing cmd runner
+- *(jj)* Stream output for cmds where we don't need to parse its STDOUT
+- *(log)* Improve logging readability in many areas
+- *(remotes)* Detect default remote instead of relying on custom config
+
+### Other
+
+- *(cli)* Reorganize modules
+- *(docs)* Clarify details about GitHub tokens
+- Merge pull request #164 from mrjones2014/mrj/push-puqtnponxmuw
+- *(docs)* update README.md with Usage and Tips and Tricks sections
+
 ## [0.2.4](https://github.com/mrjones2014/jj-gh/compare/jj-gh-v0.2.3...jj-gh-v0.2.4) - 2026-06-05
 
 ### Added

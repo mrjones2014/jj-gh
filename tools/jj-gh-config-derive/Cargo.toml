@@ -2,7 +2,7 @@
 name = "jj-gh-config-derive"
 edition = "2024"
 license = "MIT"
-version = "0.1.0"
+version = "0.1.1"
 repository = "https://github.com/mrjones2014/jj-gh"
 description = "You are probably looking for the `jj-gh` crate instead."
 

@@ -2215,7 +2215,7 @@ dependencies = [
 
 [[package]]
 name = "jj-gh"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "anstyle",
  "anyhow",
@@ -2246,7 +2246,7 @@ dependencies = [
 
 [[package]]
 name = "jj-gh-config-derive"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "proc-macro2",
  "quote",
