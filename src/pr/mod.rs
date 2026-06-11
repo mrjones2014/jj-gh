@@ -21,6 +21,7 @@ use crate::{
         self, Jj,
         inject::{TemplateAliases, escape_jj_string},
     },
+    ui::Spinner,
     pr::{
         auto_merge::{AutoMergeArgs, AutoMergeArgsInput},
         editor::{
@@ -116,23 +117,36 @@ pub enum PrAction {
 /// calls, the editor round-trip, or any sub-handler (`create`, `fetch`,
 /// `auto-merge`).
 pub async fn dispatch(global: GlobalOptsInput, action: PrAction) -> Result<()> {
-    let mut fig = config::load_figment().merge(Serialized::defaults(&global));
-    fig = match &action {
-        PrAction::Create(a) => fig.merge(Serialized::defaults(a)),
-        PrAction::Fetch(a) => fig.merge(Serialized::defaults(a)),
-        PrAction::AutoMerge(a) => fig.merge(Serialized::defaults(a)),
-        PrAction::Edit(a) => fig.merge(Serialized::defaults(a)),
-        PrAction::Log(a) => fig.merge(Serialized::defaults(a)),
-        PrAction::Restack(a) => fig.merge(Serialized::defaults(a)),
-        PrAction::RetryFailed(a) => fig.merge(Serialized::defaults(a)),
-    };
-    let config = config::extract(&fig)?;
-    let globals = GlobalOpts::resolve(global, &config);
+    // Show feedback immediately: the eager startup below shells out to `jj` and
+    // `gh` several times, which can take a few seconds on a cold cache or large
+    // repo. The spinner is a no-op when stderr is not a TTY.
+    let startup = Spinner::start("Starting up");
 
-    let token = auth::resolve_token(&config).await?;
-    let jj = jj::real::JjCli::new().await?;
+    // Discovering the workspace (`jj workspace root` + gix) is independent of
+    // config/auth, so overlap the two cold-start chains. Within the config
+    // chain, auth must run after config loads (it reads `gh_askpass`/`gh_token`).
+    let jj_fut = jj::real::JjCli::new();
+    let cfg_auth_fut = async {
+        let mut fig = config::load_figment().merge(Serialized::defaults(&global));
+        fig = match &action {
+            PrAction::Create(a) => fig.merge(Serialized::defaults(a)),
+            PrAction::Fetch(a) => fig.merge(Serialized::defaults(a)),
+            PrAction::AutoMerge(a) => fig.merge(Serialized::defaults(a)),
+            PrAction::Edit(a) => fig.merge(Serialized::defaults(a)),
+            PrAction::Log(a) => fig.merge(Serialized::defaults(a)),
+            PrAction::Restack(a) => fig.merge(Serialized::defaults(a)),
+            PrAction::RetryFailed(a) => fig.merge(Serialized::defaults(a)),
+        };
+        let config = config::extract(&fig)?;
+        let globals = GlobalOpts::resolve(global, &config);
+        let token = auth::resolve_token(&config).await?;
+        anyhow::Ok((config, globals, token))
+    };
+    let (jj, (config, globals, token)) = tokio::try_join!(jj_fut, cfg_auth_fut)?;
+
     let gh = gh::real::OctocrabGh::new(&token)?;
     let editor = TempfileEditor;
+    startup.stop();
     match action {
         PrAction::AutoMerge(input) => {
             let args = AutoMergeArgs::resolve(input, &config, &globals);

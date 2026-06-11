@@ -107,6 +107,34 @@ pub fn capture_sync(argv: &[&str]) -> Option<Vec<u8>> {
     output.status.success().then_some(output.stdout)
 }
 
+/// Like [`capture_sync`] but for several commands at once: every child is
+/// spawned before any is waited on, so independent cold-start subprocesses
+/// overlap instead of running back-to-back. Results are positional; each entry
+/// is `None` on spawn failure or non-zero exit.
+pub fn capture_sync_batch(argvs: &[&[&str]]) -> Vec<Option<Vec<u8>>> {
+    use std::process::{Command, Stdio};
+    let children: Vec<Option<std::process::Child>> = argvs
+        .iter()
+        .map(|argv| {
+            let (prog, rest) = argv.split_first()?;
+            Command::new(prog)
+                .args(rest)
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()
+                .ok()
+        })
+        .collect();
+    children
+        .into_iter()
+        .map(|child| {
+            let output = child?.wait_with_output().ok()?;
+            output.status.success().then_some(output.stdout)
+        })
+        .collect()
+}
+
 fn split<'a>(argv: &'a [&'a str]) -> Result<(&'a str, &'a [&'a str])> {
     argv.split_first()
         .map(|(prog, rest)| (*prog, rest))

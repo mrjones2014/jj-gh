@@ -9,6 +9,7 @@ mod fs;
 mod gh;
 mod git;
 mod jj;
+mod macro_support;
 mod pr;
 mod proc;
 mod ui;

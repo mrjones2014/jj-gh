@@ -584,10 +584,10 @@ pub fn subcommand_args(input: TokenStream) -> TokenStream {
                 let inner = option_inner(fty).unwrap_or(fty.clone());
                 resolved_fields.push(quote! {
                     #(#docs)*
-                    pub #fname: crate::util::EvalWithCfgFallback<#inner>,
+                    pub #fname: crate::macro_support::EvalWithCfgFallback<#inner>,
                 });
                 resolve_inits.push(quote! {
-                    #fname: crate::util::EvalWithCfgFallback::new(
+                    #fname: crate::macro_support::EvalWithCfgFallback::new(
                         input.#fname,
                         ::std::clone::Clone::clone(&config.#key),
                     ),
@@ -614,7 +614,7 @@ pub fn subcommand_args(input: TokenStream) -> TokenStream {
     }
 
     // Compile-time type checks: each #[config] field's local type must match
-    // the schema storage type alias under `crate::config::__schema`.
+    // the schema storage type alias under `crate::macro_support::__schema`.
     let type_checks = fields.iter().filter_map(|f| {
         let _ = f.config.as_ref()?;
         let fty = &f.ty;
@@ -626,7 +626,7 @@ pub fn subcommand_args(input: TokenStream) -> TokenStream {
         );
         Some(quote! {
             #[expect(dead_code)]
-            const #check_name: fn(#fty) -> crate::config::__schema::#key = ::std::convert::identity;
+            const #check_name: fn(#fty) -> crate::macro_support::__schema::#key = ::std::convert::identity;
         })
     });
 
@@ -641,10 +641,10 @@ pub fn subcommand_args(input: TokenStream) -> TokenStream {
         (
             quote! {
                 /// Resolved globals (remote, askpass, log options, ...).
-                pub globals: crate::cli::GlobalOpts,
+                pub globals: crate::macro_support::GlobalOpts,
             },
             quote!(globals: ::std::clone::Clone::clone(globals),),
-            quote!(, globals: &crate::cli::GlobalOpts),
+            quote!(, globals: &crate::macro_support::GlobalOpts),
             quote!(::std::fmt::Debug),
         )
     };
@@ -668,7 +668,7 @@ pub fn subcommand_args(input: TokenStream) -> TokenStream {
             #[allow(clippy::allow_attributes, deprecated)]
             pub fn resolve(
                 input: #input_name,
-                config: &crate::config::Config
+                config: &crate::macro_support::Config
                 #resolve_extra_param
             ) -> Self {
                 Self {
