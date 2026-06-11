@@ -1,5 +1,19 @@
 # Contributing
 
+Using Nix (or [Lix](https://lix.systems/)) is recommended but not required.
+
+<!--toc:start-->
+
+- [Contributing](#contributing)
+  - [Commits](#commits)
+  - [ast-grep](#ast-grep)
+  - [With Nix (recommended)](#with-nix-recommended)
+    - [Optional configuration](#optional-configuration)
+  - [With Rustup](#with-rustup)
+  - [Refreshing the GitHub GraphQL schema](#refreshing-the-github-graphql-schema)
+  - [Developing](#developing)
+  <!--toc:end-->
+
 ## Commits
 
 **Please use [conventional commits](https://www.conventionalcommits.org/en/v1.0.0/).** PRs must also be titled in the same format.
