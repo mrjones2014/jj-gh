@@ -19,12 +19,9 @@ pub fn fatal(error: impl Display) {
     let mut stderr = std::io::stderr().lock();
     if std::io::stderr().is_terminal() {
         let message = indent_continuations(&error.to_string(), 8);
-        let (tag, bg) = level_palette(log::Level::Error);
-        let tag_style = Style::new()
-            .fg_color(Some(Color::Ansi(fg_for(bg))))
-            .bg_color(Some(Color::Ansi(bg)))
-            .bold();
-        let msg_style = Style::new().fg_color(Some(Color::Ansi(bg)));
+        let (tag, color) = level_palette(log::Level::Error);
+        let tag_style = Style::new().fg_color(Some(Color::Ansi(color))).bold();
+        let msg_style = Style::new().fg_color(Some(Color::Ansi(color)));
         let _ = writeln!(
             stderr,
             "{}{tag}{} {}{message}{}",
@@ -68,42 +65,15 @@ fn level_palette(level: log::Level) -> (&'static str, AnsiColor) {
     }
 }
 
-/// Pick a readable foreground for a solid-background tag. Light backgrounds get
-/// black text, dark ones get white, so every level tag keeps enough contrast
-/// regardless of terminal theme.
-fn fg_for(bg: AnsiColor) -> AnsiColor {
-    match bg {
-        AnsiColor::Yellow
-        | AnsiColor::Cyan
-        | AnsiColor::Green
-        | AnsiColor::White
-        | AnsiColor::BrightBlack
-        | AnsiColor::BrightRed
-        | AnsiColor::BrightGreen
-        | AnsiColor::BrightYellow
-        | AnsiColor::BrightBlue
-        | AnsiColor::BrightMagenta
-        | AnsiColor::BrightCyan
-        | AnsiColor::BrightWhite => AnsiColor::Black,
-        AnsiColor::Black | AnsiColor::Red | AnsiColor::Blue | AnsiColor::Magenta => {
-            AnsiColor::White
-        }
-    }
-}
-
 fn pretty_format(
     w: &mut dyn std::io::Write,
     _now: &mut DeferredNow,
     record: &Record,
 ) -> std::io::Result<()> {
-    let (tag, bg) = level_palette(record.level());
+    let (tag, color) = level_palette(record.level());
     let message = indent_continuations(&record.args().to_string(), 8);
-    let fg = fg_for(bg);
-    let tag_style = Style::new()
-        .fg_color(Some(Color::Ansi(fg)))
-        .bg_color(Some(Color::Ansi(bg)))
-        .bold();
-    let msg_style = Style::new().fg_color(Some(Color::Ansi(bg)));
+    let tag_style = Style::new().fg_color(Some(Color::Ansi(color))).bold();
+    let msg_style = Style::new().fg_color(Some(Color::Ansi(color)));
     write!(
         w,
         "{}{tag}{} {}{}{}",
