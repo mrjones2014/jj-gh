@@ -124,35 +124,35 @@ pub async fn apply_frontmatter_diff<G: Gh>(
         gh.set_draft(ctx.pr_node_id, after.draft).await?;
     }
 
-    let labels_added: Vec<String> = after
+    let labels_added = after
         .labels
         .iter()
         .filter(|l| !before.labels.contains(l))
         .cloned()
-        .collect();
-    let labels_removed_ids: Vec<String> = before
+        .collect::<Vec<String>>();
+    let labels_removed_ids = before
         .labels
         .iter()
         .filter(|name| !after.labels.contains(name))
         .filter_map(|name| ctx.before_label_ids.get(name).cloned())
-        .collect();
+        .collect::<Vec<String>>();
     gh.add_labels(ctx.owner, ctx.repo, ctx.pr_number, &labels_added)
         .await?;
     gh.remove_labels(ctx.pr_node_id, &labels_removed_ids)
         .await?;
 
-    let reviewers_added: Vec<Reviewer> = after
+    let reviewers_added = after
         .reviewers
         .iter()
         .filter(|r| !before.reviewers.contains(r))
         .cloned()
-        .collect();
-    let reviewers_removed: Vec<Reviewer> = before
+        .collect::<Vec<Reviewer>>();
+    let reviewers_removed = before
         .reviewers
         .iter()
         .filter(|r| !after.reviewers.contains(r))
         .cloned()
-        .collect();
+        .collect::<Vec<Reviewer>>();
     gh.add_reviewers(ctx.owner, ctx.repo, ctx.pr_number, reviewers_added)
         .await?;
     gh.remove_reviewers(ctx.owner, ctx.repo, ctx.pr_number, reviewers_removed)
@@ -206,11 +206,11 @@ impl Editor for TempfileEditor {
             return Err(anyhow!("editor argv is empty"));
         }
         let tmp_arg = tmp.path().to_string_lossy().into_owned();
-        let full: Vec<&str> = argv
+        let full = argv
             .iter()
             .map(String::as_str)
             .chain(std::iter::once(tmp_arg.as_str()))
-            .collect();
+            .collect::<Vec<&str>>();
         crate::proc::stream(&full).await?;
 
         std::fs::read_to_string(tmp.path()).context("could not read edited buffer")
@@ -273,7 +273,7 @@ mod tests {
 
     #[test]
     fn empty_config_editor_falls_through() {
-        let empty: Vec<String> = vec![];
+        let empty = Vec::<String>::new();
         let env = FakeEnv::with(&[("EDITOR", "vi")]);
         let argv = resolve_editor_argv(Some(&empty), &env).unwrap();
         assert_eq!(argv, vec!["vi".to_string()]);

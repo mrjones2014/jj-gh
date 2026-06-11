@@ -198,7 +198,7 @@ mod tests {
     use super::*;
 
     fn emit_string(shell: Shell) -> String {
-        let mut buf: Vec<u8> = Vec::new();
+        let mut buf = Vec::<u8>::new();
         alias_completions(shell, "pr", SubcommandStr::Pr, &mut buf).unwrap();
         String::from_utf8(buf).unwrap()
     }
@@ -231,7 +231,7 @@ mod tests {
 
     #[test]
     fn unsupported_shell_errors_with_name() {
-        let mut buf: Vec<u8> = Vec::new();
+        let mut buf = Vec::<u8>::new();
         let err = alias_completions(
             Shell::Other("powershell".into()),
             "pr",

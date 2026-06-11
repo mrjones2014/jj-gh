@@ -179,11 +179,14 @@ async fn gather_context<J: Jj, G: Gh>(
     let (owner, repo) = git::url::parse_owner_repo(&origin_url)?;
 
     let bookmarks = jj.pushed_bookmarks(default_remote).await?;
-    let branch_to_local: HashMap<String, String> = bookmarks
+    let branch_to_local = bookmarks
         .iter()
         .map(|b| (b.name.clone(), b.local_commit_id.clone()))
-        .collect();
-    let names: Vec<String> = bookmarks.iter().map(|b| b.name.clone()).collect();
+        .collect::<HashMap<String, String>>();
+    let names = bookmarks
+        .iter()
+        .map(|b| b.name.clone())
+        .collect::<Vec<String>>();
     let prs = gh.local_pulls(&owner, &repo, &names).await?;
     let trunk = jj.trunk_branch().await?;
     let plans = propose_plans(jj, &prs, &branch_to_local, trunk.as_deref()).await?;
@@ -293,7 +296,7 @@ async fn submit<G: Gh>(
     ctx: &RestackContext,
     decisions: &HashMap<u64, Decision>,
 ) -> Result<()> {
-    let updates: Vec<(u64, UpdatePr)> = ctx
+    let updates = ctx
         .plans
         .iter()
         .filter_map(|p| {
@@ -311,7 +314,7 @@ async fn submit<G: Gh>(
                 },
             ))
         })
-        .collect();
+        .collect::<Vec<(u64, UpdatePr)>>();
 
     if updates.is_empty() {
         println!("no PRs updated");
@@ -320,15 +323,15 @@ async fn submit<G: Gh>(
 
     let total = updates.len();
     let spinner = Spinner::start(format!("Updating PRs (0/{total})"));
-    let mut futs: FuturesUnordered<_> = updates
+    let mut futs = updates
         .into_iter()
         .map(|(num, req)| async move {
             let result = gh.update_pr(req).await;
             (num, result)
         })
-        .collect();
+        .collect::<FuturesUnordered<_>>();
 
-    let mut results: Vec<(u64, Result<()>)> = Vec::with_capacity(total);
+    let mut results = Vec::<(u64, Result<()>)>::with_capacity(total);
     while let Some((num, res)) = futs.next().await {
         results.push((num, res));
         spinner.set_message(format!("Updating PRs ({}/{total})", results.len()));

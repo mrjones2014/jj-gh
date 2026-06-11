@@ -93,9 +93,9 @@ mod tests {
             .alias("zeta", r#""z""#)
             .alias("alpha", r#""a""#)
             .to_toml();
-        let parsed: toml::Table = toml::from_str(&toml).unwrap();
+        let parsed = toml::from_str::<toml::Table>(&toml).unwrap();
         let aliases = parsed["template-aliases"].as_table().unwrap();
-        let keys: Vec<&str> = aliases.keys().map(String::as_str).collect();
+        let keys = aliases.keys().map(String::as_str).collect::<Vec<&str>>();
         assert_eq!(keys, vec!["alpha", "zeta"]);
         assert_eq!(aliases["alpha"].as_str(), Some(r#""a""#));
         assert_eq!(aliases["zeta"].as_str(), Some(r#""z""#));
@@ -107,9 +107,9 @@ mod tests {
             .color("zz-label", "yellow")
             .color("aa-label", "green")
             .to_toml();
-        let parsed: toml::Table = toml::from_str(&toml).unwrap();
+        let parsed = toml::from_str::<toml::Table>(&toml).unwrap();
         let colors = parsed["colors"].as_table().unwrap();
-        let keys: Vec<&str> = colors.keys().map(String::as_str).collect();
+        let keys = colors.keys().map(String::as_str).collect::<Vec<&str>>();
         assert_eq!(keys, vec!["aa-label", "zz-label"]);
     }
 
@@ -119,7 +119,7 @@ mod tests {
             .alias("a", r#""x""#)
             .color("c", "red")
             .to_toml();
-        let parsed: toml::Table = toml::from_str(&toml).unwrap();
+        let parsed = toml::from_str::<toml::Table>(&toml).unwrap();
         assert!(parsed.contains_key("template-aliases"));
         assert!(parsed.contains_key("colors"));
     }
@@ -129,7 +129,7 @@ mod tests {
         let toml = TemplateAliases::builder()
             .color("c", r#"weird"name"#)
             .to_toml();
-        let parsed: toml::Table = toml::from_str(&toml).unwrap();
+        let parsed = toml::from_str::<toml::Table>(&toml).unwrap();
         assert_eq!(parsed["colors"]["c"].as_str(), Some(r#"weird"name"#));
     }
 
@@ -137,7 +137,7 @@ mod tests {
     fn alias_body_with_quote_round_trips() {
         let body = r#""https://example.com/""#;
         let toml = TemplateAliases::builder().alias("u", body).to_toml();
-        let parsed: toml::Table = toml::from_str(&toml).unwrap();
+        let parsed = toml::from_str::<toml::Table>(&toml).unwrap();
         assert_eq!(parsed["template-aliases"]["u"].as_str(), Some(body));
     }
 
@@ -172,7 +172,7 @@ mod tests {
             .alias("a", r#""1""#)
             .alias("a", r#""2""#)
             .to_toml();
-        let parsed: toml::Table = toml::from_str(&toml).unwrap();
+        let parsed = toml::from_str::<toml::Table>(&toml).unwrap();
         assert_eq!(parsed["template-aliases"]["a"].as_str(), Some(r#""2""#));
     }
 }

@@ -1,0 +1,21 @@
+id: prefer-turbofish-over-let-type-ascription
+valid:
+  - |
+    let values = items.collect::<Vec<String>>();
+  - |
+    let mut values = Vec::<String>::new();
+  - |
+    let parsed = input.parse::<Config>()?;
+  - |
+    let mut row = 0_u16;
+  - |
+    let Some(value) = optional else {
+        return;
+    };
+invalid:
+  - |
+    let values: Vec<String> = items.collect();
+  - |
+    let mut values: Vec<String> = Vec::new();
+  - |
+    let (left, right): (Vec<String>, Vec<String>) = items.unzip();

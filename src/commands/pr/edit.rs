@@ -95,10 +95,10 @@ where
     } = details;
 
     let before_body = body;
-    let before_label_ids: HashMap<String, String> = labels
+    let before_label_ids = labels
         .iter()
         .map(|l| (l.name.clone(), l.node_id.clone()))
-        .collect();
+        .collect::<HashMap<String, String>>();
     let before_fm = Frontmatter {
         title,
         base: target.base_spec(&base_ref),

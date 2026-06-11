@@ -81,10 +81,10 @@ where
         .await
         .with_context(|| format!("listing workflow runs for PR #{}", pr.number))?;
 
-    let in_progress: Vec<&WorkflowRun> = runs
+    let in_progress = runs
         .iter()
         .filter(|r| r.status != WorkflowRunStatus::Completed)
-        .collect();
+        .collect::<Vec<&WorkflowRun>>();
 
     if *cancel {
         if !in_progress.is_empty() {
@@ -156,13 +156,13 @@ async fn retry_failed_jobs<G: Gh>(
     pr_number: u64,
     runs: &[WorkflowRun],
 ) -> Result<()> {
-    let failed: Vec<&WorkflowRun> = runs
+    let failed = runs
         .iter()
         .filter(|r| {
             r.conclusion
                 .is_some_and(crate::gh::WorkflowRunConclusion::is_retryable_failure)
         })
-        .collect();
+        .collect::<Vec<&WorkflowRun>>();
 
     if failed.is_empty() {
         log::info!("No failed workflow runs to retry on PR #{pr_number}");

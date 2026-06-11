@@ -201,7 +201,7 @@ fn render_log(out: &mut Stdout, state: &UiState, log_height: usize) -> Result<()
         .get(state.cursor_pr_idx)
         .and_then(|n| state.pr_to_line.get(n))
         .copied();
-    let cols: usize = terminal::size().ok().map_or(80, |(c, _)| c.into());
+    let cols = terminal::size().ok().map_or(80, |(c, _)| usize::from(c));
     let viewport_end = (state.scroll_offset + log_height).min(state.log_lines.len());
     for (i, line) in state.log_lines[state.scroll_offset..viewport_end]
         .iter()
@@ -266,7 +266,7 @@ fn apply_bg_highlight(line: &str, bg_code: &str) -> (String, usize) {
 fn render_summary(out: &mut Stdout, state: &UiState, height: usize) -> Result<()> {
     let total_rows = state.plans.len() + 2;
     let visible_rows = height.min(total_rows.saturating_sub(state.summary_scroll));
-    let mut row: u16 = 0;
+    let mut row = 0_u16;
     let mut idx = state.summary_scroll;
     while idx < state.summary_scroll + visible_rows {
         queue!(out, cursor::MoveTo(0, row))?;
@@ -414,7 +414,7 @@ fn render_browse_status(out: &mut Stdout, state: &UiState, cols: u16) -> Result<
     let right = BROWSE_KEYMAP;
     let used = left_plain.chars().count();
     let right_w = right.chars().count();
-    let cols: usize = cols.into();
+    let cols = usize::from(cols);
     if used + 2 + right_w <= cols {
         let pad = cols - used - right_w;
         queue!(
@@ -454,7 +454,7 @@ fn render_picker_status(out: &mut Stdout, state: &UiState, cols: u16) -> Result<
     )?;
     let used = left_plain.chars().count();
     let right_w = PICKER_KEYMAP.chars().count();
-    let cols: usize = cols.into();
+    let cols = usize::from(cols);
     if used + 2 + right_w <= cols {
         let pad = cols - used - right_w;
         queue!(
@@ -480,7 +480,7 @@ fn render_summary_status(out: &mut Stdout, state: &UiState, cols: u16) -> Result
     )?;
     let used = left_plain.chars().count();
     let right_w = SUMMARY_KEYMAP.chars().count();
-    let cols: usize = cols.into();
+    let cols = usize::from(cols);
     if used + 2 + right_w <= cols {
         let pad = cols - used - right_w;
         queue!(
@@ -557,7 +557,7 @@ fn truncate(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         return s.to_string();
     }
-    let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
+    let mut out = s.chars().take(max.saturating_sub(1)).collect::<String>();
     out.push('\u{2026}');
     out
 }
@@ -698,7 +698,7 @@ fn move_cursor(state: &mut UiState, delta: isize) {
         return;
     }
     let len = i64::try_from(state.pr_order.len()).unwrap_or(i64::MAX);
-    let delta: i64 = delta.try_into().expect("Cursor delta out of range");
+    let delta = i64::try_from(delta).expect("Cursor delta out of range");
     let next = (i64::try_from(state.cursor_pr_idx).unwrap_or(0) + delta).clamp(0, len - 1);
     move_cursor_to(state, usize::try_from(next).unwrap_or(0));
 }
@@ -728,7 +728,7 @@ fn visible_log_rows() -> Option<usize> {
 fn scroll_viewport(state: &mut UiState, delta: isize) {
     let height = visible_log_rows().unwrap_or(DEFAULT_LOG_HEIGHT);
     let max_offset = state.log_lines.len().saturating_sub(height);
-    let delta: i64 = delta.try_into().expect("Scroll delta out of range");
+    let delta = i64::try_from(delta).expect("Scroll delta out of range");
     let next = i64::try_from(state.scroll_offset).unwrap_or(0) + delta;
     let clamped = next.max(0);
     state.scroll_offset = usize::try_from(clamped).unwrap_or(0).min(max_offset);
@@ -806,11 +806,11 @@ pub(crate) fn build_base_candidates(ctx: &RestackContext) -> Vec<String> {
 /// renders as-is; we only consume the markers when post-processing the
 /// captured stream.
 async fn capture_log(ctx: &RestackContext, args: &RestackArgs) -> Result<String> {
-    let branch_to_local: HashMap<String, String> = ctx
+    let branch_to_local = ctx
         .bookmarks
         .iter()
         .map(|b| (b.name.clone(), b.local_commit_id.clone()))
-        .collect();
+        .collect::<HashMap<String, String>>();
     let user_body = args
         .template
         .as_deref()
@@ -852,7 +852,7 @@ async fn capture_log(ctx: &RestackContext, args: &RestackArgs) -> Result<String>
 /// displayed line.
 fn parse_sentinel_lines(raw: &str) -> (Vec<String>, HashMap<String, usize>) {
     let mut out_lines = Vec::new();
-    let mut commit_to_line: HashMap<String, usize> = HashMap::new();
+    let mut commit_to_line = HashMap::<String, usize>::new();
     for line in raw.lines() {
         let (cleaned, commit) = strip_sentinel(line);
         if let Some(id) = commit {
@@ -932,11 +932,11 @@ async fn order_prs_topologically<J: Jj>(jj: &J, plans: &[PrPlan]) -> Result<Vec<
         .eval_template(&revset, template, None, false)
         .await
         .context("ordering PRs by topology")?;
-    let commit_to_pr: HashMap<&str, u64> = plans
+    let commit_to_pr = plans
         .iter()
         .map(|p| (p.local_commit_id.as_str(), p.pr_number))
-        .collect();
-    let mut order: Vec<u64> = Vec::with_capacity(plans.len());
+        .collect::<HashMap<&str, u64>>();
+    let mut order = Vec::<u64>::with_capacity(plans.len());
     for line in stdout.lines() {
         let id = line.trim();
         if let Some(&pr) = commit_to_pr.get(id)

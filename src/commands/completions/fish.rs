@@ -13,9 +13,9 @@ pub(super) fn emit<W: Write>(cmd: &Command, alias: &str, out: &mut W) -> Result<
     writeln!(out, "{}", helpers())?;
 
     for sub in &subs {
-        let names: Vec<&str> = std::iter::once(sub.name)
+        let names = std::iter::once(sub.name)
             .chain(sub.aliases.iter().copied())
-            .collect();
+            .collect::<Vec<&str>>();
         for n in &names {
             let line = match &sub.about {
                 Some(about) => format!(
@@ -93,7 +93,7 @@ mod tests {
 
     #[test]
     fn registers_against_jj_and_gates_on_alias() {
-        let mut out: Vec<u8> = Vec::new();
+        let mut out = Vec::<u8>::new();
         emit(&fake_pr_command(), "pr", &mut out).unwrap();
         let s = String::from_utf8(out).unwrap();
 
