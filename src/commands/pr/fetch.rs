@@ -698,7 +698,7 @@ mod tests {
     #[test]
     fn build_fetch_aliases_contains_all_pr_fields() {
         let cfg = build_fetch_aliases(&details()).to_toml();
-        let parsed: toml::Table = toml::from_str(&cfg).unwrap();
+        let parsed = toml::from_str::<toml::Table>(&cfg).unwrap();
         let aliases = parsed["template-aliases"].as_table().unwrap();
         assert_eq!(aliases["pr_number"].as_str(), Some(r#""1234""#));
         assert_eq!(aliases["pr_title"].as_str(), Some(r#""Add the feature""#));
@@ -719,7 +719,7 @@ mod tests {
         d.head_user_login = None;
         d.head_repo_name = None;
         let cfg = build_fetch_aliases(&d).to_toml();
-        let parsed: toml::Table = toml::from_str(&cfg).unwrap();
+        let parsed = toml::from_str::<toml::Table>(&cfg).unwrap();
         let aliases = parsed["template-aliases"].as_table().unwrap();
         assert_eq!(aliases["pr_head_user"].as_str(), Some(r#""""#));
         assert_eq!(aliases["pr_head_repo"].as_str(), Some(r#""""#));

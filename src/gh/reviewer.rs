@@ -142,13 +142,13 @@ mod tests {
         let yaml = noyalib::to_string(&r).unwrap();
         // serde_yml wraps anything starting with `@` (a YAML reserved indicator).
         assert!(yaml.contains("@john"), "yaml was {yaml:?}");
-        let back: Reviewer = noyalib::from_str(&yaml).unwrap();
+        let back = noyalib::from_str::<Reviewer>(&yaml).unwrap();
         assert_eq!(back, r);
     }
 
     #[test]
     fn deserialize_accepts_bare_slug() {
-        let r: Reviewer = noyalib::from_str("john").unwrap();
+        let r = noyalib::from_str::<Reviewer>("john").unwrap();
         assert_eq!(r.slug(), "john");
     }
 }

@@ -133,10 +133,10 @@ pub async fn run(gh: &impl Gh, jj: &impl Jj, args: &PrLogArgs) -> Result<()> {
         .ok_or_else(|| anyhow!("`{remote}` remote is not configured"))?;
     let (owner, repo) = git::url::parse_owner_repo(&origin_url)?;
     let bookmarks = jj.pushed_bookmarks(&remote).await?;
-    let branch_to_local: HashMap<String, String> = bookmarks
+    let branch_to_local = bookmarks
         .iter()
         .map(|b| (b.name.clone(), b.local_commit_id.clone()))
-        .collect();
+        .collect::<HashMap<String, String>>();
     let names = bookmarks.into_iter().map(|b| b.name).collect::<Vec<_>>();
     let prs = gh.local_pulls(&owner, &repo, &names).await?;
     spinner.stop();
@@ -146,7 +146,7 @@ pub async fn run(gh: &impl Gh, jj: &impl Jj, args: &PrLogArgs) -> Result<()> {
 
     // Stream so jj sees a tty and emits color; capturing would strip it.
     let cfg = tmp.path().to_string_lossy().into_owned();
-    let mut cmd: Vec<&str> = vec!["jj", "--config-file", &cfg, "log"];
+    let mut cmd = Vec::<&str>::from(["jj", "--config-file", &cfg, "log"]);
     if !user_set_template(jj_log_args) {
         cmd.extend(["-T", "pr_log"]);
     }
@@ -372,10 +372,10 @@ mod tests {
                 CiStatus::None,
             ),
         ];
-        let map: HashMap<String, String> = prs
+        let map = prs
             .iter()
             .map(|p| (p.head_ref_name.clone(), p.head_sha.clone()))
-            .collect();
+            .collect::<HashMap<String, String>>();
         let expr = if_chain_alias(&prs, &map, |pr| format!(r#""{}""#, pr.number));
         assert_eq!(
             expr,

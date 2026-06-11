@@ -185,10 +185,10 @@ fn discover_layers() -> Vec<PathBuf> {
         ["jj", "config", "path", "--repo"].as_slice(),
         ["jj", "config", "path", "--workspace"].as_slice(),
     ]);
-    let mut out: Vec<PathBuf> = outputs
+    let mut out = outputs
         .iter()
         .filter_map(|o| parse_config_path(o.as_deref()))
-        .collect();
+        .collect::<Vec<PathBuf>>();
     if let Some(p) = std::env::var_os("JJ_GH_EXTRA_CONFIG") {
         out.push(PathBuf::from(p));
     }
@@ -334,8 +334,8 @@ enum SourceError {
 }
 
 fn extract_jj_gh_subtree(contents: &str) -> Result<Option<toml::Table>, SourceError> {
-    let parsed: toml::Value =
-        toml::from_str(contents).map_err(|e| SourceError::Toml(e.to_string()))?;
+    let parsed =
+        toml::from_str::<toml::Value>(contents).map_err(|e| SourceError::Toml(e.to_string()))?;
     let Some(subtree) = parsed.get("jj-gh") else {
         return Ok(None);
     };

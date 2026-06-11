@@ -99,8 +99,8 @@ impl Jj for JjCli {
         if stdout.is_empty() {
             return Ok(None);
         }
-        let bookmarks: Vec<String> =
-            serde_json::from_slice(&stdout).context("could not parse jj bookmarks output")?;
+        let bookmarks = serde_json::from_slice::<Vec<String>>(&stdout)
+            .context("could not parse jj bookmarks output")?;
         Ok(bookmarks.into_iter().next())
     }
 
@@ -153,8 +153,8 @@ impl Jj for JjCli {
         if stdout.is_empty() {
             return Ok(None);
         }
-        let names: Vec<String> =
-            serde_json::from_slice(&stdout).context("could not parse jj bookmarks output")?;
+        let names = serde_json::from_slice::<Vec<String>>(&stdout)
+            .context("could not parse jj bookmarks output")?;
         Ok(names.into_iter().next())
     }
 
@@ -232,14 +232,14 @@ impl Jj for JjCli {
             &template,
         ])
         .await?;
-        let mut bookmarks: Vec<PushedBookmark> = std::str::from_utf8(&stdout)
+        let mut bookmarks = std::str::from_utf8(&stdout)
             .context("jj bookmark list output is not UTF-8")?
             .lines()
             .filter(|l| !l.trim().is_empty())
             .map(|l| {
                 serde_json::from_str(l).with_context(|| format!("parsing bookmark record `{l}`"))
             })
-            .collect::<Result<_>>()?;
+            .collect::<Result<Vec<PushedBookmark>>>()?;
         bookmarks.sort_by(|a, b| a.name.cmp(&b.name));
         bookmarks.dedup_by(|a, b| a.name == b.name);
         Ok(bookmarks)
@@ -276,7 +276,7 @@ async fn run_jj_passthrough(args: &[&str]) -> Result<()> {
 }
 
 async fn run_jj_strs(args: &[String]) -> Result<Vec<u8>> {
-    let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let refs = args.iter().map(String::as_str).collect::<Vec<&str>>();
     run_jj(&refs).await
 }
 
@@ -288,7 +288,7 @@ fn eval_template_argv(
     config_file: Option<&Path>,
     reversed: bool,
 ) -> Vec<String> {
-    let mut argv: Vec<String> = Vec::with_capacity(10);
+    let mut argv = Vec::<String>::with_capacity(10);
     if let Some(path) = config_file {
         argv.push("--config-file".into());
         argv.push(path.to_string_lossy().into_owned());

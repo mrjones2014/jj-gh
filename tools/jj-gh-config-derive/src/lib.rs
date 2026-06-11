@@ -68,9 +68,9 @@ enum EnvKind {
 
 impl Parse for EnvSpec {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        let key: LitStr = input.parse()?;
+        let key = input.parse::<LitStr>()?;
         input.parse::<Token![,]>()?;
-        let kind_ident: Ident = input.parse()?;
+        let kind_ident = input.parse::<Ident>()?;
         let kind = match kind_ident.to_string().as_str() {
             "string" => EnvKind::String,
             "path" => EnvKind::Path,
@@ -121,12 +121,12 @@ impl Parse for SchemaField {
                 passthrough_attrs.push(attr);
             }
         }
-        let name: Ident = input.parse()?;
+        let name = input.parse::<Ident>()?;
         input.parse::<Token![:]>()?;
-        let ty: Type = input.parse()?;
+        let ty = input.parse::<Type>()?;
         input.parse::<Token![=]>()?;
-        let default: Expr = input.parse()?;
-        let _trailing: Option<Token![,]> = input.parse()?;
+        let default = input.parse::<Expr>()?;
+        let _trailing = input.parse::<Option<Token![,]>>()?;
         Ok(SchemaField {
             docs,
             passthrough_attrs,
@@ -228,11 +228,11 @@ pub fn config_schema(input: TokenStream) -> TokenStream {
     let struct_fields = schema.fields.iter().map(|f| {
         let docs = &f.docs;
         let passthrough_attrs = &f.passthrough_attrs;
-        let mut serde_attrs: Vec<TokenStream2> = f
+        let mut serde_attrs = f
             .serde_attrs
             .iter()
             .map(|inner| quote!(#[serde(#inner)]))
-            .collect();
+            .collect::<Vec<TokenStream2>>();
         if is_option(&f.ty) && !touches_skip_serializing(&f.serde_attrs) {
             serde_attrs.push(quote!(#[serde(skip_serializing_if = "Option::is_none")]));
         }
@@ -265,7 +265,7 @@ pub fn config_schema(input: TokenStream) -> TokenStream {
         Some((name.clone(), ty.clone(), read))
     });
 
-    let (env_struct_fields, env_inits): (Vec<_>, Vec<_>) = env_fields
+    let (env_struct_fields, env_inits) = env_fields
         .map(|(name, ty, read)| {
             let struct_field = quote! {
                 #[serde(skip_serializing_if = "Option::is_none")]
@@ -274,7 +274,7 @@ pub fn config_schema(input: TokenStream) -> TokenStream {
             let init = quote! { #name: #read, };
             (struct_field, init)
         })
-        .unzip();
+        .unzip::<_, _, Vec<_>, Vec<_>>();
 
     let schema_aliases = schema.fields.iter().map(|f| {
         let name = &f.name;
@@ -394,9 +394,9 @@ impl Parse for SubcommandArgs {
                 ));
             }
         }
-        let vis: syn::Visibility = input.parse()?;
+        let vis = input.parse::<syn::Visibility>()?;
         input.parse::<Token![struct]>()?;
-        let name: Ident = input.parse()?;
+        let name = input.parse::<Ident>()?;
         let content;
         syn::braced!(content in input);
         let mut fields = Vec::new();
@@ -417,8 +417,8 @@ impl Parse for ArgField {
         let raw_attrs = input.call(Attribute::parse_outer)?;
         let mut docs = Vec::new();
         let mut passthrough_attrs = Vec::new();
-        let mut arg: Option<Attribute> = None;
-        let mut config: Option<ConfigLink> = None;
+        let mut arg = Option::<Attribute>::None;
+        let mut config = Option::<ConfigLink>::None;
         for attr in raw_attrs {
             if attr.path().is_ident("doc") {
                 docs.push(attr);
@@ -442,11 +442,11 @@ impl Parse for ArgField {
                 passthrough_attrs.push(attr);
             }
         }
-        let _vis: syn::Visibility = input.parse()?;
-        let name: Ident = input.parse()?;
+        let _vis = input.parse::<syn::Visibility>()?;
+        let name = input.parse::<Ident>()?;
         input.parse::<Token![:]>()?;
-        let ty: Type = input.parse()?;
-        let _trailing: Option<Token![,]> = input.parse()?;
+        let ty = input.parse::<Type>()?;
+        let _trailing = input.parse::<Option<Token![,]>>()?;
         Ok(ArgField {
             docs,
             passthrough_attrs,
@@ -462,15 +462,15 @@ fn parse_config_attr(attr: &Attribute) -> syn::Result<ConfigLink> {
     match &attr.meta {
         syn::Meta::Path(_) => Ok(ConfigLink::Same),
         syn::Meta::List(list) => {
-            let mut maps_to: Option<LitStr> = None;
-            let mut fallback: Option<LitStr> = None;
+            let mut maps_to = Option::<LitStr>::None;
+            let mut fallback = Option::<LitStr>::None;
             list.parse_nested_meta(|nested| {
                 if nested.path.is_ident("maps_to") {
-                    let value: LitStr = nested.value()?.parse()?;
+                    let value = nested.value()?.parse::<LitStr>()?;
                     maps_to = Some(value);
                     Ok(())
                 } else if nested.path.is_ident("fallback") {
-                    let value: LitStr = nested.value()?.parse()?;
+                    let value = nested.value()?.parse::<LitStr>()?;
                     fallback = Some(value);
                     Ok(())
                 } else {

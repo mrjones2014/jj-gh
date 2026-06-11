@@ -25,6 +25,7 @@ use anyhow::{Context, Result, anyhow};
 use graphql_client::GraphQLQuery;
 use octocrab::Octocrab;
 use secrecy::{ExposeSecret, SecretString};
+use std::collections::HashSet;
 
 /// Production [`Gh`] impl wrapping an authenticated `octocrab` client.
 pub struct OctocrabGh {
@@ -66,9 +67,9 @@ impl Gh for OctocrabGh {
             head_ref_name: head_branch.to_string(),
         };
         let body = FindOpenPrInternal::build_query(vars);
-        let data: FindOpenPrResponseData = self
+        let data = self
             .octo
-            .graphql(&body)
+            .graphql::<FindOpenPrResponseData>(&body)
             .await
             .map_err(humanize)
             .with_context(|| format!("listing PRs for {owner}/{repo} head={head_spec}"))?;
@@ -104,9 +105,9 @@ impl Gh for OctocrabGh {
             branch_qualified_name: format!("refs/heads/{branch}"),
         };
         let body = LookupBaseInternal::build_query(vars);
-        let data: LookupBaseResponseData = self
+        let data = self
             .octo
-            .graphql(&body)
+            .graphql::<LookupBaseResponseData>(&body)
             .await
             .map_err(humanize)
             .with_context(|| format!("looking up {owner}/{repo} base={branch}"))?;
@@ -129,9 +130,9 @@ impl Gh for OctocrabGh {
             draft: req.draft,
         };
         let body = CreatePrInternal::build_query(vars);
-        let data: CreatePrResponseData = self
+        let data = self
             .octo
-            .graphql(&body)
+            .graphql::<CreatePrResponseData>(&body)
             .await
             .map_err(humanize)
             .context("creating PR")?;
@@ -438,20 +439,20 @@ impl Gh for OctocrabGh {
             return Ok(Vec::new());
         }
 
-        let mut out: Vec<PrWithCiStatus> = Vec::new();
-        let mut seen: std::collections::HashSet<u64> = std::collections::HashSet::new();
+        let mut out = Vec::<PrWithCiStatus>::new();
+        let mut seen = HashSet::<u64>::new();
         for search_query in build_search_queries(owner, repo, branches) {
             let vars = PrsWithCiStatusVariables {
                 query: search_query,
             };
             let body = PrsWithCiStatusInternal::build_query(vars);
-            let batch: Vec<PrWithCiStatus> = self
-                .octo
-                .graphql::<PrsWithCiStatusResponseData>(&body)
-                .await
-                .map_err(humanize)
-                .context("fetching local PRs")?
-                .into();
+            let batch = Into::<Vec<PrWithCiStatus>>::into(
+                self.octo
+                    .graphql::<PrsWithCiStatusResponseData>(&body)
+                    .await
+                    .map_err(humanize)
+                    .context("fetching local PRs")?,
+            );
             for pr in batch {
                 if seen.insert(pr.number) {
                     out.push(pr);
@@ -465,8 +466,9 @@ impl Gh for OctocrabGh {
 /// Split reviewers into `(user_logins, team_names)` as the REST review-request
 /// endpoint expects (team names without their org prefix).
 fn split_users_and_teams(reviewers: &[Reviewer]) -> (Vec<String>, Vec<String>) {
-    let (teams, users): (Vec<&Reviewer>, Vec<&Reviewer>) =
-        reviewers.iter().partition(|r| r.team_name().is_some());
+    let (teams, users) = reviewers
+        .iter()
+        .partition::<Vec<&Reviewer>, _>(|r| r.team_name().is_some());
     let user_logins = users.into_iter().map(|r| r.slug().to_string()).collect();
     let team_names = teams
         .into_iter()
@@ -598,7 +600,9 @@ mod tests {
     #[test]
     fn splits_into_batches_when_over_limit() {
         let long = "x".repeat(200);
-        let branches: Vec<String> = (0..10).map(|i| format!("{long}-{i}")).collect();
+        let branches = (0..10)
+            .map(|i| format!("{long}-{i}"))
+            .collect::<Vec<String>>();
         let qs = build_search_queries("o", "r", &branches);
         assert!(qs.len() >= 2, "expected multiple batches, got {qs:?}");
         for q in &qs {

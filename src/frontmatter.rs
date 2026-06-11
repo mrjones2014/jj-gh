@@ -95,8 +95,8 @@ impl Frontmatter {
             .split_once("\n---\n")
             .or_else(|| rest.split_once("\n---"))
             .ok_or_else(|| anyhow!("unterminated frontmatter; expected closing `---`"))?;
-        let fm: Frontmatter =
-            noyalib::from_str(yaml).context("could not parse YAML frontmatter")?;
+        let fm =
+            noyalib::from_str::<Frontmatter>(yaml).context("could not parse YAML frontmatter")?;
         let body = body.trim_start_matches('\n').trim_end().to_string();
         Ok((fm, body))
     }

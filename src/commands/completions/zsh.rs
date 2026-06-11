@@ -17,7 +17,7 @@ pub(super) fn emit<W: Write>(cmd: &Command, alias: &str, out: &mut W) -> Result<
 }
 
 fn wrapper(alias: &str, subs: &[SubInfo]) -> String {
-    let mut sub_lines: Vec<String> = Vec::new();
+    let mut sub_lines = Vec::<String>::new();
     for sub in subs {
         let desc = sub
             .about
@@ -77,9 +77,9 @@ fi
 fn build_cases(subs: &[SubInfo]) -> String {
     let mut out = String::new();
     for sub in subs {
-        let names: Vec<&str> = std::iter::once(sub.name)
+        let names = std::iter::once(sub.name)
             .chain(sub.aliases.iter().copied())
-            .collect();
+            .collect::<Vec<&str>>();
         let pattern = names.join("|");
         let args = arg_spec_lines(&sub.args);
         if args.is_empty() {
@@ -107,7 +107,7 @@ fn build_cases(subs: &[SubInfo]) -> String {
 }
 
 fn arg_spec_lines(args: &[ArgInfo]) -> String {
-    let mut lines: Vec<String> = Vec::new();
+    let mut lines = Vec::<String>::new();
     for a in args {
         let desc = a.about.as_deref().map(first_help_line).unwrap_or_default();
         let value_suffix = if a.takes_value { "=" } else { "" };
@@ -141,7 +141,7 @@ mod tests {
 
     #[test]
     fn compdef_and_chains() {
-        let mut out: Vec<u8> = Vec::new();
+        let mut out = Vec::<u8>::new();
         emit(&fake_pr_command(), "pr", &mut out).unwrap();
         let s = String::from_utf8(out).unwrap();
 

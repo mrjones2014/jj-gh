@@ -102,7 +102,7 @@ mod tests {
     #[tokio::test]
     async fn cli_wins_and_closure_never_runs() {
         let calls = Cell::new(0);
-        let r: Result<String> = pair(Some("from-cli"), Some("from-fallback"))
+        let r = pair(Some("from-cli"), Some("from-fallback"))
             .resolve_or(
                 || async {
                     calls.set(calls.get() + 1);
@@ -117,7 +117,7 @@ mod tests {
 
     #[tokio::test]
     async fn closure_result_wins_over_fallback() {
-        let r: Result<String> = pair(None, Some("from-fallback"))
+        let r = pair(None, Some("from-fallback"))
             .resolve_or(|| async { Some("from-closure".into()) }, "should not error")
             .await;
         assert_eq!(r.unwrap(), "from-closure");
@@ -125,7 +125,7 @@ mod tests {
 
     #[tokio::test]
     async fn fallback_used_when_cli_and_closure_both_empty() {
-        let r: Result<String> = pair(None, Some("from-fallback"))
+        let r = pair(None, Some("from-fallback"))
             .resolve_or(|| async { Option::<String>::None }, "should not error")
             .await;
         assert_eq!(r.unwrap(), "from-fallback");
@@ -133,7 +133,7 @@ mod tests {
 
     #[tokio::test]
     async fn error_when_every_source_is_none() {
-        let r: Result<String> = pair(None, None)
+        let r = pair(None, None)
             .resolve_or(|| async { Option::<String>::None }, "all sources empty")
             .await;
         let err = r.unwrap_err();
@@ -142,7 +142,7 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_without_err_returns_none_when_all_empty() {
-        let r: Option<String> = pair(None, None)
+        let r = pair(None, None)
             .resolve(|| async { Option::<String>::None })
             .await;
         assert!(r.is_none());

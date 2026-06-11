@@ -113,7 +113,7 @@ pub fn capture_sync(argv: &[&str]) -> Option<Vec<u8>> {
 /// is `None` on spawn failure or non-zero exit.
 pub fn capture_sync_batch(argvs: &[&[&str]]) -> Vec<Option<Vec<u8>>> {
     use std::process::{Command, Stdio};
-    let children: Vec<Option<std::process::Child>> = argvs
+    let children = argvs
         .iter()
         .map(|argv| {
             let (prog, rest) = argv.split_first()?;
@@ -125,7 +125,7 @@ pub fn capture_sync_batch(argvs: &[&[&str]]) -> Vec<Option<Vec<u8>>> {
                 .spawn()
                 .ok()
         })
-        .collect();
+        .collect::<Vec<Option<std::process::Child>>>();
     children
         .into_iter()
         .map(|child| {

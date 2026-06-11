@@ -17,12 +17,12 @@ pub(super) fn emit<W: Write>(cmd: &Command, alias: &str, out: &mut W) -> Result<
 }
 
 fn wrapper(alias: &str, subs: &[SubInfo]) -> String {
-    let sub_names: Vec<String> = subs
+    let sub_names = subs
         .iter()
         .flat_map(|s| {
             std::iter::once(s.name.to_string()).chain(s.aliases.iter().map(ToString::to_string))
         })
-        .collect();
+        .collect::<Vec<String>>();
     let sub_list = sub_names.join(" ");
     let per_sub_cases = build_cases(subs);
 
@@ -86,9 +86,9 @@ fi
 fn build_cases(subs: &[SubInfo]) -> String {
     let mut out = String::new();
     for sub in subs {
-        let names: Vec<&str> = std::iter::once(sub.name)
+        let names = std::iter::once(sub.name)
             .chain(sub.aliases.iter().copied())
-            .collect();
+            .collect::<Vec<&str>>();
         let pattern = names.join("|");
         let flags = flag_list(&sub.args);
         writeln!(
@@ -104,7 +104,7 @@ fn build_cases(subs: &[SubInfo]) -> String {
 }
 
 fn flag_list(args: &[ArgInfo]) -> String {
-    let mut flags: Vec<String> = Vec::new();
+    let mut flags = Vec::<String>::new();
     for a in args {
         if let Some(long) = a.long {
             flags.push(format!("--{long}"));
@@ -123,7 +123,7 @@ mod tests {
 
     #[test]
     fn wraps_and_chains() {
-        let mut out: Vec<u8> = Vec::new();
+        let mut out = Vec::<u8>::new();
         emit(&fake_pr_command(), "pr", &mut out).unwrap();
         let s = String::from_utf8(out).unwrap();
 
