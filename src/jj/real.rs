@@ -7,7 +7,6 @@
 use super::{CommitInfo, Jj, PushedBookmark};
 use crate::util::subprocess_error;
 use anyhow::{Context, Result, anyhow};
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use tokio::process::Command;
 
@@ -284,23 +283,20 @@ fn log_jj_command(args: &[&str]) {
 
 async fn run_jj_passthrough(args: &[&str]) -> Result<()> {
     log_jj_command(args);
-    let output = Command::new("jj")
+    // Inherit stdio so slow commands (e.g. `jj git push -c`) stream their
+    // progress live instead of buffering until exit. The no-status-for-jj rule
+    // targets data-capturing calls; this is deliberate passthrough.
+    // ast-grep-ignore: no-status-for-jj-command
+    let status = Command::new("jj")
         .arg("--ignore-working-copy")
         .args(args)
-        .output()
+        .status()
         .await
         .context("failed to spawn `jj`")?;
-    if !output.status.success() {
-        return Err(anyhow!("{}", subprocess_error(&output.stderr)));
+    if !status.success() {
+        return Err(anyhow!("jj exited with {status}"));
     }
-    std::io::stdout()
-        .lock()
-        .write_all(&output.stdout)
-        .context("writing `jj` stdout")?;
-    std::io::stderr()
-        .lock()
-        .write_all(&output.stderr)
-        .context("writing `jj` stderr")
+    Ok(())
 }
 
 async fn run_jj_strs(args: &[String]) -> Result<Vec<u8>> {
