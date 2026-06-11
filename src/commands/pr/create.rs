@@ -1,14 +1,16 @@
 use crate::{
     auth::EnvReader,
     cli::GlobalOpts,
-    config::AutoMergeMethod,
+    config::{self, AutoMergeMethod},
+    editor::{self, ApplyChangesCtx, Editor, resolve_editor_argv},
+    frontmatter::Frontmatter,
+    fs::RealFs,
     gh::{CreatePrRequest, Gh, remote},
-    jj::{self, Jj, JjExt},
-    pr::{
-        editor::{self, ApplyChangesCtx, Editor, resolve_editor_argv},
-        frontmatter::Frontmatter,
-        load_template_for, validation,
+    jj::{
+        self, Jj, JjExt,
+        inject::{TemplateAliases, escape_jj_string},
     },
+    template::{self, TemplateSource},
 };
 use anyhow::{Context, Result, anyhow};
 use jj_gh_config_derive::subcommand_args;
@@ -269,7 +271,7 @@ where
         preview,
     )
     .await?;
-    validation::validate(&final_fm, &body, &raw_template_body)?;
+    final_fm.validate(&body, &raw_template_body)?;
     let final_base_branch = remote::branch_from_base_spec(&target.owner, &final_fm.base)?;
     let final_base_lookup = if final_base_branch == base_branch {
         base_lookup
@@ -343,4 +345,48 @@ where
 
     println!("{}", created.html_url);
     Ok(())
+}
+
+async fn load_template_for<J: Jj>(
+    args: &CreateArgs,
+    jj: &J,
+    title_revset: &str,
+    default_title: &str,
+    base: &str,
+    head_branch: Option<&str>,
+) -> Result<Option<String>> {
+    let repo_root = std::env::current_dir().context("could not read cwd")?;
+    let fs = RealFs;
+    let user_layer = config::user_layer_template()?;
+    let repo_layer = config::repo_layer_template()?;
+    match template::resolve_template_source(args, &repo_layer, &user_layer, &repo_root, &fs) {
+        TemplateSource::None => Ok(None),
+        TemplateSource::File(p) => template::load_template_file(&p, &fs),
+        TemplateSource::JjTemplate(t) => {
+            let oldest_rev_id = jj
+                .eval_template(title_revset, r#"commit_id.short(40) ++ "\n""#, None, true)
+                .await
+                .context("resolving oldest commit id for `pr_oldest_rev_id` alias")?
+                .lines()
+                .next()
+                .unwrap_or("")
+                .to_string();
+            let aliases = TemplateAliases::builder()
+                .alias("pr_title", quote_jj(default_title))
+                .alias("pr_base", quote_jj(base))
+                .alias("pr_head_branch", quote_jj(head_branch.unwrap_or("")))
+                .alias("pr_oldest_rev_id", quote_jj(&oldest_rev_id));
+            let tmp = aliases.write_temp_config()?;
+            let body = jj
+                .eval_template(title_revset, &t, Some(tmp.path()), true)
+                .await
+                .context("evaluating PR body template")?;
+            Ok(Some(body.trim_end_matches('\n').to_string()))
+        }
+    }
+}
+
+/// Wrap `s` as a jj template double-quoted string literal, escaping `\` and `"`.
+fn quote_jj(s: &str) -> String {
+    format!(r#""{}""#, escape_jj_string(s))
 }

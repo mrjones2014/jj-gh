@@ -6,5 +6,5 @@
 //! generated macro output.
 
 pub(crate) use crate::cli::GlobalOpts;
-pub(crate) use crate::config::{Config, __schema};
+pub(crate) use crate::config::{__schema, Config};
 pub(crate) use crate::util::EvalWithCfgFallback;

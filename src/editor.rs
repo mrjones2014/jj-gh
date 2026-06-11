@@ -3,13 +3,10 @@
 //! Production [`TempfileEditor`] writes the initial buffer to a tempfile, spawns
 //! the editor (inheriting stdio), then reads back. Tests use a fake.
 
-pub(crate) mod create;
-pub(crate) mod edit;
-
 use crate::{
     auth::EnvReader,
+    frontmatter::Frontmatter,
     gh::{Gh, Reviewer, UpdatePr, remote},
-    pr::frontmatter::Frontmatter,
 };
 use anyhow::{Context, Result, anyhow, bail};
 use std::collections::HashMap;

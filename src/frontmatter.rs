@@ -29,6 +29,8 @@ use serde::{Deserialize, Serialize};
 /// whitespace).
 pub const PREVIEW_MARKER: &str = "# 8< jj-gh: below this line removed on submit >8";
 
+const TITLE_WARN_LEN: usize = 72;
+
 fn is_default<T: Default + PartialEq>(val: &T) -> bool {
     *val == T::default()
 }
@@ -98,6 +100,42 @@ impl Frontmatter {
         let body = body.trim_start_matches('\n').trim_end().to_string();
         Ok((fm, body))
     }
+
+    /// Validate this frontmatter + `body` before sending to the GH API.
+    ///
+    /// `raw_template_body` is the unedited body we wrote to the tempfile; if the
+    /// user saved without changes, we refuse to open a PR.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the title is empty, the base is empty, the body is
+    /// empty, or the body is unchanged from the raw template.
+    pub fn validate(&self, body: &str, raw_template_body: &str) -> Result<()> {
+        if self.title.trim().is_empty() {
+            return Err(anyhow!("title is empty"));
+        }
+
+        if self.base.trim().is_empty() {
+            return Err(anyhow!("base is empty"));
+        }
+
+        if body.trim().is_empty() {
+            return Err(anyhow!("body is empty"));
+        }
+
+        if body.trim() == raw_template_body.trim() {
+            return Err(anyhow!("body is unchanged from the template"));
+        }
+
+        if self.title.chars().count() > TITLE_WARN_LEN {
+            log::warn!(
+                "PR title is longer than recommended (recommend 72 max, saw {} characters)",
+                self.title.chars().count()
+            );
+        }
+
+        Ok(())
+    }
 }
 
 /// Truncate `buffer` at the first line equal to [`PREVIEW_MARKER`] (after
@@ -114,7 +152,7 @@ fn strip_preview(buffer: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pr::editor::{self, Editor};
+    use crate::editor::{self, Editor};
     use std::sync::Mutex;
 
     fn fm(title: &str) -> Frontmatter {
@@ -310,5 +348,58 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(body, "");
+    }
+
+    fn fm_with_base(title: &str, base: &str) -> Frontmatter {
+        Frontmatter {
+            title: title.into(),
+            base: base.into(),
+            labels: vec![],
+            reviewers: vec![],
+            draft: false,
+            auto_merge: false,
+            auto_merge_method: AutoMergeMethod::Merge,
+        }
+    }
+
+    #[test]
+    fn validate_happy_path() {
+        fm("title")
+            .validate("body text", "original template")
+            .unwrap();
+    }
+
+    #[test]
+    fn validate_empty_title_errors() {
+        let err = fm("   ").validate("body", "template").unwrap_err();
+        assert!(err.to_string().contains("title is empty"));
+    }
+
+    #[test]
+    fn validate_empty_base_errors() {
+        let err = fm_with_base("title", "  ")
+            .validate("body", "template")
+            .unwrap_err();
+        assert!(err.to_string().contains("base is empty"));
+    }
+
+    #[test]
+    fn validate_empty_body_errors() {
+        let err = fm("title").validate("  \n", "template").unwrap_err();
+        assert!(err.to_string().contains("body is empty"));
+    }
+
+    #[test]
+    fn validate_unchanged_body_errors() {
+        let err = fm("title")
+            .validate("template text", "  template text  ")
+            .unwrap_err();
+        assert!(err.to_string().contains("unchanged"));
+    }
+
+    #[test]
+    fn validate_long_title_warns_but_passes() {
+        let long_title = "x".repeat(TITLE_WARN_LEN + 1);
+        fm(&long_title).validate("body", "template").unwrap();
     }
 }

@@ -1,6 +1,6 @@
 //! CLI arg parser
 
-use crate::{completions::SubcommandStr, pr::PrAction};
+use crate::commands::{completions::SubcommandStr, pr::PrAction};
 use clap::{
     Parser, Subcommand,
     builder::{Styles, styling::AnsiColor},

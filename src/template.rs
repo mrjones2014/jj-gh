@@ -5,7 +5,7 @@
 //! the filesystem. [`load_template_file`] reads a chosen file via a
 //! [`FileSystem`] so tests stay hermetic.
 
-use crate::{config::LayerTemplate, fs::FileSystem, pr::CreateArgs};
+use crate::{commands::pr::CreateArgs, config::LayerTemplate, fs::FileSystem};
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 

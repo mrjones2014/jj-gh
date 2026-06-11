@@ -89,7 +89,7 @@ fn escape(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::completions::fake_pr_command;
+    use crate::commands::completions::fake_pr_command;
 
     #[test]
     fn registers_against_jj_and_gates_on_alias() {

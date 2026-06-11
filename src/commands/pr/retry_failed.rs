@@ -8,9 +8,8 @@
 
 use crate::{
     cli::GlobalOpts,
-    gh::{Gh, WorkflowRun, WorkflowRunStatus},
+    gh::{Gh, WorkflowRun, WorkflowRunStatus, pr_lookup},
     jj::{Jj, JjExt},
-    pr,
     ui::Spinner,
 };
 use anyhow::{Context, Result, bail};
@@ -73,7 +72,7 @@ where
 
     let remote = jj.resolve_default_remote(remote.as_ref()).await?;
     let (pr, target) =
-        pr::resolve_pr_with_target(jj, gh, &remote, upstream_remote, number_or_rev).await?;
+        pr_lookup::resolve_pr_with_target(jj, gh, &remote, upstream_remote, number_or_rev).await?;
     let owner = &target.owner;
     let repo = &target.repo;
 
@@ -161,7 +160,7 @@ async fn retry_failed_jobs<G: Gh>(
         .iter()
         .filter(|r| {
             r.conclusion
-                .is_some_and(super::super::gh::WorkflowRunConclusion::is_retryable_failure)
+                .is_some_and(crate::gh::WorkflowRunConclusion::is_retryable_failure)
         })
         .collect();
 
