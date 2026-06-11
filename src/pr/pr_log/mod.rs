@@ -18,12 +18,10 @@ use crate::{
         inject::{TemplateAliases, escape_jj_string},
     },
     ui::Spinner,
-    util::subprocess_error,
 };
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Result, anyhow};
 use jj_gh_config_derive::subcommand_args;
 use std::collections::HashMap;
-use tokio::process::Command;
 
 /// jj `label(...)` keys for which we ship default colors in the injected
 /// config. Templates reference them by name so users can override the colors
@@ -146,22 +144,14 @@ pub async fn run(gh: &impl Gh, jj: &impl Jj, args: &PrLogArgs) -> Result<()> {
     let aliases = build_aliases(&prs, &branch_to_local, *nerdfonts, template.as_deref());
     let tmp = aliases.write_temp_config()?;
 
-    let mut cmd = Command::new("jj");
-    cmd.arg("--config-file").arg(tmp.path()).arg("log");
+    // Stream so jj sees a tty and emits color; capturing would strip it.
+    let cfg = tmp.path().to_string_lossy().into_owned();
+    let mut cmd: Vec<&str> = vec!["jj", "--config-file", &cfg, "log"];
     if !user_set_template(jj_log_args) {
-        cmd.args(["-T", "pr_log"]);
+        cmd.extend(["-T", "pr_log"]);
     }
-    cmd.args(jj_log_args);
-
-    let output = cmd.output().await.context("failed to spawn `jj log`")?;
-    std::io::Write::write_all(&mut std::io::stdout().lock(), &output.stdout)
-        .context("writing `jj log` output")?;
-    if !output.status.success() {
-        return Err(anyhow!("{}", subprocess_error(&output.stderr)));
-    }
-    std::io::Write::write_all(&mut std::io::stderr().lock(), &output.stderr)
-        .context("writing `jj log` stderr")?;
-    Ok(())
+    cmd.extend(jj_log_args.iter().map(String::as_str));
+    crate::proc::stream(&cmd).await
 }
 
 /// Whether the user already passed `-T` / `--template` in the forwarded args.

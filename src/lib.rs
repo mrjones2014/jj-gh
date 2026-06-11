@@ -10,6 +10,7 @@ mod gh;
 mod git;
 mod jj;
 mod pr;
+mod proc;
 mod ui;
 mod util;
 

@@ -202,14 +202,8 @@ fn repo_layer_paths() -> Vec<PathBuf> {
 /// the layer is unavailable (e.g. `--repo` outside any repo), or jj prints an
 /// empty path.
 fn jj_config_path(level: &str) -> Option<PathBuf> {
-    let output = std::process::Command::new("jj")
-        .args(["config", "path", level])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let s = std::str::from_utf8(&output.stdout).ok()?.trim();
+    let stdout = crate::proc::capture_sync(&["jj", "config", "path", level])?;
+    let s = std::str::from_utf8(&stdout).ok()?.trim();
     if s.is_empty() {
         return None;
     }

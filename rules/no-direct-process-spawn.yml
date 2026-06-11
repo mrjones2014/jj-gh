@@ -1,0 +1,15 @@
+id: no-direct-process-spawn
+language: Rust
+severity: error
+message: Spawn external processes through src/proc.rs, not Command directly.
+note: >-
+  Use proc::capture (parse output), proc::stream (display/progress/interactive), proc::capture_sync (pre-runtime config), or the ProcessRunner trait. They centralize stdio mode, color/tty handling, and error normalization so call sites cannot reintroduce regressions like stripped color or buffered output.
+files:
+  - src/**/*.rs
+ignores:
+  - src/proc.rs
+rule:
+  any:
+    - pattern: $X.output()
+    - pattern: $X.status()
+    - pattern: $X.spawn()

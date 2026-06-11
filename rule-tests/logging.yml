@@ -22,18 +22,16 @@ invalid:
   - |
     return Err(anyhow!("{}", String::from_utf8_lossy(&output.stderr)));
 ---
-id: no-status-for-jj-command
+id: no-direct-process-spawn
 valid:
   - |
-    async fn run_editor() {
-        Command::new(editor).status().await?;
-    }
+    let out = proc::capture(&argv).await?;
   - |
-    async fn run_jj() {
-        Command::new("jj").output().await?;
-    }
+    proc::stream(&argv).await?;
 invalid:
   - |
-    async fn run_jj() {
-        Command::new("jj").status().await?;
-    }
+    let out = cmd.output().await?;
+  - |
+    let status = cmd.status().await?;
+  - |
+    let child = cmd.spawn()?;
