@@ -25,11 +25,11 @@
 
 use super::{Decision, PrPlan, RestackContext};
 use crate::{
-    jj::{Jj, jj_argv},
-    pr::{
-        pr_log::{PR_LOG_TEMPLATE, build_aliases},
+    commands::pr::{
+        log::{PR_LOG_TEMPLATE, build_aliases},
         restack::RestackArgs,
     },
+    jj::{Jj, jj_argv},
 };
 use anyhow::{Context, Result, anyhow};
 use crossterm::{

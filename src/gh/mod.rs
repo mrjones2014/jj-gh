@@ -9,6 +9,7 @@ use anyhow::Result;
 mod queries;
 mod reviewer;
 
+pub mod pr_lookup;
 pub mod real;
 pub mod remote;
 pub use queries::{CiStatus, PrWithCiStatus};

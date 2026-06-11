@@ -4,10 +4,9 @@ use crate::{
     auth,
     cli::{DebugAction, GlobalOpts, GlobalOptsInput},
     config::{self, Config},
-    gh::{Gh, real::OctocrabGh},
+    gh::{Gh, pr_lookup, real::OctocrabGh},
     git::url::parse_owner_repo,
     jj::{self, CommitInfo, Jj, JjExt, real::JjCli},
-    pr,
     ui::Spinner,
 };
 use anyhow::Result;
@@ -117,7 +116,7 @@ async fn print_pr_lookup(globals: &GlobalOpts, config: &Config, rev: &str) -> Re
     let token = auth::resolve_token(config).await?;
     let gh = OctocrabGh::new(&token)?;
 
-    let lookup = pr::resolve_pr_for_rev(&jj, &gh, &remote, upstream_remote, rev).await?;
+    let lookup = pr_lookup::resolve_pr_for_rev(&jj, &gh, &remote, upstream_remote, rev).await?;
     let base = gh
         .lookup_base(
             &lookup.target.owner,

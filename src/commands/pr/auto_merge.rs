@@ -1,9 +1,8 @@
 use crate::{
     cli::GlobalOpts,
     config::AutoMergeMethod,
-    gh::Gh,
+    gh::{Gh, pr_lookup},
     jj::{Jj, JjExt},
-    pr,
 };
 use anyhow::{Context, Result, bail};
 use jj_gh_config_derive::subcommand_args;
@@ -43,7 +42,7 @@ where
     } = args;
 
     let remote = jj.resolve_default_remote(remote.as_ref()).await?;
-    let pr = pr::get_pr(jj, gh, &remote, upstream_remote, number_or_rev).await?;
+    let pr = pr_lookup::get_pr(jj, gh, &remote, upstream_remote, number_or_rev).await?;
 
     if pr.in_merge_queue {
         bail!(

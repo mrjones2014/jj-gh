@@ -19,10 +19,28 @@ mod bash;
 mod fish;
 mod zsh;
 
-use crate::pr::PrAction;
+use crate::{Cli, commands::pr::PrAction};
 use anyhow::{Result, bail};
-use clap::{Arg, Command, Subcommand};
+use clap::{Arg, Command, CommandFactory, Subcommand};
 use std::{fmt::Display, io::Write};
+
+pub fn run(
+    bin_name: &str,
+    shell: clap_complete::Shell,
+    jj_alias: Option<String>,
+    jj_gh_subcommand: Option<SubcommandStr>,
+) -> Result<()> {
+    match (jj_alias, jj_gh_subcommand) {
+        (Some(alias), Some(subcommand)) => {
+            alias_completions(shell.into(), &alias, subcommand, &mut std::io::stdout())?;
+        }
+        _ => {
+            clap_complete::generate(shell, &mut Cli::command(), bin_name, &mut std::io::stdout());
+        }
+    }
+
+    Ok(())
+}
 
 /// Shells for which an overlay can be emitted. Sibling to
 /// `clap_complete::Shell`, but narrower: only shells whose programmable
@@ -82,7 +100,7 @@ fn _ensure_subcmds_handled(cmd: crate::cli::Command) {
 }
 
 /// Emit a completion overlay for `jj <alias> <tab>` to `out`.
-pub fn run<W: Write>(
+fn alias_completions<W: Write>(
     shell: Shell,
     alias: &str,
     subcommand: SubcommandStr,
@@ -179,9 +197,9 @@ pub(super) fn fake_pr_command() -> Command {
 mod tests {
     use super::*;
 
-    fn emit_real(shell: Shell) -> String {
+    fn emit_string(shell: Shell) -> String {
         let mut buf: Vec<u8> = Vec::new();
-        run(shell, "pr", SubcommandStr::Pr, &mut buf).unwrap();
+        alias_completions(shell, "pr", SubcommandStr::Pr, &mut buf).unwrap();
         String::from_utf8(buf).unwrap()
     }
 
@@ -189,19 +207,19 @@ mod tests {
     fn real_pr_action_covers_all_visible_subcommands() {
         // Catches regressions when adding/renaming subcommands or visible
         // aliases on `PrAction`; fake_pr_command is too narrow to notice.
-        let bash = emit_real(Shell::Bash);
+        let bash = emit_string(Shell::Bash);
         for name in ["create", "c", "fetch", "f", "auto-merge", "am", "log", "l"] {
             assert!(bash.contains(name), "bash overlay missing `{name}`");
         }
         assert!(bash.contains("complete -F _jj_gh_alias_wrapper_pr jj"));
 
-        let zsh = emit_real(Shell::Zsh);
+        let zsh = emit_string(Shell::Zsh);
         for name in ["create", "c", "fetch", "f", "auto-merge", "am", "log", "l"] {
             assert!(zsh.contains(name), "zsh overlay missing `{name}`");
         }
         assert!(zsh.contains("compdef _jj_gh_alias_pr jj"));
 
-        let fish = emit_real(Shell::Fish);
+        let fish = emit_string(Shell::Fish);
         for name in ["create", "c", "fetch", "f", "auto-merge", "am", "log", "l"] {
             assert!(
                 fish.contains(&format!("-a '{name}'")),
@@ -214,7 +232,7 @@ mod tests {
     #[test]
     fn unsupported_shell_errors_with_name() {
         let mut buf: Vec<u8> = Vec::new();
-        let err = run(
+        let err = alias_completions(
             Shell::Other("powershell".into()),
             "pr",
             SubcommandStr::Pr,

@@ -119,7 +119,7 @@ fn flag_list(args: &[ArgInfo]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::completions::fake_pr_command;
+    use crate::commands::completions::fake_pr_command;
 
     #[test]
     fn wraps_and_chains() {

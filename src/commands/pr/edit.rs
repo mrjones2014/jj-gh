@@ -1,13 +1,14 @@
 use crate::{
     auth::EnvReader,
     cli::GlobalOpts,
-    gh::{Gh, PrDetails, remote::Target},
-    jj::{Jj, JjExt},
-    pr::{
-        self, PrLookup,
-        editor::{self, ApplyChangesCtx, Editor, resolve_editor_argv},
-        frontmatter::Frontmatter,
+    editor::{self, ApplyChangesCtx, Editor, resolve_editor_argv},
+    frontmatter::Frontmatter,
+    gh::{
+        Gh, PrDetails,
+        pr_lookup::{self, PrLookup},
+        remote::Target,
     },
+    jj::{Jj, JjExt},
     ui::Spinner,
 };
 use anyhow::{Context, Result, anyhow, bail};
@@ -178,7 +179,8 @@ async fn resolve_pr_target<J: Jj, G: Gh>(
         head_spec,
         summary,
         ..
-    } = pr::resolve_pr_for_rev(jj, gh, default_remote, upstream_remote, number_or_rev).await?;
+    } = pr_lookup::resolve_pr_for_rev(jj, gh, default_remote, upstream_remote, number_or_rev)
+        .await?;
     let summary = summary
         .ok_or_else(|| anyhow!("no open PR for revision `{number_or_rev}` (head `{head_spec}`)"))?;
     Ok((target, summary.number))

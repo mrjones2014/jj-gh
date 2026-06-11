@@ -176,8 +176,22 @@ pub fn extract(fig: &Figment) -> Result<Config> {
 }
 
 fn discover_layers() -> Vec<PathBuf> {
-    let mut out = user_layer_paths();
-    out.extend(repo_layer_paths());
+    // The three `jj config path` calls are independent cold subprocess spawns;
+    // run them concurrently so startup pays one spawn's latency, not three.
+    // Order (user, repo, workspace) is load-bearing: later layers override
+    // earlier, and `JJ_GH_EXTRA_CONFIG` sits highest.
+    let outputs = crate::proc::capture_sync_batch(&[
+        ["jj", "config", "path", "--user"].as_slice(),
+        ["jj", "config", "path", "--repo"].as_slice(),
+        ["jj", "config", "path", "--workspace"].as_slice(),
+    ]);
+    let mut out: Vec<PathBuf> = outputs
+        .iter()
+        .filter_map(|o| parse_config_path(o.as_deref()))
+        .collect();
+    if let Some(p) = std::env::var_os("JJ_GH_EXTRA_CONFIG") {
+        out.push(PathBuf::from(p));
+    }
     out
 }
 
@@ -203,7 +217,13 @@ fn repo_layer_paths() -> Vec<PathBuf> {
 /// empty path.
 fn jj_config_path(level: &str) -> Option<PathBuf> {
     let stdout = crate::proc::capture_sync(&["jj", "config", "path", level])?;
-    let s = std::str::from_utf8(&stdout).ok()?.trim();
+    parse_config_path(Some(&stdout))
+}
+
+/// Parse a `jj config path` stdout into a layer path. `None` when the command
+/// failed (no stdout) or jj printed an empty path.
+fn parse_config_path(stdout: Option<&[u8]>) -> Option<PathBuf> {
+    let s = std::str::from_utf8(stdout?).ok()?.trim();
     if s.is_empty() {
         return None;
     }

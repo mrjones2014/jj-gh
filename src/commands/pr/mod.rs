@@ -1,44 +1,38 @@
-//! End-to-end orchestrator for `jj-gh pr create` / `jj-gh pr fetch` / `jj-gh pr auto-merge`.
+//! End-to-end orchestrator for the `pr` subcommand: loads config, resolves
+//! auth, builds the jj/GitHub clients, then dispatches to the matching handler.
+//! One module per CLI subcommand; PR lookup helpers live in
+//! [`crate::gh::pr_lookup`].
 
 mod auto_merge;
-mod editor;
+mod create;
+mod edit;
 pub mod fetch;
-mod frontmatter;
-mod pr_log;
+mod log;
 mod restack;
 mod retry_failed;
-mod template;
-mod validation;
 
 use crate::{
     auth::{self, OsEnv},
     cli::{GlobalOpts, GlobalOptsInput},
     config,
-    fs::RealFs,
-    gh::{self, Gh, PrDetails, PrSummary, remote},
+    editor::TempfileEditor,
+    gh,
     git::real::RealGit,
-    jj::{
-        self, Jj,
-        inject::{TemplateAliases, escape_jj_string},
-    },
-    pr::{
-        auto_merge::{AutoMergeArgs, AutoMergeArgsInput},
-        editor::{
-            TempfileEditor,
-            edit::{EditArgs, EditArgsInput},
-        },
-        fetch::{FetchArgs, FetchArgsInput},
-        pr_log::{PrLogArgs, PrLogArgsInput},
-        restack::{RestackArgs, RestackArgsInput},
-        retry_failed::{RetryFailedArgs, RetryFailedArgsInput},
-        template::TemplateSource,
-    },
+    jj,
+    ui::Spinner,
 };
-use anyhow::{Context, Result, anyhow};
+use anyhow::Result;
 use clap::Subcommand;
 use figment::providers::Serialized;
 
-pub use editor::create::{CreateArgs, CreateArgsInput};
+use self::log::{PrLogArgs, PrLogArgsInput};
+use auto_merge::{AutoMergeArgs, AutoMergeArgsInput};
+use edit::{EditArgs, EditArgsInput};
+use fetch::{FetchArgs, FetchArgsInput};
+use restack::{RestackArgs, RestackArgsInput};
+use retry_failed::{RetryFailedArgs, RetryFailedArgsInput};
+
+pub use create::{CreateArgs, CreateArgsInput};
 
 #[derive(Debug, Subcommand)]
 pub enum PrAction {
@@ -116,23 +110,33 @@ pub enum PrAction {
 /// calls, the editor round-trip, or any sub-handler (`create`, `fetch`,
 /// `auto-merge`).
 pub async fn dispatch(global: GlobalOptsInput, action: PrAction) -> Result<()> {
-    let mut fig = config::load_figment().merge(Serialized::defaults(&global));
-    fig = match &action {
-        PrAction::Create(a) => fig.merge(Serialized::defaults(a)),
-        PrAction::Fetch(a) => fig.merge(Serialized::defaults(a)),
-        PrAction::AutoMerge(a) => fig.merge(Serialized::defaults(a)),
-        PrAction::Edit(a) => fig.merge(Serialized::defaults(a)),
-        PrAction::Log(a) => fig.merge(Serialized::defaults(a)),
-        PrAction::Restack(a) => fig.merge(Serialized::defaults(a)),
-        PrAction::RetryFailed(a) => fig.merge(Serialized::defaults(a)),
-    };
-    let config = config::extract(&fig)?;
-    let globals = GlobalOpts::resolve(global, &config);
+    let startup = Spinner::start("Resolving workspace");
 
-    let token = auth::resolve_token(&config).await?;
-    let jj = jj::real::JjCli::new().await?;
+    // Discovering the workspace (`jj workspace root` + gix) is independent of
+    // config/auth, so overlap the two cold-start chains. Within the config
+    // chain, auth must run after config loads (it reads `gh_askpass`/`gh_token`).
+    let jj_fut = jj::real::JjCli::new();
+    let cfg_auth_fut = async {
+        let mut fig = config::load_figment().merge(Serialized::defaults(&global));
+        fig = match &action {
+            PrAction::Create(a) => fig.merge(Serialized::defaults(a)),
+            PrAction::Fetch(a) => fig.merge(Serialized::defaults(a)),
+            PrAction::AutoMerge(a) => fig.merge(Serialized::defaults(a)),
+            PrAction::Edit(a) => fig.merge(Serialized::defaults(a)),
+            PrAction::Log(a) => fig.merge(Serialized::defaults(a)),
+            PrAction::Restack(a) => fig.merge(Serialized::defaults(a)),
+            PrAction::RetryFailed(a) => fig.merge(Serialized::defaults(a)),
+        };
+        let config = config::extract(&fig)?;
+        let globals = GlobalOpts::resolve(global, &config);
+        let token = auth::resolve_token(&config).await?;
+        anyhow::Ok((config, globals, token))
+    };
+    let (jj, (config, globals, token)) = tokio::try_join!(jj_fut, cfg_auth_fut)?;
+
     let gh = gh::real::OctocrabGh::new(&token)?;
     let editor = TempfileEditor;
+    startup.stop();
     match action {
         PrAction::AutoMerge(input) => {
             let args = AutoMergeArgs::resolve(input, &config, &globals);
@@ -140,11 +144,11 @@ pub async fn dispatch(global: GlobalOptsInput, action: PrAction) -> Result<()> {
         }
         PrAction::Create(input) => {
             let args = CreateArgs::resolve(input, &config, &globals);
-            editor::create::run(&jj, &gh, &OsEnv, &editor, &args).await?;
+            create::run(&jj, &gh, &OsEnv, &editor, &args).await?;
         }
         PrAction::Edit(input) => {
             let args = EditArgs::resolve(input, &config, &globals);
-            editor::edit::run(&jj, &gh, &OsEnv, &editor, &args).await?;
+            edit::run(&jj, &gh, &OsEnv, &editor, &args).await?;
         }
         PrAction::Fetch(input) => {
             let git = RealGit::new(jj.repo().clone());
@@ -153,7 +157,7 @@ pub async fn dispatch(global: GlobalOptsInput, action: PrAction) -> Result<()> {
         }
         PrAction::Log(input) => {
             let args = PrLogArgs::resolve(input, &config, &globals);
-            pr_log::run(&gh, &jj, &args).await?;
+            self::log::run(&gh, &jj, &args).await?;
         }
         PrAction::Restack(input) => {
             let args = RestackArgs::resolve(input, &config, &globals);
@@ -165,172 +169,6 @@ pub async fn dispatch(global: GlobalOptsInput, action: PrAction) -> Result<()> {
         }
     }
     Ok(())
-}
-
-/// Resolved lookup state for a revision: the bookmark, the remote target, the
-/// `owner:branch` head spec, the detected trunk bookmark, and the open PR (if
-/// any) whose head matches.
-///
-/// Shared by `jj-gh pr auto-merge <rev>` and `jj-gh debug pr-lookup`.
-#[derive(Debug)]
-pub struct PrLookup {
-    pub branch: String,
-    pub target: remote::Target,
-    pub head_spec: String,
-    pub default_base: String,
-    pub summary: Option<PrSummary>,
-}
-
-/// Lookup a PR by either a revision ID or PR number
-///
-/// # Errors
-///
-/// Returns an error if `rev` has no local bookmark, if the configured
-/// `default_remote` is unset, if `trunk()` is empty, or if any underlying
-/// jj/GH call fails.
-pub async fn get_pr<J: Jj, G: Gh>(
-    jj: &J,
-    gh: &G,
-    default_remote: &str,
-    upstream_remote: &str,
-    number_or_rev: &str,
-) -> Result<PrDetails> {
-    Ok(
-        resolve_pr_with_target(jj, gh, default_remote, upstream_remote, number_or_rev)
-            .await?
-            .0,
-    )
-}
-
-/// Same as [`get_pr`] but also returns the resolved [`remote::Target`] so
-/// callers that need the owner/repo for further API calls don't have to
-/// re-derive it from the remote URL.
-///
-/// # Errors
-///
-/// See [`get_pr`].
-pub async fn resolve_pr_with_target<J: Jj, G: Gh>(
-    jj: &J,
-    gh: &G,
-    default_remote: &str,
-    upstream_remote: &str,
-    number_or_rev: &str,
-) -> Result<(PrDetails, remote::Target)> {
-    if let Ok(num) = number_or_rev.parse::<u64>() {
-        let origin_url = jj
-            .remote_url(default_remote)
-            .await?
-            .ok_or_else(|| anyhow!("`{default_remote}` remote is not configured"))?;
-        let upstream_url = jj.remote_url(upstream_remote).await?;
-        let target = remote::target(&origin_url, upstream_url.as_deref())?;
-        let pr = gh.get_pr(&target.owner, &target.repo, num).await?;
-        Ok((pr, target))
-    } else {
-        let lookup =
-            resolve_pr_for_rev(jj, gh, default_remote, upstream_remote, number_or_rev).await?;
-        let summary = lookup.summary.ok_or_else(|| {
-            anyhow!(
-                "no open PR for revision `{number_or_rev}` (head `{}`)",
-                lookup.head_spec,
-            )
-        })?;
-        let pr = gh
-            .get_pr(&lookup.target.owner, &lookup.target.repo, summary.number)
-            .await?;
-        Ok((pr, lookup.target))
-    }
-}
-
-/// Resolve a revision into its PR-lookup context: bookmark, remote target,
-/// head spec, trunk bookmark, and any existing open PR.
-///
-/// # Errors
-///
-/// Returns an error if `rev` has no local bookmark, if the configured
-/// `default_remote` is unset, if `trunk()` is empty, or if any underlying
-/// jj/GH call fails.
-pub async fn resolve_pr_for_rev<J: Jj, G: Gh>(
-    jj: &J,
-    gh: &G,
-    default_remote: &str,
-    upstream_remote: &str,
-    rev: &str,
-) -> Result<PrLookup> {
-    let info = jj.resolve_rev(rev).await?;
-    let branch = info
-        .bookmarks
-        .first()
-        .cloned()
-        .ok_or_else(|| anyhow!("no local bookmark on `{rev}`; nothing to look up"))?;
-
-    let origin_url = jj
-        .remote_url(default_remote)
-        .await?
-        .ok_or_else(|| anyhow!("`{default_remote}` remote is not configured"))?;
-    let upstream_url = jj.remote_url(upstream_remote).await?;
-    let target = remote::target(&origin_url, upstream_url.as_deref())?;
-    let head_spec = target.head_spec(&branch);
-
-    let default_base = jj
-        .trunk_branch()
-        .await?
-        .ok_or_else(|| anyhow!("could not detect trunk() bookmark"))?;
-
-    let summary = gh
-        .find_open_pr(&target.owner, &target.repo, &head_spec)
-        .await?;
-
-    Ok(PrLookup {
-        branch,
-        target,
-        head_spec,
-        default_base,
-        summary,
-    })
-}
-
-async fn load_template_for<J: Jj>(
-    args: &CreateArgs,
-    jj: &J,
-    title_revset: &str,
-    default_title: &str,
-    base: &str,
-    head_branch: Option<&str>,
-) -> Result<Option<String>> {
-    let repo_root = std::env::current_dir().context("could not read cwd")?;
-    let fs = RealFs;
-    let user_layer = config::user_layer_template()?;
-    let repo_layer = config::repo_layer_template()?;
-    match template::resolve_template_source(args, &repo_layer, &user_layer, &repo_root, &fs) {
-        TemplateSource::None => Ok(None),
-        TemplateSource::File(p) => template::load_template_file(&p, &fs),
-        TemplateSource::JjTemplate(t) => {
-            let oldest_rev_id = jj
-                .eval_template(title_revset, r#"commit_id.short(40) ++ "\n""#, None, true)
-                .await
-                .context("resolving oldest commit id for `pr_oldest_rev_id` alias")?
-                .lines()
-                .next()
-                .unwrap_or("")
-                .to_string();
-            let aliases = TemplateAliases::builder()
-                .alias("pr_title", quote_jj(default_title))
-                .alias("pr_base", quote_jj(base))
-                .alias("pr_head_branch", quote_jj(head_branch.unwrap_or("")))
-                .alias("pr_oldest_rev_id", quote_jj(&oldest_rev_id));
-            let tmp = aliases.write_temp_config()?;
-            let body = jj
-                .eval_template(title_revset, &t, Some(tmp.path()), true)
-                .await
-                .context("evaluating PR body template")?;
-            Ok(Some(body.trim_end_matches('\n').to_string()))
-        }
-    }
-}
-
-/// Wrap `s` as a jj template double-quoted string literal, escaping `\` and `"`.
-fn quote_jj(s: &str) -> String {
-    format!(r#""{}""#, escape_jj_string(s))
 }
 
 #[cfg(test)]
