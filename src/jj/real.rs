@@ -4,11 +4,9 @@
 //! discovered at the workspace root. The repository is discovered once at
 //! [`JjCli::new`] and reused for every subsequent gix operation.
 
-use super::{CommitInfo, Jj, PushedBookmark};
-use crate::util::subprocess_error;
+use super::{CommitInfo, Jj, PushedBookmark, jj_argv};
 use anyhow::{Context, Result, anyhow};
 use std::path::{Path, PathBuf};
-use tokio::process::Command;
 
 /// Build a jj template that emits a JSON object: each `(key, expr)` becomes
 /// `"key": json(expr)`.
@@ -262,16 +260,7 @@ async fn workspace_root() -> Result<PathBuf> {
 
 async fn run_jj(args: &[&str]) -> Result<Vec<u8>> {
     log_jj_command(args);
-    let output = Command::new("jj")
-        .arg("--ignore-working-copy")
-        .args(args)
-        .output()
-        .await
-        .context("failed to spawn `jj`")?;
-    if !output.status.success() {
-        return Err(anyhow!("{}", subprocess_error(&output.stderr)));
-    }
-    Ok(output.stdout)
+    crate::proc::capture(&jj_argv(args)).await
 }
 
 fn log_jj_command(args: &[&str]) {
@@ -283,20 +272,7 @@ fn log_jj_command(args: &[&str]) {
 
 async fn run_jj_passthrough(args: &[&str]) -> Result<()> {
     log_jj_command(args);
-    // Inherit stdio so slow commands (e.g. `jj git push -c`) stream their
-    // progress live instead of buffering until exit. The no-status-for-jj rule
-    // targets data-capturing calls; this is deliberate passthrough.
-    // ast-grep-ignore: no-status-for-jj-command
-    let status = Command::new("jj")
-        .arg("--ignore-working-copy")
-        .args(args)
-        .status()
-        .await
-        .context("failed to spawn `jj`")?;
-    if !status.success() {
-        return Err(anyhow!("jj exited with {status}"));
-    }
-    Ok(())
+    crate::proc::stream(&jj_argv(args)).await
 }
 
 async fn run_jj_strs(args: &[String]) -> Result<Vec<u8>> {

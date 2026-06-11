@@ -13,7 +13,6 @@ use crate::{
 };
 use anyhow::{Context, Result, anyhow, bail};
 use std::collections::HashMap;
-use tokio::process::Command;
 
 pub trait Editor {
     /// Edit `initial` with the configured editor and return the resulting buffer.
@@ -206,19 +205,16 @@ impl Editor for TempfileEditor {
             .context("could not create tempfile for editor buffer")?;
         std::fs::write(tmp.path(), initial).context("could not write editor buffer")?;
 
-        let (prog, rest) = argv
-            .split_first()
-            .ok_or_else(|| anyhow!("editor argv is empty"))?;
-        let tmp_arg = tmp.path().to_string_lossy().into_owned();
-        let status = Command::new(prog)
-            .args(rest)
-            .arg(tmp_arg)
-            .status()
-            .await
-            .with_context(|| format!("failed to spawn editor `{prog}`"))?;
-        if !status.success() {
-            return Err(anyhow!("editor exited with {status}"));
+        if argv.is_empty() {
+            return Err(anyhow!("editor argv is empty"));
         }
+        let tmp_arg = tmp.path().to_string_lossy().into_owned();
+        let full: Vec<&str> = argv
+            .iter()
+            .map(String::as_str)
+            .chain(std::iter::once(tmp_arg.as_str()))
+            .collect();
+        crate::proc::stream(&full).await?;
 
         std::fs::read_to_string(tmp.path()).context("could not read edited buffer")
     }

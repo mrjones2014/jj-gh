@@ -183,6 +183,15 @@ pub fn title_base_revset(rev: &str, ancestor: Option<&str>) -> String {
     }
 }
 
+/// Build a `jj` command line, prepending the program and the
+/// `--ignore-working-copy` flag shared by all our invocations.
+pub(crate) fn jj_argv<'a>(args: &[&'a str]) -> Vec<&'a str> {
+    ["jj", "--ignore-working-copy"]
+        .into_iter()
+        .chain(args.iter().copied())
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

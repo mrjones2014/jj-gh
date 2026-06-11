@@ -25,12 +25,11 @@
 
 use super::{Decision, PrPlan, RestackContext};
 use crate::{
-    jj::Jj,
+    jj::{Jj, jj_argv},
     pr::{
         pr_log::{PR_LOG_TEMPLATE, build_aliases},
         restack::RestackArgs,
     },
-    util::subprocess_error,
 };
 use anyhow::{Context, Result, anyhow};
 use crossterm::{
@@ -40,7 +39,6 @@ use crossterm::{
 };
 use std::collections::HashMap;
 use std::io::{Stdout, Write};
-use tokio::process::Command;
 
 const CONTROL_BAR_LINES: u16 = 2;
 const DEFAULT_LOG_HEIGHT: usize = 20;
@@ -830,22 +828,21 @@ async fn capture_log(ctx: &RestackContext, args: &RestackArgs) -> Result<String>
     .alias("pr_log", wrapped);
     let tmp = aliases.write_temp_config()?;
 
-    let mut cmd = Command::new("jj");
-    cmd.arg("--ignore-working-copy")
-        .arg("--config-file")
-        .arg(tmp.path())
-        .arg("log")
-        .arg("--color=always")
-        .args(["-T", "pr_log"]);
-    let output = cmd
-        .output()
+    // Force color through the pipe; we parse the captured output for the TUI.
+    let cfg = tmp.path().to_string_lossy().into_owned();
+    let cmd = jj_argv(&[
+        "--config-file",
+        cfg.as_str(),
+        "log",
+        "--color=always",
+        "-T",
+        "pr_log",
+    ]);
+    let stdout = crate::proc::capture(&cmd)
         .await
         .context("spawning `jj log` for restack")?;
-    if !output.status.success() {
-        return Err(anyhow!("{}", subprocess_error(&output.stderr)));
-    }
     drop(tmp);
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    Ok(String::from_utf8_lossy(&stdout).into_owned())
 }
 
 /// Walk `raw` line-by-line; for each line containing the sentinel pair,

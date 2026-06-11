@@ -13,39 +13,13 @@
 //! real process environment or filesystem.
 
 use crate::config::Config;
+use crate::proc::{ProcessRunner, SpawnOutcome, TokioProcessRunner};
 use anyhow::{Context, Result, anyhow};
 use secrecy::SecretString;
-use std::{ffi::OsStr, time::Duration};
-use tokio::{process::Command, time::timeout};
+use std::ffi::OsStr;
+use std::time::Duration;
 
 const ASKPASS_STDOUT_LIMIT: usize = 4 * 1024;
-
-/// Outcome of a single process invocation through a [`ProcessRunner`].
-#[derive(Debug, Clone)]
-pub enum SpawnOutcome {
-    /// Process ran to completion. `code` is `None` when terminated by a signal.
-    Completed {
-        code: Option<i32>,
-        stdout: Vec<u8>,
-        stderr: Vec<u8>,
-    },
-    /// Process could not be spawned (e.g. missing binary, permission denied).
-    SpawnFailed(String),
-    /// Process exceeded the configured timeout.
-    TimedOut,
-}
-
-impl SpawnOutcome {
-    fn status_display(code: Option<i32>) -> String {
-        code.map_or_else(|| "signal".to_string(), |c| format!("exit code {c}"))
-    }
-}
-
-/// External process boundary. Implementations spawn `argv[0]` with `argv[1..]`
-/// as arguments and return its outcome, applying any timeout themselves.
-pub trait ProcessRunner {
-    async fn run(&self, argv: &[impl AsRef<OsStr>], timeout: Duration) -> SpawnOutcome;
-}
 
 /// Environment lookup boundary. Implementations return the value of `key` or
 /// `None` if unset.
@@ -59,26 +33,6 @@ pub struct OsEnv;
 impl EnvReader for OsEnv {
     fn get(&self, key: &str) -> Option<String> {
         std::env::var(key).ok()
-    }
-}
-
-/// Production runner backed by `tokio::process` + `tokio::time::timeout`.
-pub struct TokioProcessRunner;
-
-impl ProcessRunner for TokioProcessRunner {
-    async fn run(&self, argv: &[impl AsRef<OsStr>], dur: Duration) -> SpawnOutcome {
-        let Some((prog, rest)) = argv.split_first() else {
-            return SpawnOutcome::SpawnFailed("empty argv".into());
-        };
-        match timeout(dur, Command::new(prog).args(rest).output()).await {
-            Ok(Ok(output)) => SpawnOutcome::Completed {
-                code: output.status.code(),
-                stdout: output.stdout,
-                stderr: output.stderr,
-            },
-            Ok(Err(io)) => SpawnOutcome::SpawnFailed(io.to_string()),
-            Err(_) => SpawnOutcome::TimedOut,
-        }
     }
 }
 
