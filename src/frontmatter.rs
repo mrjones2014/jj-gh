@@ -101,30 +101,18 @@ impl Frontmatter {
         Ok((fm, body))
     }
 
-    /// Validate this frontmatter + `body` before sending to the GH API.
-    ///
-    /// `raw_template_body` is the unedited body we wrote to the tempfile; if the
-    /// user saved without changes, we refuse to open a PR.
+    /// Validate this frontmatter before sending it to the GH API.
     ///
     /// # Errors
     ///
-    /// Returns an error if the title is empty, the base is empty, the body is
-    /// empty, or the body is unchanged from the raw template.
-    pub fn validate(&self, body: &str, raw_template_body: &str) -> Result<()> {
+    /// Returns an error if the title or base is empty.
+    pub fn validate(&self) -> Result<()> {
         if self.title.trim().is_empty() {
             return Err(anyhow!("title is empty"));
         }
 
         if self.base.trim().is_empty() {
             return Err(anyhow!("base is empty"));
-        }
-
-        if body.trim().is_empty() {
-            return Err(anyhow!("body is empty"));
-        }
-
-        if body.trim() == raw_template_body.trim() {
-            return Err(anyhow!("body is unchanged from the template"));
         }
 
         if self.title.chars().count() > TITLE_WARN_LEN {
@@ -364,42 +352,24 @@ mod tests {
 
     #[test]
     fn validate_happy_path() {
-        fm("title")
-            .validate("body text", "original template")
-            .unwrap();
+        fm("title").validate().unwrap();
     }
 
     #[test]
     fn validate_empty_title_errors() {
-        let err = fm("   ").validate("body", "template").unwrap_err();
+        let err = fm("   ").validate().unwrap_err();
         assert!(err.to_string().contains("title is empty"));
     }
 
     #[test]
     fn validate_empty_base_errors() {
-        let err = fm_with_base("title", "  ")
-            .validate("body", "template")
-            .unwrap_err();
+        let err = fm_with_base("title", "  ").validate().unwrap_err();
         assert!(err.to_string().contains("base is empty"));
-    }
-
-    #[test]
-    fn validate_empty_body_errors() {
-        let err = fm("title").validate("  \n", "template").unwrap_err();
-        assert!(err.to_string().contains("body is empty"));
-    }
-
-    #[test]
-    fn validate_unchanged_body_errors() {
-        let err = fm("title")
-            .validate("template text", "  template text  ")
-            .unwrap_err();
-        assert!(err.to_string().contains("unchanged"));
     }
 
     #[test]
     fn validate_long_title_warns_but_passes() {
         let long_title = "x".repeat(TITLE_WARN_LEN + 1);
-        fm(&long_title).validate("body", "template").unwrap();
+        fm(&long_title).validate().unwrap();
     }
 }

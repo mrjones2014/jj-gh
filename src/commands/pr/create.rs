@@ -248,8 +248,6 @@ where
         auto_merge: *auto_merge,
         auto_merge_method: *auto_merge_method,
     };
-    let raw_template_body = raw_template.clone().unwrap_or_default();
-
     let editor_argv = resolve_editor_argv(editor_argv.as_deref(), env)?;
     let diff_preview = if *show_diffs {
         jj.diff(&title_revset)
@@ -271,7 +269,7 @@ where
         preview,
     )
     .await?;
-    final_fm.validate(&body, &raw_template_body)?;
+    final_fm.validate()?;
     let final_base_branch = remote::branch_from_base_spec(&target.owner, &final_fm.base)?;
     let final_base_lookup = if final_base_branch == base_branch {
         base_lookup
