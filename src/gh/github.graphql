@@ -165,7 +165,7 @@ type AddEnterpriseSupportEntitlementPayload {
 }
 input AddLabelsToLabelableInput {
     clientMutationId: String
-    labelIds: [ID!]! @possibleTypes(concreteTypes: ["Label"])
+    labelIds: [ID!] @possibleTypes(concreteTypes: ["Label"])
     labelableId: ID! @possibleTypes(concreteTypes: ["Discussion", "Issue", "PullRequest"], abstractType: "Labelable")
 }
 type AddLabelsToLabelablePayload {
@@ -213,6 +213,15 @@ input AddProjectV2ItemByIdInput {
 type AddProjectV2ItemByIdPayload {
     clientMutationId: String
     item: ProjectV2Item
+}
+input AddPullRequestCreationCapBypassUsersInput {
+    clientMutationId: String
+    repositoryId: ID! @possibleTypes(concreteTypes: ["Repository"])
+    userIds: [ID!]! @possibleTypes(concreteTypes: ["User"])
+}
+type AddPullRequestCreationCapBypassUsersPayload {
+    clientMutationId: String
+    repository: Repository
 }
 input AddPullRequestReviewCommentInput {
     body: String
@@ -5009,6 +5018,10 @@ type IssueContributionsByRepository @docsCategory(name: "issues") {
   ): CreatedIssueContributionConnection!
     repository: Repository!
 }
+enum IssueCreationPolicy @docsCategory(name: "issues") {
+    ALL
+    COLLABORATORS_ONLY
+}
 type IssueDependenciesSummary @docsCategory(name: "issues") {
     blockedBy: Int!
     blocking: Int!
@@ -6503,6 +6516,9 @@ type Mutation @docsCategory(name: "meta") {
     addProjectV2ItemById(
         input: AddProjectV2ItemByIdInput!
   ): AddProjectV2ItemByIdPayload @docsCategory(name: "projects")
+    addPullRequestCreationCapBypassUsers(
+        input: AddPullRequestCreationCapBypassUsersInput!
+  ): AddPullRequestCreationCapBypassUsersPayload @docsCategory(name: "pulls")
     addPullRequestReview(
         input: AddPullRequestReviewInput!
   ): AddPullRequestReviewPayload @docsCategory(name: "pulls")
@@ -6948,6 +6964,9 @@ type Mutation @docsCategory(name: "meta") {
     removeOutsideCollaborator(
         input: RemoveOutsideCollaboratorInput!
   ): RemoveOutsideCollaboratorPayload @docsCategory(name: "orgs")
+    removePullRequestCreationCapBypassUsers(
+        input: RemovePullRequestCreationCapBypassUsersInput!
+  ): RemovePullRequestCreationCapBypassUsersPayload @docsCategory(name: "pulls")
     removeReaction(
         input: RemoveReactionInput!
   ): RemoveReactionPayload @docsCategory(name: "reactions")
@@ -11225,6 +11244,7 @@ type ProjectV2 implements Closable & Node & Updatable @docsCategory(name: "proje
     id: ID!
     items(
         after: String
+        archivedStates: [ProjectV2ItemArchivedState!] = [NOT_ARCHIVED]
         before: String
         first: Int
         last: Int
@@ -11436,6 +11456,10 @@ type ProjectV2Item implements Node @docsCategory(name: "projects") {
     project: ProjectV2!
     type: ProjectV2ItemType!
     updatedAt: DateTime!
+}
+enum ProjectV2ItemArchivedState @docsCategory(name: "projects") {
+    ARCHIVED
+    NOT_ARCHIVED
 }
 type ProjectV2ItemConnection {
     edges: [ProjectV2ItemEdge]
@@ -12318,6 +12342,14 @@ type PullRequestContributionsByRepository @docsCategory(name: "pulls") {
         orderBy: ContributionOrder = {direction: DESC}
   ): CreatedPullRequestContributionConnection!
     repository: Repository!
+}
+type PullRequestCreationCapConfig @docsCategory(name: "pulls") {
+    bypassedUsers(
+        after: String
+        before: String
+        first: Int
+        last: Int
+  ): UserConnection!
 }
 enum PullRequestCreationPolicy @docsCategory(name: "pulls") {
     ALL
@@ -13407,6 +13439,15 @@ input RemoveOutsideCollaboratorInput {
 type RemoveOutsideCollaboratorPayload {
     clientMutationId: String
     removedUser: User
+}
+input RemovePullRequestCreationCapBypassUsersInput {
+    clientMutationId: String
+    repositoryId: ID! @possibleTypes(concreteTypes: ["Repository"])
+    userIds: [ID!]! @possibleTypes(concreteTypes: ["User"])
+}
+type RemovePullRequestCreationCapBypassUsersPayload {
+    clientMutationId: String
+    repository: Repository
 }
 input RemoveReactionInput {
     clientMutationId: String
@@ -15234,6 +15275,7 @@ type Repository implements Node & PackageOwner & ProjectOwner & ProjectV2Recent 
     issue(
         number: Int!
   ): Issue
+    issueCreationPolicy: IssueCreationPolicy
     issueFields(
         after: String
         before: String
@@ -15387,6 +15429,7 @@ type Repository implements Node & PackageOwner & ProjectOwner & ProjectV2Recent 
     pullRequest(
         number: Int!
   ): PullRequest
+    pullRequestCreationCapConfig: PullRequestCreationCapConfig
     pullRequestCreationPolicy: PullRequestCreationPolicy
     pullRequestTemplates: [PullRequestTemplate!]
     pullRequests(
@@ -15500,6 +15543,7 @@ type Repository implements Node & PackageOwner & ProjectOwner & ProjectV2Recent 
     url: URI!
     usesCustomOpenGraphImage: Boolean!
     viewerCanAdminister: Boolean!
+    viewerCanCreateIssues: Boolean!
     viewerCanCreateProjects: Boolean!
     @deprecated(
       reason: "Projects (classic) is being deprecated in favor of the new Projects experience, see: https://github.blog/changelog/2024-05-23-sunset-notice-projects-classic/. Removal on 2025-04-01 UTC."
@@ -15682,6 +15726,7 @@ interface RepositoryInfo @docsCategory(name: "repos") {
     isMirror: Boolean!
     isPrivate: Boolean!
     isTemplate: Boolean!
+    issueCreationPolicy: IssueCreationPolicy
     licenseInfo: License
     lockReason: RepositoryLockReason
     mirrorUrl: URI
@@ -16825,6 +16870,7 @@ enum SocialAccountProvider @docsCategory(name: "users") {
     MASTODON
     NPM
     REDDIT
+    THREADS
     TWITCH
     TWITTER
     YOUTUBE
@@ -17602,6 +17648,7 @@ type StatusContext implements Node & RequirableByPullRequest @docsCategory(name:
   ): Boolean!
     state: StatusState!
     targetUrl: URI
+    updatedAt: DateTime!
 }
 type StatusContextStateCount @docsCategory(name: "commits") {
     count: Int!
@@ -20137,6 +20184,7 @@ type WorkflowRun implements Node & UniformResourceLocatable @docsCategory(name: 
         first: Int
         last: Int
   ): DeploymentReviewConnection!
+    displayTitle: String
     event: String!
     file: WorkflowRunFile
     id: ID!
@@ -20147,6 +20195,7 @@ type WorkflowRun implements Node & UniformResourceLocatable @docsCategory(name: 
         last: Int
   ): DeploymentRequestConnection!
     resourcePath: URI!
+    runAttempt: Int!
     runNumber: Int!
     updatedAt: DateTime!
     url: URI!
