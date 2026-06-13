@@ -25,3 +25,4 @@ semver_check = false
 [[package]]
 name = "jj-gh-config-derive"
 changelog_update = false
+git_release_enable = false
