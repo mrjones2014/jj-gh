@@ -10,12 +10,26 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
 jobs:
+  discover_checks:
+    runs-on: ubuntu-latest
+    outputs:
+      targets: ${{ steps.checks.outputs.targets }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
+      - id: checks
+        run: echo "targets=$(nix eval --json .#checks.x86_64-linux --apply builtins.attrNames)" >> "$GITHUB_OUTPUT"
   check:
+    needs: discover_checks
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        target: [jj-gh, clippy, nextest, treefmt, ast-grep, graphql-validate, hm-module-schema, docs, release-plz-patched]
+        target: ${{ fromJSON(needs.discover_checks.outputs.targets) }}
     steps:
       - uses: wimpysworld/nothing-but-nix@main
       - uses: actions/checkout@v6
@@ -30,19 +44,17 @@ jobs:
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
           extraPullNames: nix-community
       - run: nix build .#checks.x86_64-linux.${{ matrix.target }} --print-build-logs
-      - if: matrix.target == 'jj-gh' && github.event_name == 'push'
-        run: nix build .#checks.x86_64-linux.release-plz-patched --print-build-logs
       # we don't really ever need to rebuild this, so pin it in cachix
       - if: matrix.target == 'release-plz-patched' && github.event_name == 'push'
         run: |
           path=$(nix build .#checks.x86_64-linux.release-plz-patched --print-out-paths --no-link)
           cachix pin jj-gh release-plz-patched "$path"
   flake-check:
-    needs: check
+    needs: [discover_checks, check]
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - if: ${{ contains(needs.check.result, 'failure') || contains(needs.check.result, 'cancelled') }}
+      - if: ${{ needs.discover_checks.result != 'success' || needs.check.result != 'success' }}
         run: exit 1
   udeps:
     runs-on: ubuntu-latest
