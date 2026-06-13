@@ -12,9 +12,11 @@ use crate::{
     },
     template::{self, TemplateSource},
 };
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use jj_gh_config_derive::subcommand_args;
 use std::collections::HashMap;
+
+mod title_picker;
 
 subcommand_args! {
     pub struct CreateArgs {
@@ -96,6 +98,16 @@ subcommand_args! {
         #[arg(long, conflicts_with_all = ["template", "template_file"])]
         pub no_template: bool,
 
+        /// Interactively choose which commit supplies the PR title.
+        #[arg(long)]
+        pub pick_title: bool,
+
+        /// jj template string used to render candidate PR titles. Evaluated
+        /// once per commit in the PR revset.
+        #[arg(long, value_name = "TEMPLATE")]
+        #[config(maps_to = "pr_create_title_template")]
+        pub title_template: String,
+
         /// Editor command, e.g. `--editor "nvim +7"`. Default:
         /// `editor` in config, then `$VISUAL`, then `$EDITOR`.
         #[arg(short = 'e', long, value_name = "CMD", value_parser = shell_words::split)]
@@ -163,6 +175,8 @@ where
         no_auto_merge: _,
         no_draft: _,
         no_template: _,
+        pick_title,
+        title_template,
     } = args;
 
     let remote = jj.resolve_default_remote(remote.as_ref()).await?;
@@ -228,7 +242,18 @@ where
     let base_display = target.base_spec(&base_branch);
 
     let title_revset = jj::title_base_revset(rev, ancestor.as_deref());
-    let default_title = jj.first_commit_description(&title_revset).await?;
+    let candidates = resolve_title_candidates(jj, &title_revset, title_template).await?;
+    let default_title = if *pick_title {
+        crate::ui::tui::require_tty("--pick-title")?;
+        title_picker::pick(&candidates)?
+    } else {
+        candidates
+            .first()
+            .context("no commits found in the PR revset")?
+            .valid_title()
+            .context("oldest commit produced an invalid PR title")?
+            .to_string()
+    };
 
     let raw_template = load_template_for(
         args,
@@ -345,6 +370,64 @@ where
     Ok(())
 }
 
+const TITLE_RECORD_OPEN: char = '\u{E010}';
+const TITLE_RECORD_SEPARATOR: char = '\u{E011}';
+const TITLE_RECORD_CLOSE: char = '\u{E012}';
+
+#[derive(Debug, Clone)]
+pub(crate) struct TitleCandidate {
+    pub change_id: String,
+    pub title: String,
+}
+
+impl TitleCandidate {
+    pub(crate) fn valid_title(&self) -> Option<&str> {
+        let title = self.title.trim();
+        (!title.is_empty() && !title.contains(['\n', '\r'])).then_some(title)
+    }
+}
+
+async fn resolve_title_candidates<J: Jj>(
+    jj: &J,
+    title_revset: &str,
+    title_template: &str,
+) -> Result<Vec<TitleCandidate>> {
+    let template = format!(
+        r#""{TITLE_RECORD_OPEN}" ++ change_id.shortest(8) ++ "{TITLE_RECORD_SEPARATOR}" ++ ({title_template}) ++ "{TITLE_RECORD_CLOSE}""#
+    );
+    let rendered = jj
+        .eval_template(title_revset, &template, None, true)
+        .await
+        .context("evaluating PR title template")?;
+    parse_title_candidates(&rendered)
+}
+
+fn parse_title_candidates(rendered: &str) -> Result<Vec<TitleCandidate>> {
+    let mut candidates = Vec::new();
+    let mut rest = rendered;
+    while let Some(open) = rest.find(TITLE_RECORD_OPEN) {
+        rest = &rest[open + TITLE_RECORD_OPEN.len_utf8()..];
+        let separator = rest
+            .find(TITLE_RECORD_SEPARATOR)
+            .context("malformed PR title candidate: missing separator")?;
+        let change_id = &rest[..separator];
+        rest = &rest[separator + TITLE_RECORD_SEPARATOR.len_utf8()..];
+        let close = rest
+            .find(TITLE_RECORD_CLOSE)
+            .context("malformed PR title candidate: missing closing marker")?;
+        let title = &rest[..close];
+        rest = &rest[close + TITLE_RECORD_CLOSE.len_utf8()..];
+        candidates.push(TitleCandidate {
+            change_id: change_id.to_string(),
+            title: title.to_string(),
+        });
+    }
+    if candidates.is_empty() {
+        bail!("no commits found in the PR revset");
+    }
+    Ok(candidates)
+}
+
 async fn load_template_for<J: Jj>(
     args: &CreateArgs,
     jj: &J,
@@ -387,4 +470,43 @@ async fn load_template_for<J: Jj>(
 /// Wrap `s` as a jj template double-quoted string literal, escaping `\` and `"`.
 fn quote_jj(s: &str) -> String {
     format!(r#""{}""#, escape_jj_string(s))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn title_candidate_requires_single_nonempty_line() {
+        let valid = TitleCandidate {
+            change_id: "abcdefgh".into(),
+            title: "  good title  ".into(),
+        };
+        assert_eq!(valid.valid_title(), Some("good title"));
+
+        for title in ["", " \t ", "first\nsecond", "first\rsecond"] {
+            let invalid = TitleCandidate {
+                change_id: "abcdefgh".into(),
+                title: title.into(),
+            };
+            assert!(invalid.valid_title().is_none());
+        }
+    }
+
+    #[test]
+    fn parses_marker_delimited_title_candidates() {
+        let rendered = format!(
+            "{TITLE_RECORD_OPEN}abc{TITLE_RECORD_SEPARATOR}one{TITLE_RECORD_CLOSE}\
+             {TITLE_RECORD_OPEN}def{TITLE_RECORD_SEPARATOR}two\nlines{TITLE_RECORD_CLOSE}"
+        );
+        let candidates = parse_title_candidates(&rendered).unwrap();
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates[0].change_id, "abc");
+        assert_eq!(candidates[1].title, "two\nlines");
+    }
+
+    #[test]
+    fn rejects_empty_candidate_set() {
+        assert!(parse_title_candidates("").is_err());
+    }
 }

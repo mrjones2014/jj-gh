@@ -2,5 +2,6 @@
 //! doesn't pollute stdout pipelines.
 
 pub mod spinner;
+pub mod tui;
 
 pub use spinner::Spinner;

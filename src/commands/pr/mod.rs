@@ -314,6 +314,23 @@ mod tests {
     }
 
     #[test]
+    fn create_title_template_cli_overrides_config() {
+        let c = merged_create(
+            &["@-", "--title-template", "description.first_line()"],
+            r#"
+            [jj-gh]
+            pr_create_title_template = "description"
+            "#,
+        );
+        assert_eq!(c.pr_create_title_template, "description.first_line()");
+    }
+
+    #[test]
+    fn create_pick_title_parses() {
+        assert!(parse_create(&["@-", "--pick-title"]).pick_title);
+    }
+
+    #[test]
     fn create_negative_flags_override_config() {
         let c = merged_create(
             &["@-", "--no-draft", "--no-auto-merge", "--no-diffs"],
