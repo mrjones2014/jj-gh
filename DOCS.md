@@ -58,7 +58,7 @@ Commands to work with PRs
 - `edit` — Edit an existing PR's title, body, base, labels, reviewers, draft state, and auto-merge settings via the markdown frontmatter editor flow
 - `log` — Like `jj log`, but injects PR metadata (e.g. number, CI status, URL)
 - `restack` — Push the current `jj` stack shape up to GitHub by updating each PR's base branch to match its closest stacked ancestor bookmark
-- `retry-failed` — Re-run failed CI jobs on a PR
+- `retry-failed` — Re-run failed CI jobs on a PR, or on all local PRs with failed CI
 
 ## `jj-gh pr create`
 
@@ -237,13 +237,13 @@ Restack does not rewrite the jj graph; the user shapes the graph first (e.g. via
 
 ## `jj-gh pr retry-failed`
 
-Re-run failed CI jobs on a PR.
+Re-run failed CI jobs on a PR, or on all local PRs with failed CI.
 
-Resolves the PR from a revision (via its local bookmark) or PR number, then re-runs failed workflow runs on the PR's head commit. By default the command fails if CI has not yet completed, because GitHub refuses to re-run a workflow run until it reaches the `completed` state.
+Resolves the PR from a revision (via its local bookmark) or PR number, then re-runs failed workflow runs on the PR's head commit. By default the command fails if CI has not yet completed, because GitHub refuses to re-run a workflow run until it reaches the `completed` state. Pass `--all` to retry every local PR whose rolled-up CI status failed.
 
 With `--cancel`, in-progress runs are cancelled first; once they finalize, every workflow run is re-run (full pipeline restart).
 
-**Usage:** `jj-gh pr retry-failed [OPTIONS] <PR_NUM|REV>`
+**Usage:** `jj-gh pr retry-failed [OPTIONS] <PR_NUM|REV|--all>`
 
 **Command Alias:** `rerun`
 
@@ -253,6 +253,7 @@ With `--cancel`, in-progress runs are cancelled first; once they finalize, every
 
 ###### **Options:**
 
+- `--all` — Retry failed CI on all local PRs
 - `--cancel` — Cancel any in-progress runs and restart the entire pipeline. Without this flag, the command fails if CI has not yet completed
 - `--cancel-timeout <SECS>` — Seconds to wait for cancelled runs to finalize before re-running. Only meaningful with --cancel
 
