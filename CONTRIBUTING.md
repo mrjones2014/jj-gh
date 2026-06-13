@@ -45,7 +45,9 @@ I also recommend setting the following repo configs for `jj`:
 
 ```toml
 [aliases]
-pr = ["util", "exec", "--", "nix", "run", ".#", "--", "pr"]
+# .#dev is the same as `.#default` but with `doCheck = false`
+# and skips completion installation, for faster local iteration
+pr = ["util", "exec", "--", "nix", "run", ".#dev", "--", "pr"]
 
 [fix.tools.treefmt]
 command = ["treefmt", "--quiet", "--stdin", "$path"]
