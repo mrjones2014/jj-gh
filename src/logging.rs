@@ -57,11 +57,11 @@ pub fn init(level: LevelFilter) -> Result<LoggerHandle, FlexiLoggerError> {
 
 fn level_palette(level: log::Level) -> (&'static str, AnsiColor) {
     match level {
-        log::Level::Error => (" ERROR ", AnsiColor::Red),
-        log::Level::Warn => (" WARN  ", AnsiColor::Yellow),
-        log::Level::Info => (" INFO  ", AnsiColor::Blue),
-        log::Level::Debug => (" DEBUG ", AnsiColor::Magenta),
-        log::Level::Trace => (" TRACE ", AnsiColor::BrightBlack),
+        log::Level::Error => ("ERROR", AnsiColor::Red),
+        log::Level::Warn => ("WARN", AnsiColor::Yellow),
+        log::Level::Info => ("INFO", AnsiColor::Blue),
+        log::Level::Debug => ("DEBUG", AnsiColor::Magenta),
+        log::Level::Trace => ("TRACE", AnsiColor::BrightBlack),
     }
 }
 
