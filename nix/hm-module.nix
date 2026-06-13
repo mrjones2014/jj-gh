@@ -140,6 +140,18 @@ in
         '';
       };
 
+      pr_create_title_template = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        example = "description.first_line()";
+        description = ''
+          jj template string used to render the PR title when opening editor.
+          Evaluated against the revset contained in the PR. You can use
+          `--pick-title` at runtime to choose the commit to take the PR title
+          from.
+        '';
+      };
+
       pr_log_template = mkOption {
         type = types.nullOr types.str;
         default = null;

@@ -23,25 +23,30 @@
 //! Nothing is sent to the GitHub API until the user accepts the summary
 //! screen.
 
-use super::{Decision, PrPlan, RestackContext};
 use crate::{
     commands::pr::{
         log::{PR_LOG_TEMPLATE, build_aliases},
-        restack::RestackArgs,
+        restack::{Decision, PrPlan, RestackArgs, RestackContext},
     },
     jj::{Jj, jj_argv},
+    ui::tui::{
+        HORIZONTAL_SEPARATOR, InlineSession, bounded_region_rows, ensure_visible, move_index,
+        print_highlighted_row, truncate,
+    },
 };
 use anyhow::{Context, Result, anyhow};
 use crossterm::{
     cursor,
     event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
-    execute, queue, style, terminal,
+    queue, style, terminal,
 };
 use std::collections::HashMap;
 use std::io::{Stdout, Write};
 
 const CONTROL_BAR_LINES: u16 = 2;
-const DEFAULT_LOG_HEIGHT: usize = 20;
+const MAX_CONTENT_HEIGHT: usize = 20;
+const ARROW_LEFT: &str = " ← ";
+const ARROW_RIGHT: &str = "  → ";
 
 /// Unicode Private-Use Area markers wrapping the commit id in our
 /// restack-specific template. Invisible in terminals (no glyph), so users
@@ -84,6 +89,7 @@ struct UiState {
     picker: Option<PickerState>,
     base_candidates: Vec<String>,
     summary_scroll: usize,
+    viewport_height: usize,
 }
 
 pub async fn run<J: Jj>(
@@ -109,6 +115,13 @@ pub async fn run<J: Jj>(
         .map(|p| (p.pr_number, Decision::Unset))
         .collect();
 
+    let requested_rows = bounded_region_rows(
+        log_lines.len().max(ctx.plans.len() + 2),
+        CONTROL_BAR_LINES,
+        MAX_CONTENT_HEIGHT,
+    );
+    let mut session = InlineSession::enter(requested_rows)?;
+    let viewport_height = usize::from(session.rows().saturating_sub(CONTROL_BAR_LINES));
     let mut state = UiState {
         plans: ctx.plans.clone(),
         decisions,
@@ -121,13 +134,13 @@ pub async fn run<J: Jj>(
         picker: None,
         base_candidates: build_base_candidates(ctx),
         summary_scroll: 0,
+        viewport_height,
     };
 
-    let guard = AltScreenGuard::enter()?;
     let mut out = std::io::stdout();
 
     let result = loop {
-        render(&mut out, &state)?;
+        render(&mut out, &mut session, &state)?;
         let Event::Key(key) = event::read()? else {
             continue;
         };
@@ -141,7 +154,7 @@ pub async fn run<J: Jj>(
         }
     };
 
-    drop(guard);
+    drop(session);
 
     match result {
         Ok(()) => Ok(state.decisions),
@@ -149,53 +162,30 @@ pub async fn run<J: Jj>(
     }
 }
 
-struct AltScreenGuard;
+fn render(out: &mut Stdout, session: &mut InlineSession, state: &UiState) -> Result<()> {
+    let cols = terminal::size().context("reading terminal size")?.0;
+    session.begin_frame(out)?;
 
-impl AltScreenGuard {
-    fn enter() -> Result<Self> {
-        terminal::enable_raw_mode().context("enabling raw mode")?;
-        execute!(
-            std::io::stdout(),
-            terminal::EnterAlternateScreen,
-            cursor::Hide,
-        )
-        .context("entering alt screen")?;
-        Ok(Self)
-    }
-}
-
-impl Drop for AltScreenGuard {
-    fn drop(&mut self) {
-        let _ = execute!(
-            std::io::stdout(),
-            cursor::Show,
-            terminal::LeaveAlternateScreen,
-        );
-        let _ = terminal::disable_raw_mode();
-    }
-}
-
-fn render(out: &mut Stdout, state: &UiState) -> Result<()> {
-    let (cols, rows) = terminal::size().context("reading terminal size")?;
-    let log_height = rows.saturating_sub(CONTROL_BAR_LINES).into();
-
-    queue!(
-        out,
-        terminal::Clear(terminal::ClearType::All),
-        cursor::MoveTo(0, 0),
-    )?;
-
-    match state.mode {
-        Mode::Summary => render_summary(out, state, log_height)?,
-        _ => render_log(out, state, log_height)?,
+    let rendered_rows = match state.mode {
+        Mode::Summary => render_summary(out, state, state.viewport_height)?,
+        _ => render_log(out, state, state.viewport_height)?,
+    };
+    if rendered_rows < state.viewport_height {
+        queue!(
+            out,
+            cursor::MoveDown(
+                u16::try_from(state.viewport_height - rendered_rows).unwrap_or(u16::MAX)
+            ),
+            cursor::MoveToColumn(0),
+        )?;
     }
 
-    render_control_bar(out, state, cols, rows)?;
+    render_control_bar(out, state, cols)?;
     out.flush()?;
     Ok(())
 }
 
-fn render_log(out: &mut Stdout, state: &UiState, log_height: usize) -> Result<()> {
+fn render_log(out: &mut Stdout, state: &UiState, log_height: usize) -> Result<usize> {
     let cursor_line = state
         .pr_order
         .get(state.cursor_pr_idx)
@@ -209,67 +199,22 @@ fn render_log(out: &mut Stdout, state: &UiState, log_height: usize) -> Result<()
     {
         let absolute = state.scroll_offset + i;
         let highlighted = Some(absolute) == cursor_line;
-        queue!(out, cursor::MoveTo(0, u16::try_from(i).unwrap_or(u16::MAX)))?;
         if highlighted {
-            let (painted, visible) = apply_bg_highlight(line, HIGHLIGHT_BG);
-            let pad = cols.saturating_sub(visible);
-            queue!(
-                out,
-                style::Print(painted),
-                style::Print(format!("{HIGHLIGHT_BG}{:pad$}\x1b[0m", "", pad = pad)),
-            )?;
+            print_highlighted_row(out, line, cols)?;
         } else {
             queue!(out, style::Print(line))?;
         }
+        queue!(out, cursor::MoveDown(1), cursor::MoveToColumn(0))?;
     }
-    Ok(())
+    Ok(viewport_end.saturating_sub(state.scroll_offset))
 }
 
-/// ANSI sequence applied to highlight the cursor row's background
-const HIGHLIGHT_BG: &str = "\x1b[48;5;236m";
-
-/// Wrap `line` so the background-color escape stays active across any
-/// `\x1b[0m`/`\x1b[m` resets embedded in the captured output, and return the
-/// number of visible (non-ANSI) characters for downstream padding.
-fn apply_bg_highlight(line: &str, bg_code: &str) -> (String, usize) {
-    let mut out = String::with_capacity(line.len() + bg_code.len() * 4);
-    out.push_str(bg_code);
-    let mut visible = 0usize;
-    let mut chars = line.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '\x1b' && chars.peek() == Some(&'[') {
-            let mut esc = String::from("\x1b[");
-            chars.next();
-            for ch in chars.by_ref() {
-                esc.push(ch);
-                if ch.is_ascii_alphabetic() {
-                    break;
-                }
-            }
-            out.push_str(&esc);
-            if esc.ends_with('m') {
-                let body = &esc[2..esc.len() - 1];
-                let is_reset = body.is_empty() || body.split(';').any(|p| p == "0" || p == "00");
-                if is_reset {
-                    out.push_str(bg_code);
-                }
-            }
-        } else {
-            out.push(c);
-            visible += 1;
-        }
-    }
-    out.push_str("\x1b[0m");
-    (out, visible)
-}
-
-fn render_summary(out: &mut Stdout, state: &UiState, height: usize) -> Result<()> {
+fn render_summary(out: &mut Stdout, state: &UiState, height: usize) -> Result<usize> {
     let total_rows = state.plans.len() + 2;
     let visible_rows = height.min(total_rows.saturating_sub(state.summary_scroll));
     let mut row = 0_u16;
     let mut idx = state.summary_scroll;
     while idx < state.summary_scroll + visible_rows {
-        queue!(out, cursor::MoveTo(0, row))?;
         if idx == 0 {
             queue!(
                 out,
@@ -290,10 +235,11 @@ fn render_summary(out: &mut Stdout, state: &UiState, height: usize) -> Result<()
                 .unwrap_or(&Decision::Unset);
             render_summary_row(out, p, decision)?;
         }
+        queue!(out, cursor::MoveDown(1), cursor::MoveToColumn(0))?;
         row = row.saturating_add(1);
         idx += 1;
     }
-    Ok(())
+    Ok(usize::from(row))
 }
 
 fn render_summary_row(out: &mut Stdout, p: &PrPlan, decision: &Decision) -> Result<()> {
@@ -322,7 +268,7 @@ fn render_summary_row(out: &mut Stdout, p: &PrPlan, decision: &Decision) -> Resu
         style::SetForegroundColor(base_color),
         style::Print(base),
         style::SetForegroundColor(style::Color::DarkGrey),
-        style::Print(" \u{2190} "),
+        style::Print(ARROW_LEFT),
         style::SetForegroundColor(style::Color::Magenta),
         style::Print(&p.bookmark),
         style::ResetColor,
@@ -345,17 +291,16 @@ const BROWSE_KEYMAP: &str = "c=confirm e=edit s=skip j/k=move Enter=summary q=qu
 const SUMMARY_KEYMAP: &str = "y=submit  Esc/q=back";
 const PICKER_KEYMAP: &str = "Enter=apply Esc=cancel C-n/C-p";
 
-fn render_control_bar(out: &mut Stdout, state: &UiState, cols: u16, rows: u16) -> Result<()> {
-    let bar_top = rows.saturating_sub(CONTROL_BAR_LINES);
-    let border = "\u{2501}".repeat(cols.into());
+fn render_control_bar(out: &mut Stdout, state: &UiState, cols: u16) -> Result<()> {
+    let border = HORIZONTAL_SEPARATOR.repeat(cols.into());
     queue!(
         out,
-        cursor::MoveTo(0, bar_top),
         style::SetAttribute(style::Attribute::Reset),
         style::SetForegroundColor(style::Color::DarkGrey),
         style::Print(border),
         style::ResetColor,
-        cursor::MoveTo(0, bar_top + 1),
+        cursor::MoveDown(1),
+        cursor::MoveToColumn(0),
         terminal::Clear(terminal::ClearType::UntilNewLine),
     )?;
 
@@ -390,7 +335,7 @@ fn render_browse_status(out: &mut Stdout, state: &UiState, cols: u16) -> Result<
     let title = truncate(&plan.title, 50);
     let base = display_base(plan);
     let left_plain = format!(
-        "[{n}/{total}] #{pr} {title}  {base} \u{2190} {bookmark} [{badge}]",
+        "[{n}/{total}] #{pr} {title}  {base}{ARROW_LEFT}{bookmark} [{badge}]",
         pr = plan.pr_number,
         bookmark = plan.bookmark,
         badge = decision_badge(decision, plan),
@@ -448,7 +393,7 @@ fn render_picker_status(out: &mut Stdout, state: &UiState, cols: u16) -> Result<
         style::ResetColor,
         style::Print(format!("{}_", picker.input)),
         style::SetForegroundColor(style::Color::DarkGrey),
-        style::Print("  \u{2192} "),
+        style::Print(ARROW_RIGHT),
         style::ResetColor,
         style::Print(candidate),
     )?;
@@ -518,7 +463,7 @@ fn render_base_arrow(out: &mut Stdout, plan: &PrPlan) -> Result<()> {
         style::SetForegroundColor(base_color),
         style::Print(display_base(plan)),
         style::SetForegroundColor(style::Color::DarkGrey),
-        style::Print(" \u{2190} "),
+        style::Print(ARROW_LEFT),
         style::SetForegroundColor(style::Color::Magenta),
         style::Print(&plan.bookmark),
         style::ResetColor,
@@ -551,15 +496,6 @@ fn decision_badge(decision: &Decision, plan: &PrPlan) -> &'static str {
         Decision::EditedTo(_) => "edited",
         Decision::Skip => "skip",
     }
-}
-
-fn truncate(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        return s.to_string();
-    }
-    let mut out = s.chars().take(max.saturating_sub(1)).collect::<String>();
-    out.push('\u{2026}');
-    out
 }
 
 fn count_submittable(state: &UiState) -> usize {
@@ -694,13 +630,8 @@ fn handle_quit_confirm(state: &mut UiState, key: KeyEvent) -> LoopOutcome {
 }
 
 fn move_cursor(state: &mut UiState, delta: isize) {
-    if state.pr_order.is_empty() {
-        return;
-    }
-    let len = i64::try_from(state.pr_order.len()).unwrap_or(i64::MAX);
-    let delta = i64::try_from(delta).expect("Cursor delta out of range");
-    let next = (i64::try_from(state.cursor_pr_idx).unwrap_or(0) + delta).clamp(0, len - 1);
-    move_cursor_to(state, usize::try_from(next).unwrap_or(0));
+    let next = move_index(state.cursor_pr_idx, delta, state.pr_order.len());
+    move_cursor_to(state, next);
 }
 
 fn move_cursor_to(state: &mut UiState, idx: usize) {
@@ -711,22 +642,11 @@ fn move_cursor_to(state: &mut UiState, idx: usize) {
     let Some(target_line) = state.pr_to_line.get(pr).copied() else {
         return;
     };
-    let height = visible_log_rows().unwrap_or(DEFAULT_LOG_HEIGHT);
-    if target_line < state.scroll_offset {
-        state.scroll_offset = target_line;
-    } else if target_line >= state.scroll_offset + height {
-        state.scroll_offset = target_line + 1 - height;
-    }
-}
-
-fn visible_log_rows() -> Option<usize> {
-    terminal::size()
-        .ok()
-        .map(|(_, r)| r.saturating_sub(CONTROL_BAR_LINES).into())
+    ensure_visible(target_line, &mut state.scroll_offset, state.viewport_height);
 }
 
 fn scroll_viewport(state: &mut UiState, delta: isize) {
-    let height = visible_log_rows().unwrap_or(DEFAULT_LOG_HEIGHT);
+    let height = state.viewport_height;
     let max_offset = state.log_lines.len().saturating_sub(height);
     let delta = i64::try_from(delta).expect("Scroll delta out of range");
     let next = i64::try_from(state.scroll_offset).unwrap_or(0) + delta;
@@ -1018,8 +938,9 @@ mod tests {
 
     #[test]
     fn strip_sentinel_passes_through_non_marker_lines() {
-        let (cleaned, commit) = strip_sentinel("\u{2502}  no marker here");
-        assert_eq!(cleaned, "\u{2502}  no marker here");
+        let input = format!("{}  no marker here", crate::ui::tui::VERTICAL_SEPARATOR);
+        let (cleaned, commit) = strip_sentinel(&input);
+        assert_eq!(cleaned, input);
         assert!(commit.is_none());
     }
 
@@ -1036,7 +957,8 @@ mod tests {
         let id1 = "a".repeat(40);
         let id2 = "b".repeat(40);
         let raw = format!(
-            "@ {SENTINEL_OPEN}{id1}{SENTINEL_CLOSE} header\n  description\n\u{2502} {SENTINEL_OPEN}{id2}{SENTINEL_CLOSE} other\n",
+            "@ {SENTINEL_OPEN}{id1}{SENTINEL_CLOSE} header\n  description\n{} {SENTINEL_OPEN}{id2}{SENTINEL_CLOSE} other\n",
+            crate::ui::tui::VERTICAL_SEPARATOR,
         );
         let (lines, map) = parse_sentinel_lines(&raw);
         assert_eq!(lines.len(), 3);

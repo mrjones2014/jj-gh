@@ -65,6 +65,9 @@ config_schema! {
     #[env("JJ_GH_TEMPLATE", string)]
     pr_create_template: Option<String> = None,
 
+    /// jj template string used to render candidate PR titles.
+    pr_create_title_template: String = "description.first_line()".into(),
+
     /// Open new PRs as drafts.
     draft: bool = false,
 
@@ -501,6 +504,7 @@ mod tests {
             [jj-gh]
             pr_create_template = "description.first_line()"
             pr_create_template_file = "/repo/.github/PULL_REQUEST_TEMPLATE.md"
+            pr_create_title_template = "description.first_line().upper()"
             "#,
         )])
         .unwrap();
@@ -513,6 +517,10 @@ mod tests {
             Some(std::path::Path::new(
                 "/repo/.github/PULL_REQUEST_TEMPLATE.md"
             ))
+        );
+        assert_eq!(
+            config.pr_create_title_template,
+            "description.first_line().upper()"
         );
     }
 }

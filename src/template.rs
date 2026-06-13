@@ -142,6 +142,8 @@ mod tests {
             template: None,
             template_file: None,
             no_template: false,
+            pick_title: false,
+            title_template: "description.first_line()".into(),
             editor: None,
             show_diffs: true,
             no_diffs: false,
