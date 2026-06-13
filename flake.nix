@@ -88,6 +88,14 @@
               '';
           }
         );
+        jj-gh-dev = craneLib.buildPackage (
+          commonArgs
+          // {
+            inherit cargoArtifacts;
+            cargoExtraArgs = "--package jj-gh";
+            doCheck = false;
+          }
+        );
         gen-docs = craneLib.buildPackage (
           commonArgs
           // {
@@ -184,6 +192,7 @@
       {
         packages = {
           default = jj-gh;
+          dev = jj-gh-dev;
           inherit gen-docs gen-manpage;
           udeps = craneLibNightly.mkCargoDerivation (
             commonArgs
