@@ -11,15 +11,12 @@
 
 use crate::{
     cli::GlobalOpts,
-    gh::{CiStatus, Gh, PrWithCiStatus},
-    git,
-    jj::{
-        Jj, JjExt,
-        inject::{TemplateAliases, escape_jj_string},
-    },
+    gh::{CiStatus, PrWithCiStatus},
+    jj::inject::{TemplateAliases, escape_jj_string},
+    model::Model,
     ui::Spinner,
 };
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use jj_gh_config_derive::subcommand_args;
 use std::collections::HashMap;
 
@@ -107,7 +104,7 @@ subcommand_args! {
     }
 }
 
-pub async fn run(gh: &impl Gh, jj: &impl Jj, args: &PrLogArgs) -> Result<()> {
+pub async fn run(model: &impl Model, args: &PrLogArgs) -> Result<()> {
     let PrLogArgs {
         jj_log_args,
         nerdfonts,
@@ -119,29 +116,29 @@ pub async fn run(gh: &impl Gh, jj: &impl Jj, args: &PrLogArgs) -> Result<()> {
                 verbose: _,
                 quiet: _,
                 log_level: _,
-                upstream_remote: _,
+                upstream_remote,
                 gh_askpass: _,
                 askpass_timeout_secs: _,
             },
     } = args;
 
     let spinner = Spinner::start("Resolving local PRs");
-    let remote = jj.resolve_default_remote(remote.as_ref()).await?;
-    let origin_url = jj
-        .remote_url(&remote)
-        .await?
-        .ok_or_else(|| anyhow!("`{remote}` remote is not configured"))?;
-    let (owner, repo) = git::url::parse_owner_repo(&origin_url)?;
-    let bookmarks = jj.pushed_bookmarks(&remote).await?;
-    let branch_to_local = bookmarks
+    let local = model
+        .local_pulls(remote.as_ref(), Some(upstream_remote))
+        .await?;
+    let branch_to_local = local
+        .bookmarks
         .iter()
         .map(|b| (b.name.clone(), b.local_commit_id.clone()))
         .collect::<HashMap<String, String>>();
-    let names = bookmarks.into_iter().map(|b| b.name).collect::<Vec<_>>();
-    let prs = gh.local_pulls(&owner, &repo, &names).await?;
     spinner.stop();
 
-    let aliases = build_aliases(&prs, &branch_to_local, *nerdfonts, template.as_deref());
+    let aliases = build_aliases(
+        &local.prs,
+        &branch_to_local,
+        *nerdfonts,
+        template.as_deref(),
+    );
     let tmp = aliases.write_temp_config()?;
 
     // Stream so jj sees a tty and emits color; capturing would strip it.
@@ -319,6 +316,7 @@ mod tests {
             url: format!("https://github.com/o/r/pull/{number}"),
             title: format!("PR {number}"),
             head_ref_name: format!("branch-{number}"),
+            head_owner: Some("o".into()),
             head_sha: sha.into(),
             base_ref_name: "master".into(),
             is_draft: false,
@@ -341,6 +339,7 @@ mod tests {
             url: format!("https://github.com/o/r/pull/{number}"),
             title: format!("PR {number}"),
             head_ref_name: format!("branch-{number}"),
+            head_owner: Some("o".into()),
             head_sha: number.to_string(),
             base_ref_name: "master".into(),
             is_draft: false,

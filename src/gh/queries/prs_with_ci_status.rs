@@ -65,6 +65,8 @@ pub struct PrWithCiStatus {
     /// renders on the local commit even when it has diverged from the remote
     /// head SHA.
     pub head_ref_name: String,
+    /// Owner of the repository containing the PR head branch.
+    pub head_owner: Option<String>,
     /// SHA of the commit at the head of the PR's branch on the remote. May
     /// not match the local bookmark target if the local bookmark has diverged
     /// from the remote PR head (e.g. if you rebase the PR on `trunk()` but have
@@ -109,6 +111,7 @@ impl From<prs_with_ci_status_internal::ResponseData> for Vec<PrWithCiStatus> {
                      title,
                      head_ref_name,
                      head_ref_oid,
+                     head_repository,
                      base_ref_name,
                      is_draft,
                      merged,
@@ -127,6 +130,7 @@ impl From<prs_with_ci_status_internal::ResponseData> for Vec<PrWithCiStatus> {
                     is_draft,
                     is_in_merge_queue,
                     head_ref_name,
+                    head_owner: head_repository.map(|repo| repo.owner.login),
                     head_sha: head_ref_oid,
                     base_ref_name,
                     ci_status: status_check_rollup.into(),

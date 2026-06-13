@@ -1,15 +1,15 @@
 use crate::{
-    auth::EnvReader,
     cli::GlobalOpts,
     config::{self, AutoMergeMethod},
-    editor::{self, ApplyChangesCtx, Editor, resolve_editor_argv},
+    editor::{self, ApplyChangesCtx, resolve_editor_argv},
     frontmatter::Frontmatter,
     fs::RealFs,
     gh::{CreatePrRequest, Gh, remote},
     jj::{
-        self, Jj, JjExt,
+        self, Jj,
         inject::{TemplateAliases, escape_jj_string},
     },
+    model::Model,
     template::{self, TemplateSource},
 };
 use anyhow::{Context, Result, anyhow, bail};
@@ -137,19 +137,11 @@ subcommand_args! {
 ///
 /// Returns an error from any step (rev resolution, GH API, push, editor, etc.).
 #[expect(clippy::too_many_lines)]
-pub async fn run<J, G, E, ENV>(
-    jj: &J,
-    gh: &G,
-    env: &ENV,
-    editor: &E,
-    args: &CreateArgs,
-) -> Result<()>
-where
-    J: Jj,
-    G: Gh,
-    E: Editor,
-    ENV: EnvReader,
-{
+pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
+    let jj = model.jj();
+    let gh = model.gh();
+    let env = model.env();
+    let editor = model.editor();
     let args @ CreateArgs {
         globals:
             GlobalOpts {
@@ -179,16 +171,11 @@ where
         title_template,
     } = args;
 
-    let remote = jj.resolve_default_remote(remote.as_ref()).await?;
+    let (remote, target) = model
+        .resolve_target(remote.as_ref(), Some(upstream_remote))
+        .await?;
     let info = jj.resolve_rev(rev).await?;
     let existing_branch = info.bookmarks.first().cloned();
-
-    let origin_url = jj
-        .remote_url(&remote)
-        .await?
-        .ok_or_else(|| anyhow!("`{remote}` remote is not configured"))?;
-    let upstream_url = jj.remote_url(upstream_remote).await?;
-    let target = remote::target(&origin_url, upstream_url.as_deref())?;
 
     // Pre-flight only when we already have a bookmark; an unpushed rev can't have
     // a matching open PR.
@@ -387,8 +374,8 @@ impl TitleCandidate {
     }
 }
 
-async fn resolve_title_candidates<J: Jj>(
-    jj: &J,
+async fn resolve_title_candidates(
+    jj: &impl Jj,
     title_revset: &str,
     title_template: &str,
 ) -> Result<Vec<TitleCandidate>> {
@@ -428,9 +415,9 @@ fn parse_title_candidates(rendered: &str) -> Result<Vec<TitleCandidate>> {
     Ok(candidates)
 }
 
-async fn load_template_for<J: Jj>(
+async fn load_template_for(
     args: &CreateArgs,
-    jj: &J,
+    jj: &impl Jj,
     title_revset: &str,
     default_title: &str,
     base: &str,

@@ -7,6 +7,7 @@
 use super::{CommitInfo, Jj, PushedBookmark, jj_argv};
 use anyhow::{Context, Result, anyhow};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 /// Build a jj template that emits a JSON object: each `(key, expr)` becomes
 /// `"key": json(expr)`.
@@ -24,7 +25,7 @@ fn json_object_template(fields: &[(&str, &str)]) -> String {
 /// Caches the workspace root and a `gix::Repository` discovered at
 /// construction so all gix-backed reads share one handle.
 pub struct JjCli {
-    repo: gix::Repository,
+    repo: Rc<gix::Repository>,
     workspace_root: PathBuf,
 }
 
@@ -36,18 +37,15 @@ impl JjCli {
     ///
     /// Propagates failures from `jj workspace root` or gix discovery.
     pub async fn new() -> Result<Self> {
-        let workspace_root = workspace_root().await?;
-        let repo = gix::discover(&workspace_root)?;
-        Ok(Self {
-            repo,
-            workspace_root,
-        })
+        let (repo, workspace_root) = discover_workspace().await?;
+        Ok(Self::from_repository(Rc::new(repo), workspace_root))
     }
 
-    /// Shared handle to the discovered git repository.
-    #[must_use]
-    pub fn repo(&self) -> &gix::Repository {
-        &self.repo
+    pub(crate) fn from_repository(repo: Rc<gix::Repository>, workspace_root: PathBuf) -> Self {
+        Self {
+            repo,
+            workspace_root,
+        }
     }
 }
 
@@ -244,6 +242,12 @@ impl Jj for JjCli {
         bookmarks.dedup_by(|a, b| a.name == b.name);
         Ok(bookmarks)
     }
+}
+
+pub(crate) async fn discover_workspace() -> Result<(gix::Repository, PathBuf)> {
+    let workspace_root = workspace_root().await?;
+    let repo = gix::discover(&workspace_root)?;
+    Ok((repo, workspace_root))
 }
 
 async fn workspace_root() -> Result<PathBuf> {

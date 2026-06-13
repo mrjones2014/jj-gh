@@ -1,9 +1,4 @@
-use crate::{
-    cli::GlobalOpts,
-    config::AutoMergeMethod,
-    gh::{Gh, pr_lookup},
-    jj::{Jj, JjExt},
-};
+use crate::{cli::GlobalOpts, config::AutoMergeMethod, gh::Gh, model::Model};
 use anyhow::{Context, Result, bail};
 use jj_gh_config_derive::subcommand_args;
 
@@ -21,11 +16,8 @@ subcommand_args! {
     }
 }
 
-pub async fn run<J, G>(jj: &J, gh: &G, args: &AutoMergeArgs) -> Result<()>
-where
-    J: Jj,
-    G: Gh,
-{
+pub async fn run(model: &impl Model, args: &AutoMergeArgs) -> Result<()> {
+    let gh = model.gh();
     let AutoMergeArgs {
         number_or_rev,
         auto_merge_method,
@@ -41,8 +33,9 @@ where
             },
     } = args;
 
-    let remote = jj.resolve_default_remote(remote.as_ref()).await?;
-    let pr = pr_lookup::get_pr(jj, gh, &remote, upstream_remote, number_or_rev).await?;
+    let pr = model
+        .resolve_pr(remote.as_ref(), upstream_remote, number_or_rev)
+        .await?;
 
     if pr.in_merge_queue {
         bail!(

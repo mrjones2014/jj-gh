@@ -16,6 +16,11 @@ pub struct Target {
 }
 
 impl Target {
+    #[must_use]
+    pub fn origin_owner(&self) -> &str {
+        &self.origin_owner
+    }
+
     /// Compose the GitHub `head` filter for `branch` in this target context.
     #[must_use]
     pub fn head_spec(&self, branch: &str) -> String {

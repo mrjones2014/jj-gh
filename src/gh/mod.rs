@@ -289,8 +289,9 @@ pub trait Gh {
     async fn enable_auto_merge(&self, pr_node_id: &str, method: AutoMergeMethod) -> Result<()>;
 
     /// Fetch open PRs with head commit SHA and CI status, scoped to the given
-    /// `branches` (head ref names). Used by `pr log` to build a `commit_id` →
-    /// PR mapping for jj template aliases.
+    /// `branches` (head ref names) and `head_owner`. Used by `pr log` to build
+    /// a `commit_id` → PR mapping for jj template aliases. Owner filtering is
+    /// required because unrelated forks commonly use the same branch names.
     ///
     /// The search is `is:pr is:open head:<b1> head:<b2> ...`. Implementations
     /// may batch large `branches` lists into multiple requests to stay under
@@ -305,6 +306,7 @@ pub trait Gh {
         &self,
         owner: &str,
         repo: &str,
+        head_owner: &str,
         branches: &[String],
     ) -> Result<Vec<PrWithCiStatus>>;
 
