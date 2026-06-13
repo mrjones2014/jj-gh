@@ -86,6 +86,27 @@ Public Key: `jj-gh.cachix.org-1:N1uFBMDd9znlhDa68BRqLSXYzXXJ2+WHVuwxpGxCtDo=`
 
 <details>
 
+  <summary>Precompiled binary</summary>
+
+Download and extract the archive for your platform from the [latest GitHub release](https://github.com/mrjones2014/jj-gh/releases/latest), then
+place the `jj-gh` binary somewhere in your `$PATH`.
+
+</details>
+
+<details>
+
+  <summary>with <code>cargo-binstall</code></summary>
+
+Requires [cargo-binstall](https://github.com/cargo-bins/cargo-binstall).
+
+```sh
+cargo binstall jj-gh
+```
+
+</details>
+
+<details>
+
   <summary>From crates.io</summary>
 
 Requires a Rust toolchain.
