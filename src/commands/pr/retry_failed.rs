@@ -1,4 +1,4 @@
-//! `jj-gh pr retry-failed`: re-run failed CI on a PR's head commit.
+//! `jj-gh pr retry-failed`: re-run failed CI on one PR or all failed local PRs.
 //!
 //! Default: refuses to act if any workflow run is still in progress, because
 //! GitHub will reject `rerun-failed-jobs` until the run is `completed`.
@@ -8,19 +8,23 @@
 
 use crate::{
     cli::GlobalOpts,
-    gh::{Gh, WorkflowRun, WorkflowRunStatus, pr_lookup},
+    gh::{CiStatus, Gh, WorkflowRun, WorkflowRunStatus, pr_lookup, remote},
     jj::{Jj, JjExt},
     ui::Spinner,
 };
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use jj_gh_config_derive::subcommand_args;
 use std::time::{Duration, Instant};
 
 subcommand_args! {
     pub struct RetryFailedArgs {
         /// PR number, or revision ID to look up a PR from.
-        #[arg(value_name = "PR_NUM|REV")]
-        pub number_or_rev: String,
+        #[arg(value_name = "PR_NUM|REV", group = "retry_target")]
+        pub number_or_rev: Option<String>,
+
+        /// Retry failed CI on all local PRs.
+        #[arg(long, group = "retry_target")]
+        pub all: bool,
 
         /// Cancel any in-progress runs and restart the entire pipeline.
         /// Without this flag, the command fails if CI has not yet completed.
@@ -56,6 +60,7 @@ where
 {
     let RetryFailedArgs {
         number_or_rev,
+        all,
         cancel,
         cancel_timeout,
         globals:
@@ -70,29 +75,101 @@ where
             },
     } = args;
 
-    let remote = jj.resolve_default_remote(remote.as_ref()).await?;
-    let (pr, target) =
-        pr_lookup::resolve_pr_with_target(jj, gh, &remote, upstream_remote, number_or_rev).await?;
-    let owner = &target.owner;
-    let repo = &target.repo;
+    let default_remote = jj.resolve_default_remote(remote.as_ref()).await?;
+    if let Some(number_or_rev) = number_or_rev {
+        let (pr, target) = pr_lookup::resolve_pr_with_target(
+            jj,
+            gh,
+            &default_remote,
+            upstream_remote,
+            number_or_rev,
+        )
+        .await?;
+        retry_pr(
+            gh,
+            &target.owner,
+            &target.repo,
+            pr.number,
+            &pr.head_sha,
+            &pr.html_url,
+            *cancel,
+            *cancel_timeout,
+            poll_interval,
+        )
+        .await?;
+        Ok(())
+    } else if *all {
+        let origin_url = jj
+            .remote_url(&default_remote)
+            .await?
+            .ok_or_else(|| anyhow!("`{default_remote}` remote is not configured"))?;
+        let upstream_url = jj.remote_url(upstream_remote).await?;
+        let target = remote::target(&origin_url, upstream_url.as_deref())?;
+        let names = jj
+            .pushed_bookmarks(&default_remote)
+            .await?
+            .into_iter()
+            .map(|bookmark| bookmark.name)
+            .collect::<Vec<_>>();
+        let prs = gh
+            .local_pulls(&target.owner, &target.repo, &names)
+            .await?
+            .into_iter()
+            .filter(|pr| matches!(pr.ci_status, CiStatus::Failed))
+            .collect::<Vec<_>>();
 
+        if prs.is_empty() {
+            log::info!("No local PRs with failed CI");
+        }
+        for pr in prs {
+            retry_pr(
+                gh,
+                &target.owner,
+                &target.repo,
+                pr.number,
+                &pr.head_sha,
+                &pr.url,
+                *cancel,
+                *cancel_timeout,
+                poll_interval,
+            )
+            .await?;
+        }
+        Ok(())
+    } else {
+        Ok(())
+    }
+}
+
+#[expect(clippy::too_many_arguments)]
+async fn retry_pr<G: Gh>(
+    gh: &G,
+    owner: &str,
+    repo: &str,
+    pr_number: u64,
+    head_sha: &str,
+    html_url: &str,
+    cancel: bool,
+    cancel_timeout: u64,
+    poll_interval: Duration,
+) -> Result<()> {
     let runs = gh
-        .list_workflow_runs_for_sha(owner, repo, &pr.head_sha)
+        .list_workflow_runs_for_sha(owner, repo, head_sha)
         .await
-        .with_context(|| format!("listing workflow runs for PR #{}", pr.number))?;
+        .with_context(|| format!("listing workflow runs for PR #{pr_number}"))?;
 
     let in_progress = runs
         .iter()
         .filter(|r| r.status != WorkflowRunStatus::Completed)
         .collect::<Vec<&WorkflowRun>>();
 
-    if *cancel {
+    if cancel {
         if !in_progress.is_empty() {
             let spinner = Spinner::start(format!(
                 "cancelling {} in-progress workflow run(s)",
                 in_progress.len()
             ));
-            let cancel_result = cancel_each(gh, owner, repo, pr.number, &in_progress).await;
+            let cancel_result = cancel_each(gh, owner, repo, pr_number, &in_progress).await;
             if let Err(e) = cancel_result {
                 spinner.stop();
                 return Err(e);
@@ -101,8 +178,8 @@ where
                 gh,
                 owner,
                 repo,
-                &pr.head_sha,
-                Duration::from_secs(*cancel_timeout),
+                head_sha,
+                Duration::from_secs(cancel_timeout),
                 poll_interval,
             )
             .await;
@@ -111,16 +188,16 @@ where
         }
 
         let final_runs = gh
-            .list_workflow_runs_for_sha(owner, repo, &pr.head_sha)
+            .list_workflow_runs_for_sha(owner, repo, head_sha)
             .await
-            .with_context(|| format!("re-listing workflow runs for PR #{}", pr.number))?;
+            .with_context(|| format!("re-listing workflow runs for PR #{pr_number}"))?;
 
         if final_runs.is_empty() {
-            log::info!("No workflow runs found for PR #{}", pr.number);
+            log::info!("No workflow runs found for PR #{pr_number}");
         } else {
             let spinner =
                 Spinner::start(format!("restarting {} workflow run(s)", final_runs.len()));
-            let result = rerun_each(gh, owner, repo, pr.number, &final_runs).await;
+            let result = rerun_each(gh, owner, repo, pr_number, &final_runs).await;
             spinner.stop();
             result?;
 
@@ -128,7 +205,7 @@ where
                 "Cancelled {} run(s) and restarted {} workflow run(s) for PR #{}",
                 in_progress.len(),
                 final_runs.len(),
-                pr.number
+                pr_number
             );
         }
     } else {
@@ -138,14 +215,14 @@ where
                 Pass --cancel to cancel and restart the pipeline. \
                 This is a GitHub limitation; it does not let you retry jobs \
                 while jobs are still in progress.",
-                pr.number,
+                pr_number,
                 in_progress.len()
             );
         }
-        retry_failed_jobs(gh, owner, repo, pr.number, &runs).await?;
+        retry_failed_jobs(gh, owner, repo, pr_number, &runs).await?;
     }
 
-    println!("{}", pr.html_url);
+    println!("{html_url}");
     Ok(())
 }
 
@@ -358,7 +435,10 @@ mod tests {
             unimplemented!()
         }
         async fn pushed_bookmarks(&self, _remote: &str) -> Result<Vec<PushedBookmark>> {
-            unimplemented!()
+            Ok(vec![PushedBookmark {
+                name: "feat".into(),
+                local_commit_id: "local".into(),
+            }])
         }
         async fn eval_template(
             &self,
@@ -383,6 +463,7 @@ mod tests {
 
     struct FakeGh {
         pr: PrDetails,
+        local_prs: Mutex<Vec<PrWithCiStatus>>,
         /// Successive responses to `list_workflow_runs_for_sha`. Last entry
         /// repeats once exhausted.
         list_responses: Mutex<Vec<Vec<WorkflowRun>>>,
@@ -393,9 +474,15 @@ mod tests {
         fn new(pr: PrDetails, responses: Vec<Vec<WorkflowRun>>) -> Self {
             Self {
                 pr,
+                local_prs: Mutex::new(Vec::new()),
                 list_responses: Mutex::new(responses),
                 calls: Mutex::new(Calls::default()),
             }
+        }
+
+        fn with_local_prs(self, prs: Vec<PrWithCiStatus>) -> Self {
+            *self.local_prs.lock().unwrap() = prs;
+            self
         }
     }
 
@@ -458,7 +545,7 @@ mod tests {
             _r: &str,
             _b: &[String],
         ) -> Result<Vec<PrWithCiStatus>> {
-            unimplemented!()
+            Ok(std::mem::take(&mut *self.local_prs.lock().unwrap()))
         }
         async fn list_workflow_runs_for_sha(
             &self,
@@ -489,7 +576,8 @@ mod tests {
 
     fn args(number: &str, cancel: bool, timeout: u64) -> RetryFailedArgs {
         RetryFailedArgs {
-            number_or_rev: number.into(),
+            number_or_rev: Some(number.into()),
+            all: false,
             cancel,
             cancel_timeout: timeout,
             globals: GlobalOpts {
@@ -501,6 +589,31 @@ mod tests {
                 gh_askpass: None,
                 askpass_timeout_secs: 20,
             },
+        }
+    }
+
+    fn all_args(cancel: bool, timeout: u64) -> RetryFailedArgs {
+        RetryFailedArgs {
+            number_or_rev: None,
+            all: true,
+            ..args("unused", cancel, timeout)
+        }
+    }
+
+    fn local_pr(number: u64, sha: &str, status: CiStatus) -> PrWithCiStatus {
+        PrWithCiStatus {
+            id: format!("node-{number}"),
+            number,
+            url: format!("https://github.com/o/r/pull/{number}"),
+            title: "t".into(),
+            head_ref_name: "feat".into(),
+            head_sha: sha.into(),
+            base_ref_name: "main".into(),
+            is_draft: false,
+            merged: false,
+            is_in_merge_queue: false,
+            ci_status: status,
+            auto_merge_enabled: false,
         }
     }
 
@@ -540,6 +653,55 @@ mod tests {
         assert_eq!(calls.rerun_failed, vec![2, 3]);
         assert!(calls.cancelled.is_empty());
         assert!(calls.rerun.is_empty());
+    }
+
+    #[tokio::test]
+    async fn all_retries_only_local_prs_with_failed_ci() {
+        let runs = vec![wr(
+            2,
+            WorkflowRunStatus::Completed,
+            Some(WorkflowRunConclusion::Failure),
+        )];
+        let gh = FakeGh::new(pr_details(0, "unused"), vec![runs]).with_local_prs(vec![
+            local_pr(41, "success", CiStatus::Success),
+            local_pr(42, "failed", CiStatus::Failed),
+            local_pr(43, "pending", CiStatus::Pending),
+        ]);
+        let jj = FakeJj::new();
+
+        run_with(&jj, &gh, &all_args(false, 30), Duration::from_millis(1))
+            .await
+            .expect("all-local path should retry failed PRs");
+
+        let calls = gh.calls.lock().unwrap();
+        assert_eq!(calls.rerun_failed, vec![2]);
+        assert!(calls.cancelled.is_empty());
+        assert!(calls.rerun.is_empty());
+    }
+
+    #[tokio::test]
+    async fn all_respects_cancel() {
+        let initial = vec![wr(1, WorkflowRunStatus::InProgress, None)];
+        let completed = vec![wr(
+            1,
+            WorkflowRunStatus::Completed,
+            Some(WorkflowRunConclusion::Cancelled),
+        )];
+        let gh = FakeGh::new(
+            pr_details(0, "unused"),
+            vec![initial, completed.clone(), completed],
+        )
+        .with_local_prs(vec![local_pr(42, "failed", CiStatus::Failed)]);
+        let jj = FakeJj::new();
+
+        run_with(&jj, &gh, &all_args(true, 5), Duration::from_millis(1))
+            .await
+            .expect("all-local cancel path should restart failed PRs");
+
+        let calls = gh.calls.lock().unwrap();
+        assert_eq!(calls.cancelled, vec![1]);
+        assert_eq!(calls.rerun, vec![1]);
+        assert!(calls.rerun_failed.is_empty());
     }
 
     #[tokio::test]

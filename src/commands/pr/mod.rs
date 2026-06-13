@@ -89,16 +89,20 @@ pub enum PrAction {
     #[command(visible_alias = "rs")]
     Restack(RestackArgsInput),
 
-    /// Re-run failed CI jobs on a PR.
+    /// Re-run failed CI jobs on a PR, or on all local PRs with failed CI.
     ///
     /// Resolves the PR from a revision (via its local bookmark) or PR number,
     /// then re-runs failed workflow runs on the PR's head commit. By default
     /// the command fails if CI has not yet completed, because GitHub refuses
     /// to re-run a workflow run until it reaches the `completed` state.
+    /// Pass `--all` to retry every local PR whose rolled-up CI status failed.
     ///
     /// With `--cancel`, in-progress runs are cancelled first; once they
     /// finalize, every workflow run is re-run (full pipeline restart).
-    #[command(visible_alias = "rerun")]
+    #[command(
+        visible_alias = "rerun",
+        group = clap::ArgGroup::new("retry_target").required(true).multiple(false)
+    )]
     RetryFailed(RetryFailedArgsInput),
 }
 
@@ -191,6 +195,16 @@ mod tests {
         args: PrLogArgsInput,
     }
 
+    #[derive(clap::Parser, Debug)]
+    #[command(
+        no_binary_name = true,
+        group = clap::ArgGroup::new("retry_target").required(true).multiple(false)
+    )]
+    struct RetryFailedArgsParser {
+        #[command(flatten)]
+        args: RetryFailedArgsInput,
+    }
+
     fn parse_create(argv: &[&str]) -> CreateArgsInput {
         CreateArgsParser::try_parse_from(argv.iter().copied())
             .expect("CreateArgsInput failed to parse")
@@ -201,6 +215,28 @@ mod tests {
         PrLogArgsParser::try_parse_from(argv.iter().copied())
             .expect("PrLogArgsInput failed to parse")
             .args
+    }
+
+    #[test]
+    fn retry_failed_requires_pr_or_all() {
+        RetryFailedArgsParser::try_parse_from::<[&str; 0], _>([])
+            .expect_err("bare retry-failed should be rejected");
+    }
+
+    #[test]
+    fn retry_failed_all_conflicts_with_pr() {
+        RetryFailedArgsParser::try_parse_from(["--all", "42"])
+            .expect_err("--all with a PR should be rejected");
+    }
+
+    #[test]
+    fn retry_failed_all_allows_cancel() {
+        let parsed = RetryFailedArgsParser::try_parse_from(["--all", "--cancel"])
+            .expect("--all --cancel should parse")
+            .args;
+        assert!(parsed.all);
+        assert!(parsed.cancel);
+        assert!(parsed.number_or_rev.is_none());
     }
 
     fn merged_create(argv: &[&str], toml_config: &str) -> Config {
