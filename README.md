@@ -167,6 +167,14 @@ jj pr edit rev-id
 # a limitation in the GitHub API, see:
 # https://github.com/mrjones2014/jj-gh/issues/103
 jj pr auto-merge rev-id
+# "restack" your PRs; say you have PRs 1 and 2, but
+# then realize you need to land PR 3 first. So
+# you rebase the commits for PRs 1 & 2 on top of
+# the commit for PR 3. Then `jj pr restack` will
+# recompute the base branches for all locally tracked
+# PRs, open an interactive editor for you to confirm or
+# make changes, then update the PR base branches on GitHub.
+jj pr restack
 ```
 
 #### Tips and Tricks
@@ -251,6 +259,10 @@ pr_create_template = 'description ++ "\n"'
 # .github/pull_request_template.md
 # .github/PULL_REQUEST_TEMPLATE/pull_request_template.md
 pr_create_template_file = ".github/PULL_REQUEST_TEMPLATE.md"
+
+# jj template used to render PR titles. Evaluated against the oldest commit by
+# default, or against every candidate shown by `pr create --pick-title`.
+pr_create_title_template = "description.first_line()"
 
 # Bookmark name template for `pr fetch`. A jj template string, evaluated once
 # against `root()` with `pr_*` aliases pre-populated from the PR's metadata.
@@ -346,6 +358,13 @@ if(commit_id.short(40) == pr_oldest_rev_id,
 
 The rendered output seeds the buffer your editor opens; you can still edit
 the body and frontmatter before the PR is submitted.
+
+### `pr create` title (`--title-template` / `pr_create_title_template`)
+
+Evaluated once per commit in the revset being PR'd. By default, the oldest
+commit's rendered value seeds the PR title. Pass `--pick-title` to select a
+commit interactively; picker rows show the short jj change ID separately from
+the rendered title. Titles must be non-empty and single-line.
 
 ### `pr fetch` bookmark name (`-T` / `pr_fetch_bookmark_template`)
 
