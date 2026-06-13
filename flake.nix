@@ -76,7 +76,11 @@
               let
                 jj-gh = "${pkgs.stdenv.hostPlatform.emulator pkgs.buildPackages} $out/bin/jj-gh";
               in
-              pkgs.lib.optionalString (pkgs.stdenv.hostPlatform.emulatorAvailable pkgs.buildPackages) ''
+              ''
+                ${gen-manpage}/bin/gen-manpage > jj-gh.1
+                installManPage jj-gh.1
+              ''
+              + pkgs.lib.optionalString (pkgs.stdenv.hostPlatform.emulatorAvailable pkgs.buildPackages) ''
                 installShellCompletion --cmd jj-gh \
                   --bash <(${jj-gh} completions bash) \
                   --fish <(${jj-gh} completions fish) \
@@ -90,6 +94,15 @@
             inherit cargoArtifacts;
             pname = "gen-docs";
             cargoExtraArgs = "--package gen-docs";
+            doCheck = false;
+          }
+        );
+        gen-manpage = craneLib.buildPackage (
+          commonArgs
+          // {
+            inherit cargoArtifacts;
+            pname = "gen-manpage";
+            cargoExtraArgs = "--package gen-manpage";
             doCheck = false;
           }
         );
@@ -171,7 +184,7 @@
       {
         packages = {
           default = jj-gh;
-          inherit gen-docs;
+          inherit gen-docs gen-manpage;
           udeps = craneLibNightly.mkCargoDerivation (
             commonArgs
             // {

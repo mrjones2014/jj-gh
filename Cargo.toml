@@ -22,9 +22,13 @@ include = [
 [workspace]
 members = [
   "tools/gen-docs",
+  "tools/gen-manpage",
   "tools/jj-gh-config-derive",
   "tools/print-config-schema",
 ]
+
+[workspace.dependencies]
+clap = "4"
 
 [features]
 schema-validation = ["dep:schemars"]
@@ -32,7 +36,7 @@ schema-validation = ["dep:schemars"]
 [dependencies]
 anstyle = "1"
 anyhow = "1"
-clap = { version = "4", features = ["derive"] }
+clap = { workspace = true, features = ["derive", "wrap_help"] }
 clap_complete = "4"
 crossterm = "0.29"
 futures = "0.3"
