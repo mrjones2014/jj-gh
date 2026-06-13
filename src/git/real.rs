@@ -1,4 +1,5 @@
 use anyhow::Result;
+use std::rc::Rc;
 
 /// Operations against the workspace's git store. Abstracted so tests can
 /// supply a fake.
@@ -20,13 +21,14 @@ pub trait GitOps {
 
 /// Production [`GitOps`] backed by a shared `gix::Repository` discovered
 /// once at the workspace root.
+#[repr(transparent)]
 pub struct RealGit {
-    repo: gix::Repository,
+    repo: Rc<gix::Repository>,
 }
 
 impl RealGit {
     #[must_use]
-    pub fn new(repo: gix::Repository) -> Self {
+    pub fn new(repo: Rc<gix::Repository>) -> Self {
         Self { repo }
     }
 }

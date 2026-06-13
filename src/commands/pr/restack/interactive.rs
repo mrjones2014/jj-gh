@@ -92,8 +92,8 @@ struct UiState {
     viewport_height: usize,
 }
 
-pub async fn run<J: Jj>(
-    jj: &J,
+pub async fn run(
+    jj: &impl Jj,
     ctx: &RestackContext,
     args: &RestackArgs,
 ) -> Result<HashMap<u64, Decision>> {
@@ -838,7 +838,7 @@ fn commit_map_to_pr_map(commits: &HashMap<String, usize>, plans: &[PrPlan]) -> H
 /// Order PRs by topology (newest first) so cursor navigation matches what
 /// the user sees in the rendered log. Falls back to plan order for any PRs
 /// the jj query does not emit.
-async fn order_prs_topologically<J: Jj>(jj: &J, plans: &[PrPlan]) -> Result<Vec<u64>> {
+async fn order_prs_topologically(jj: &impl Jj, plans: &[PrPlan]) -> Result<Vec<u64>> {
     if plans.is_empty() {
         return Ok(Vec::new());
     }

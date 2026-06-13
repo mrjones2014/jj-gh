@@ -12,13 +12,10 @@ mod restack;
 mod retry_failed;
 
 use crate::{
-    auth::{self, OsEnv},
+    auth,
     cli::{GlobalOpts, GlobalOptsInput},
-    config,
-    editor::TempfileEditor,
-    gh,
-    git::real::RealGit,
-    jj,
+    config, jj,
+    model::ModelImpl,
     ui::Spinner,
 };
 use anyhow::Result;
@@ -119,7 +116,7 @@ pub async fn dispatch(global: GlobalOptsInput, action: PrAction) -> Result<()> {
     // Discovering the workspace (`jj workspace root` + gix) is independent of
     // config/auth, so overlap the two cold-start chains. Within the config
     // chain, auth must run after config loads (it reads `gh_askpass`/`gh_token`).
-    let jj_fut = jj::real::JjCli::new();
+    let workspace_fut = jj::real::discover_workspace();
     let cfg_auth_fut = async {
         let mut fig = config::load_figment().merge(Serialized::defaults(&global));
         fig = match &action {
@@ -136,40 +133,39 @@ pub async fn dispatch(global: GlobalOptsInput, action: PrAction) -> Result<()> {
         let token = auth::resolve_token(&config).await?;
         anyhow::Ok((config, globals, token))
     };
-    let (jj, (config, globals, token)) = tokio::try_join!(jj_fut, cfg_auth_fut)?;
+    let ((repo, workspace_root), (config, globals, token)) =
+        tokio::try_join!(workspace_fut, cfg_auth_fut)?;
 
-    let gh = gh::real::OctocrabGh::new(&token)?;
-    let editor = TempfileEditor;
+    let model = ModelImpl::new(repo, workspace_root, &token)?;
     startup.stop();
     match action {
         PrAction::AutoMerge(input) => {
             let args = AutoMergeArgs::resolve(input, &config, &globals);
-            auto_merge::run(&jj, &gh, &args).await?;
+            auto_merge::run(&model, &args).await?;
         }
         PrAction::Create(input) => {
             let args = CreateArgs::resolve(input, &config, &globals);
-            create::run(&jj, &gh, &OsEnv, &editor, &args).await?;
+            create::run(&model, &args).await?;
         }
         PrAction::Edit(input) => {
             let args = EditArgs::resolve(input, &config, &globals);
-            edit::run(&jj, &gh, &OsEnv, &editor, &args).await?;
+            edit::run(&model, &args).await?;
         }
         PrAction::Fetch(input) => {
-            let git = RealGit::new(jj.repo().clone());
             let args = FetchArgs::resolve(input, &config, &globals);
-            fetch::run(&jj, &gh, &git, &args).await?;
+            fetch::run(&model, &args).await?;
         }
         PrAction::Log(input) => {
             let args = PrLogArgs::resolve(input, &config, &globals);
-            self::log::run(&gh, &jj, &args).await?;
+            self::log::run(&model, &args).await?;
         }
         PrAction::Restack(input) => {
             let args = RestackArgs::resolve(input, &config, &globals);
-            restack::run(&jj, &gh, &args).await?;
+            restack::run(&model, &args).await?;
         }
         PrAction::RetryFailed(input) => {
             let args = RetryFailedArgs::resolve(input, &config, &globals);
-            retry_failed::run(&jj, &gh, &args).await?;
+            retry_failed::run(&model, &args).await?;
         }
     }
     Ok(())

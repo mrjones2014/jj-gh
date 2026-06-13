@@ -433,6 +433,7 @@ impl Gh for OctocrabGh {
         &self,
         owner: &str,
         repo: &str,
+        head_owner: &str,
         branches: &[String],
     ) -> Result<Vec<PrWithCiStatus>> {
         if branches.is_empty() {
@@ -454,13 +455,17 @@ impl Gh for OctocrabGh {
                     .context("fetching local PRs")?,
             );
             for pr in batch {
-                if seen.insert(pr.number) {
+                if is_local_pull(&pr, head_owner) && seen.insert(pr.number) {
                     out.push(pr);
                 }
             }
         }
         Ok(out)
     }
+}
+
+fn is_local_pull(pr: &PrWithCiStatus, head_owner: &str) -> bool {
+    pr.head_owner.as_deref() == Some(head_owner)
 }
 
 /// Split reviewers into `(user_logins, team_names)` as the REST review-request
@@ -585,6 +590,31 @@ fn humanize(e: octocrab::Error) -> anyhow::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn pr_with_owner(owner: Option<&str>) -> PrWithCiStatus {
+        PrWithCiStatus {
+            id: "id".into(),
+            number: 1,
+            url: "https://github.com/o/r/pull/1".into(),
+            title: "title".into(),
+            head_ref_name: "master".into(),
+            head_owner: owner.map(str::to_string),
+            head_sha: "sha".into(),
+            base_ref_name: "master".into(),
+            is_draft: false,
+            merged: false,
+            is_in_merge_queue: false,
+            ci_status: crate::gh::CiStatus::None,
+            auto_merge_enabled: false,
+        }
+    }
+
+    #[test]
+    fn local_pull_requires_matching_head_owner() {
+        assert!(is_local_pull(&pr_with_owner(Some("local")), "local"));
+        assert!(!is_local_pull(&pr_with_owner(Some("fork")), "local"));
+        assert!(!is_local_pull(&pr_with_owner(None), "local"));
+    }
 
     #[test]
     fn empty_branches_produces_no_queries() {

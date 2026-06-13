@@ -8,11 +8,11 @@
 
 use crate::{
     cli::GlobalOpts,
-    gh::{CiStatus, Gh, WorkflowRun, WorkflowRunStatus, pr_lookup, remote},
-    jj::{Jj, JjExt},
+    gh::{CiStatus, Gh, WorkflowRun, WorkflowRunStatus},
+    model::Model,
     ui::Spinner,
 };
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, bail};
 use jj_gh_config_derive::subcommand_args;
 use std::time::{Duration, Instant};
 
@@ -40,24 +40,16 @@ subcommand_args! {
 
 const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
-pub async fn run<J, G>(jj: &J, gh: &G, args: &RetryFailedArgs) -> Result<()>
-where
-    J: Jj,
-    G: Gh,
-{
-    run_with(jj, gh, args, DEFAULT_POLL_INTERVAL).await
+pub async fn run(model: &impl Model, args: &RetryFailedArgs) -> Result<()> {
+    run_with(model, args, DEFAULT_POLL_INTERVAL).await
 }
 
-async fn run_with<J, G>(
-    jj: &J,
-    gh: &G,
+async fn run_with(
+    model: &impl Model,
     args: &RetryFailedArgs,
     poll_interval: Duration,
-) -> Result<()>
-where
-    J: Jj,
-    G: Gh,
-{
+) -> Result<()> {
+    let gh = model.gh();
     let RetryFailedArgs {
         number_or_rev,
         all,
@@ -75,16 +67,10 @@ where
             },
     } = args;
 
-    let default_remote = jj.resolve_default_remote(remote.as_ref()).await?;
     if let Some(number_or_rev) = number_or_rev {
-        let (pr, target) = pr_lookup::resolve_pr_with_target(
-            jj,
-            gh,
-            &default_remote,
-            upstream_remote,
-            number_or_rev,
-        )
-        .await?;
+        let (pr, target) = model
+            .resolve_pr_with_target(remote.as_ref(), upstream_remote, number_or_rev)
+            .await?;
         retry_pr(
             gh,
             &target.owner,
@@ -99,21 +85,11 @@ where
         .await?;
         Ok(())
     } else if *all {
-        let origin_url = jj
-            .remote_url(&default_remote)
-            .await?
-            .ok_or_else(|| anyhow!("`{default_remote}` remote is not configured"))?;
-        let upstream_url = jj.remote_url(upstream_remote).await?;
-        let target = remote::target(&origin_url, upstream_url.as_deref())?;
-        let names = jj
-            .pushed_bookmarks(&default_remote)
-            .await?
-            .into_iter()
-            .map(|bookmark| bookmark.name)
-            .collect::<Vec<_>>();
-        let prs = gh
-            .local_pulls(&target.owner, &target.repo, &names)
-            .await?
+        let local = model
+            .local_pulls(remote.as_ref(), Some(upstream_remote))
+            .await?;
+        let prs = local
+            .prs
             .into_iter()
             .filter(|pr| matches!(pr.ci_status, CiStatus::Failed))
             .collect::<Vec<_>>();
@@ -124,8 +100,8 @@ where
         for pr in prs {
             retry_pr(
                 gh,
-                &target.owner,
-                &target.repo,
+                &local.target.owner,
+                &local.target.repo,
                 pr.number,
                 &pr.head_sha,
                 &pr.url,
@@ -142,8 +118,8 @@ where
 }
 
 #[expect(clippy::too_many_arguments)]
-async fn retry_pr<G: Gh>(
-    gh: &G,
+async fn retry_pr(
+    gh: &impl Gh,
     owner: &str,
     repo: &str,
     pr_number: u64,
@@ -226,8 +202,8 @@ async fn retry_pr<G: Gh>(
     Ok(())
 }
 
-async fn retry_failed_jobs<G: Gh>(
-    gh: &G,
+async fn retry_failed_jobs(
+    gh: &impl Gh,
     owner: &str,
     repo: &str,
     pr_number: u64,
@@ -261,8 +237,8 @@ async fn retry_failed_jobs<G: Gh>(
     Ok(())
 }
 
-async fn retry_each<G: Gh>(
-    gh: &G,
+async fn retry_each(
+    gh: &impl Gh,
     owner: &str,
     repo: &str,
     pr_number: u64,
@@ -281,8 +257,8 @@ async fn retry_each<G: Gh>(
     Ok(())
 }
 
-async fn cancel_each<G: Gh>(
-    gh: &G,
+async fn cancel_each(
+    gh: &impl Gh,
     owner: &str,
     repo: &str,
     pr_number: u64,
@@ -296,8 +272,8 @@ async fn cancel_each<G: Gh>(
     Ok(())
 }
 
-async fn rerun_each<G: Gh>(
-    gh: &G,
+async fn rerun_each(
+    gh: &impl Gh,
     owner: &str,
     repo: &str,
     pr_number: u64,
@@ -311,8 +287,8 @@ async fn rerun_each<G: Gh>(
     Ok(())
 }
 
-async fn poll_until_completed<G: Gh>(
-    gh: &G,
+async fn poll_until_completed(
+    gh: &impl Gh,
     owner: &str,
     repo: &str,
     head_sha: &str,
@@ -348,6 +324,7 @@ mod tests {
             UpdatePr, WorkflowRun, WorkflowRunConclusion, WorkflowRunStatus,
         },
         jj::{CommitInfo, PushedBookmark},
+        model::TestModel,
     };
     use std::path::{Path, PathBuf};
     use std::sync::Mutex;
@@ -543,6 +520,7 @@ mod tests {
             &self,
             _o: &str,
             _r: &str,
+            _head_owner: &str,
             _b: &[String],
         ) -> Result<Vec<PrWithCiStatus>> {
             Ok(std::mem::take(&mut *self.local_prs.lock().unwrap()))
@@ -607,6 +585,7 @@ mod tests {
             url: format!("https://github.com/o/r/pull/{number}"),
             title: "t".into(),
             head_ref_name: "feat".into(),
+            head_owner: Some("o".into()),
             head_sha: sha.into(),
             base_ref_name: "main".into(),
             is_draft: false,
@@ -645,9 +624,13 @@ mod tests {
         let gh = FakeGh::new(pr, vec![runs]);
         let jj = FakeJj::new();
 
-        run_with(&jj, &gh, &args("42", false, 30), Duration::from_millis(5))
-            .await
-            .expect("default path should succeed");
+        run_with(
+            &TestModel::without_git(&jj, &gh),
+            &args("42", false, 30),
+            Duration::from_millis(5),
+        )
+        .await
+        .expect("default path should succeed");
 
         let calls = gh.calls.lock().unwrap();
         assert_eq!(calls.rerun_failed, vec![2, 3]);
@@ -669,9 +652,13 @@ mod tests {
         ]);
         let jj = FakeJj::new();
 
-        run_with(&jj, &gh, &all_args(false, 30), Duration::from_millis(1))
-            .await
-            .expect("all-local path should retry failed PRs");
+        run_with(
+            &TestModel::without_git(&jj, &gh),
+            &all_args(false, 30),
+            Duration::from_millis(1),
+        )
+        .await
+        .expect("all-local path should retry failed PRs");
 
         let calls = gh.calls.lock().unwrap();
         assert_eq!(calls.rerun_failed, vec![2]);
@@ -694,9 +681,13 @@ mod tests {
         .with_local_prs(vec![local_pr(42, "failed", CiStatus::Failed)]);
         let jj = FakeJj::new();
 
-        run_with(&jj, &gh, &all_args(true, 5), Duration::from_millis(1))
-            .await
-            .expect("all-local cancel path should restart failed PRs");
+        run_with(
+            &TestModel::without_git(&jj, &gh),
+            &all_args(true, 5),
+            Duration::from_millis(1),
+        )
+        .await
+        .expect("all-local cancel path should restart failed PRs");
 
         let calls = gh.calls.lock().unwrap();
         assert_eq!(calls.cancelled, vec![1]);
@@ -718,9 +709,13 @@ mod tests {
         let gh = FakeGh::new(pr, vec![runs]);
         let jj = FakeJj::new();
 
-        let err = run_with(&jj, &gh, &args("7", false, 30), Duration::from_millis(5))
-            .await
-            .expect_err("should refuse while CI in progress");
+        let err = run_with(
+            &TestModel::without_git(&jj, &gh),
+            &args("7", false, 30),
+            Duration::from_millis(5),
+        )
+        .await
+        .expect_err("should refuse while CI in progress");
         let msg = format!("{err:#}");
         assert!(msg.contains("still in progress"), "msg: {msg}");
 
@@ -748,9 +743,13 @@ mod tests {
         let gh = FakeGh::new(pr, vec![runs]);
         let jj = FakeJj::new();
 
-        run_with(&jj, &gh, &args("9", false, 30), Duration::from_millis(5))
-            .await
-            .unwrap();
+        run_with(
+            &TestModel::without_git(&jj, &gh),
+            &args("9", false, 30),
+            Duration::from_millis(5),
+        )
+        .await
+        .unwrap();
 
         let calls = gh.calls.lock().unwrap();
         assert!(calls.rerun_failed.is_empty());
@@ -805,9 +804,13 @@ mod tests {
         let gh = FakeGh::new(pr, vec![initial, still_running, all_done, post_poll]);
         let jj = FakeJj::new();
 
-        run_with(&jj, &gh, &args("11", true, 5), Duration::from_millis(1))
-            .await
-            .expect("cancel path should succeed once runs settle");
+        run_with(
+            &TestModel::without_git(&jj, &gh),
+            &args("11", true, 5),
+            Duration::from_millis(1),
+        )
+        .await
+        .expect("cancel path should succeed once runs settle");
 
         let calls = gh.calls.lock().unwrap();
         assert_eq!(calls.cancelled, vec![2, 3]);
@@ -823,8 +826,7 @@ mod tests {
         let jj = FakeJj::new();
 
         let err = run_with(
-            &jj,
-            &gh,
+            &TestModel::without_git(&jj, &gh),
             // 0s timeout: the very first poll iteration sees elapsed >= timeout and errors.
             &args("13", true, 0),
             Duration::from_millis(1),
@@ -858,9 +860,13 @@ mod tests {
         let gh = FakeGh::new(pr, vec![runs.clone(), runs]);
         let jj = FakeJj::new();
 
-        run_with(&jj, &gh, &args("21", true, 30), Duration::from_millis(1))
-            .await
-            .unwrap();
+        run_with(
+            &TestModel::without_git(&jj, &gh),
+            &args("21", true, 30),
+            Duration::from_millis(1),
+        )
+        .await
+        .unwrap();
 
         let calls = gh.calls.lock().unwrap();
         assert!(calls.cancelled.is_empty());

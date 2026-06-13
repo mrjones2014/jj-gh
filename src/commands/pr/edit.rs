@@ -1,17 +1,12 @@
 use crate::{
-    auth::EnvReader,
     cli::GlobalOpts,
-    editor::{self, ApplyChangesCtx, Editor, resolve_editor_argv},
+    editor::{self, ApplyChangesCtx, resolve_editor_argv},
     frontmatter::Frontmatter,
-    gh::{
-        Gh, PrDetails,
-        pr_lookup::{self, PrLookup},
-        remote::Target,
-    },
-    jj::{Jj, JjExt},
+    gh::{Gh, PrDetails},
+    model::Model,
     ui::Spinner,
 };
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, bail};
 use jj_gh_config_derive::subcommand_args;
 use std::collections::HashMap;
 
@@ -41,13 +36,10 @@ subcommand_args! {
 /// # Errors
 ///
 /// Returns an error from any step (rev resolution, GH API, editor, etc.).
-pub async fn run<J, G, E, ENV>(jj: &J, gh: &G, env: &ENV, editor: &E, args: &EditArgs) -> Result<()>
-where
-    J: Jj,
-    G: Gh,
-    E: Editor,
-    ENV: EnvReader,
-{
+pub async fn run(model: &impl Model, args: &EditArgs) -> Result<()> {
+    let gh = model.gh();
+    let env = model.env();
+    let editor = model.editor();
     let EditArgs {
         number_or_rev,
         force,
@@ -65,12 +57,11 @@ where
     } = args;
 
     let editor_argv = resolve_editor_argv(editor_cfg.as_deref(), env)?;
-    let remote = jj.resolve_default_remote(remote.as_ref()).await?;
-
     let spinner = Spinner::start("Resolving PR");
 
-    let (target, pr_number) =
-        resolve_pr_target(jj, gh, &remote, upstream_remote, number_or_rev).await?;
+    let (target, pr_number) = model
+        .resolve_pr_number_with_target(remote.as_ref(), upstream_remote, number_or_rev)
+        .await?;
     let details = gh
         .get_pr(&target.owner, &target.repo, pr_number)
         .await
@@ -154,34 +145,4 @@ where
     log::info!("Updated PR #{number}");
     println!("{html_url}");
     Ok(())
-}
-
-/// Resolve the target repo plus PR number from either a numeric PR or a
-/// revision whose local bookmark has an open PR.
-async fn resolve_pr_target<J: Jj, G: Gh>(
-    jj: &J,
-    gh: &G,
-    default_remote: &str,
-    upstream_remote: &str,
-    number_or_rev: &str,
-) -> Result<(Target, u64)> {
-    if let Ok(num) = number_or_rev.parse::<u64>() {
-        let origin_url = jj
-            .remote_url(default_remote)
-            .await?
-            .ok_or_else(|| anyhow!("`{default_remote}` remote is not configured"))?;
-        let upstream_url = jj.remote_url(upstream_remote).await?;
-        let target = crate::gh::remote::target(&origin_url, upstream_url.as_deref())?;
-        return Ok((target, num));
-    }
-    let PrLookup {
-        target,
-        head_spec,
-        summary,
-        ..
-    } = pr_lookup::resolve_pr_for_rev(jj, gh, default_remote, upstream_remote, number_or_rev)
-        .await?;
-    let summary = summary
-        .ok_or_else(|| anyhow!("no open PR for revision `{number_or_rev}` (head `{head_spec}`)"))?;
-    Ok((target, summary.number))
 }

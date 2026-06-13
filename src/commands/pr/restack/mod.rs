@@ -11,8 +11,8 @@ mod interactive;
 use crate::{
     cli::GlobalOpts,
     gh::{Gh, PrWithCiStatus, UpdatePr},
-    git,
-    jj::{Jj, JjExt, PushedBookmark},
+    jj::{Jj, PushedBookmark},
+    model::Model,
     ui::Spinner,
 };
 use anyhow::{Result, anyhow};
@@ -112,23 +112,18 @@ impl Decision {
     }
 }
 
-pub async fn run<J, G>(jj: &J, gh: &G, args: &RestackArgs) -> Result<()>
-where
-    J: Jj,
-    G: Gh,
-{
+pub async fn run(model: &impl Model, args: &RestackArgs) -> Result<()> {
     let GlobalOpts {
         remote,
         verbose: _,
         quiet: _,
         log_level: _,
-        upstream_remote: _,
+        upstream_remote,
         gh_askpass: _,
         askpass_timeout_secs: _,
     } = &args.globals;
 
-    let remote = jj.resolve_default_remote(remote.as_ref()).await?;
-    let ctx = gather_context(jj, gh, &remote).await?;
+    let ctx = gather_context(model, remote.as_ref(), upstream_remote).await?;
 
     let force_dry = args.dry_run
         || args.json
@@ -154,8 +149,8 @@ where
         return Ok(());
     }
 
-    let decisions = interactive::run(jj, &ctx, args).await?;
-    submit(gh, &ctx, &decisions).await
+    let decisions = interactive::run(model.jj(), &ctx, args).await?;
+    submit(model.gh(), &ctx, &decisions).await
 }
 
 /// Bundle of everything restack needs after the initial fetch: PR metadata,
@@ -166,30 +161,21 @@ pub(crate) struct RestackContext {
     pub bookmarks: Vec<PushedBookmark>,
 }
 
-async fn gather_context<J: Jj, G: Gh>(
-    jj: &J,
-    gh: &G,
-    default_remote: &str,
+async fn gather_context(
+    model: &impl Model,
+    remote: Option<&String>,
+    upstream_remote: &str,
 ) -> Result<RestackContext> {
     let spinner = Spinner::start("Resolving local PRs");
-    let origin_url = jj
-        .remote_url(default_remote)
-        .await?
-        .ok_or_else(|| anyhow!("`{default_remote}` remote is not configured"))?;
-    let (owner, repo) = git::url::parse_owner_repo(&origin_url)?;
-
-    let bookmarks = jj.pushed_bookmarks(default_remote).await?;
+    let local = model.local_pulls(remote, Some(upstream_remote)).await?;
+    let bookmarks = local.bookmarks;
     let branch_to_local = bookmarks
         .iter()
         .map(|b| (b.name.clone(), b.local_commit_id.clone()))
         .collect::<HashMap<String, String>>();
-    let names = bookmarks
-        .iter()
-        .map(|b| b.name.clone())
-        .collect::<Vec<String>>();
-    let prs = gh.local_pulls(&owner, &repo, &names).await?;
-    let trunk = jj.trunk_branch().await?;
-    let plans = propose_plans(jj, &prs, &branch_to_local, trunk.as_deref()).await?;
+    let prs = local.prs;
+    let trunk = model.jj().trunk_branch().await?;
+    let plans = propose_plans(model.jj(), &prs, &branch_to_local, trunk.as_deref()).await?;
     spinner.stop();
 
     Ok(RestackContext {
@@ -202,8 +188,8 @@ async fn gather_context<J: Jj, G: Gh>(
 /// Compute the proposed base for every PR. Pure aside from the per-PR
 /// `stacked_ancestor_bookmark` jj call; that's the only piece that needs the
 /// real graph.
-async fn propose_plans<J: Jj>(
-    jj: &J,
+async fn propose_plans(
+    jj: &impl Jj,
     prs: &[PrWithCiStatus],
     branch_to_local: &HashMap<String, String>,
     trunk: Option<&str>,
@@ -291,8 +277,8 @@ fn print_dry_run_text(plans: &[PrPlan]) {
     );
 }
 
-async fn submit<G: Gh>(
-    gh: &G,
+async fn submit(
+    gh: &impl Gh,
     ctx: &RestackContext,
     decisions: &HashMap<u64, Decision>,
 ) -> Result<()> {

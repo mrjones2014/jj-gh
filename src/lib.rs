@@ -9,6 +9,7 @@ mod gh;
 mod git;
 mod jj;
 mod macro_support;
+mod model;
 mod proc;
 mod template;
 mod ui;

@@ -11,11 +11,12 @@
 use crate::{
     cli::GlobalOpts,
     gh::{Gh, PrDetails},
-    git::{real::GitOps, url::parse_owner_repo},
+    git::real::GitOps,
     jj::{
-        Jj, JjExt,
+        Jj,
         inject::{TemplateAliases, escape_jj_string},
     },
+    model::Model,
     ui::Spinner,
 };
 use anyhow::{Context, Result, anyhow};
@@ -88,19 +89,13 @@ subcommand_args! {
     }
 }
 
-/// Run `pr fetch` end-to-end. Parameterized over [`GitOps`] so tests can
-/// swap in a fake; production callers pass [`crate::git::real::RealGit`].
-///
 /// # Errors
 ///
 /// Propagates errors from any step (auth, GH API, colocation, git fetch, jj
 /// import, template eval).
-pub async fn run<J: Jj, G: Gh, GO: GitOps>(
-    jj: &J,
-    gh: &G,
-    git: &GO,
-    args: &FetchArgs,
-) -> Result<()> {
+pub async fn run(model: &impl Model, args: &FetchArgs) -> Result<()> {
+    let jj = model.jj();
+    let gh = model.gh();
     let FetchArgs {
         pr: pr_num,
         template,
@@ -122,14 +117,9 @@ pub async fn run<J: Jj, G: Gh, GO: GitOps>(
 
     let spinner = Spinner::start("Resolving PR");
 
-    let remote = jj.resolve_default_remote(remote.as_ref()).await?;
-    let origin_url = jj
-        .remote_url(&remote)
-        .await?
-        .ok_or_else(|| anyhow!("`{remote}` remote is not configured"))?;
-    let (owner, repo) = parse_owner_repo(&origin_url)?;
+    let (remote, target) = model.resolve_target(remote.as_ref(), None).await?;
 
-    let pr = gh.get_pr(&owner, &repo, *pr_num).await?;
+    let pr = gh.get_pr(&target.owner, &target.repo, *pr_num).await?;
     if pr.head_user_login.is_none() || pr.head_repo_name.is_none() {
         log::warn!(
             "PR #{}: head fork appears deleted; `pr_head_user` / `pr_head_repo` will be empty",
@@ -153,13 +143,16 @@ pub async fn run<J: Jj, G: Gh, GO: GitOps>(
         ));
     }
 
-    if git.local_bookmark_exists(&bookmark).await? && !force {
+    if model.git().local_bookmark_exists(&bookmark).await? && !force {
         return Err(anyhow!(
             "local bookmark `{bookmark}` already exists; pass --force to overwrite"
         ));
     }
 
-    git.fetch_pr(&remote, *pr_num, &bookmark, *force).await?;
+    model
+        .git()
+        .fetch_pr(&remote, *pr_num, &bookmark, *force)
+        .await?;
     jj.git_import().await?;
     spinner.stop();
 
@@ -219,7 +212,9 @@ fn slugify(s: &str) -> String {
 mod tests {
     use super::*;
     use crate::gh::{BaseLookup, CreatePrRequest, PrCreated, PrSummary};
+    use crate::git::real::GitOps;
     use crate::jj::CommitInfo;
+    use crate::model::TestModel;
     use std::cell::RefCell;
     use std::path::PathBuf;
     use std::sync::Mutex;
@@ -367,6 +362,7 @@ mod tests {
             &self,
             _owner: &str,
             _repo: &str,
+            _head_owner: &str,
             _branches: &[String],
         ) -> Result<Vec<crate::gh::PrWithCiStatus>> {
             unimplemented!("fetch does not call local_pulls")
@@ -491,7 +487,9 @@ mod tests {
             exists: false,
             fetches: RefCell::new(vec![]),
         };
-        run(&jj, &gh, &git, &args(1234, None, false)).await.unwrap();
+        run(&TestModel::new(&jj, &gh, &git), &args(1234, None, false))
+            .await
+            .unwrap();
 
         let calls = git.fetches.borrow();
         assert_eq!(calls.len(), 1);
@@ -512,9 +510,12 @@ mod tests {
             exists: false,
             fetches: RefCell::new(vec![]),
         };
-        run(&jj, &gh, &git, &args_with_remote(1234, None, false, "fork"))
-            .await
-            .unwrap();
+        run(
+            &TestModel::new(&jj, &gh, &git),
+            &args_with_remote(1234, None, false, "fork"),
+        )
+        .await
+        .unwrap();
 
         let calls = git.fetches.borrow();
         assert_eq!(calls[0].remote, "fork");
@@ -529,7 +530,7 @@ mod tests {
             exists: true,
             fetches: RefCell::new(vec![]),
         };
-        let err = run(&jj, &gh, &git, &args(1234, None, false))
+        let err = run(&TestModel::new(&jj, &gh, &git), &args(1234, None, false))
             .await
             .unwrap_err();
         let msg = format!("{err:#}");
@@ -546,7 +547,9 @@ mod tests {
             exists: true,
             fetches: RefCell::new(vec![]),
         };
-        run(&jj, &gh, &git, &args(1234, None, true)).await.unwrap();
+        run(&TestModel::new(&jj, &gh, &git), &args(1234, None, true))
+            .await
+            .unwrap();
 
         let calls = git.fetches.borrow();
         assert_eq!(calls.len(), 1);
@@ -564,9 +567,12 @@ mod tests {
         };
         let cfg_template = r#""cfg-" ++ pr_number ++ "-" ++ pr_head_user"#;
 
-        run(&jj, &gh, &git, &args(1234, Some(cfg_template), false))
-            .await
-            .unwrap();
+        run(
+            &TestModel::new(&jj, &gh, &git),
+            &args(1234, Some(cfg_template), false),
+        )
+        .await
+        .unwrap();
 
         let evals = jj.eval_template_calls.lock().unwrap();
         assert_eq!(evals.len(), 1);
@@ -587,9 +593,12 @@ mod tests {
         };
         let cli_template = r#""cli-" ++ pr_number"#;
 
-        run(&jj, &gh, &git, &args(1234, Some(cli_template), false))
-            .await
-            .unwrap();
+        run(
+            &TestModel::new(&jj, &gh, &git),
+            &args(1234, Some(cli_template), false),
+        )
+        .await
+        .unwrap();
 
         let evals = jj.eval_template_calls.lock().unwrap();
         assert_eq!(evals[0].template, cli_template);
@@ -604,7 +613,9 @@ mod tests {
             exists: false,
             fetches: RefCell::new(vec![]),
         };
-        run(&jj, &gh, &git, &args(1234, None, false)).await.unwrap();
+        run(&TestModel::new(&jj, &gh, &git), &args(1234, None, false))
+            .await
+            .unwrap();
 
         let evals = jj.eval_template_calls.lock().unwrap();
         assert_eq!(evals[0].template, DEFAULT_FETCH_TEMPLATE);
@@ -619,7 +630,7 @@ mod tests {
             exists: false,
             fetches: RefCell::new(vec![]),
         };
-        let err = run(&jj, &gh, &git, &args(1234, None, false))
+        let err = run(&TestModel::new(&jj, &gh, &git), &args(1234, None, false))
             .await
             .unwrap_err();
         let msg = format!("{err:#}");
@@ -636,7 +647,7 @@ mod tests {
             exists: false,
             fetches: RefCell::new(vec![]),
         };
-        let err = run(&jj, &gh, &git, &args(1234, None, false))
+        let err = run(&TestModel::new(&jj, &gh, &git), &args(1234, None, false))
             .await
             .unwrap_err();
         assert!(
@@ -655,7 +666,7 @@ mod tests {
             exists: false,
             fetches: RefCell::new(vec![]),
         };
-        let err = run(&jj, &gh, &git, &args(1234, None, false))
+        let err = run(&TestModel::new(&jj, &gh, &git), &args(1234, None, false))
             .await
             .unwrap_err();
         let msg = format!("{err:#}");

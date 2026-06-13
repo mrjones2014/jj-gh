@@ -9,6 +9,12 @@ query PrsWithCiStatusInternal($query: String!) {
         title
         headRefName
         headRefOid
+        headRepository {
+          owner {
+            __typename
+            login
+          }
+        }
         baseRefName
         isDraft
         merged
