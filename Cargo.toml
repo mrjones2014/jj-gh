@@ -4,7 +4,7 @@ edition = "2024"
 license = "MIT"
 name = "jj-gh"
 repository = "https://github.com/mrjones2014/jj-gh"
-version = "0.2.5"
+version = "0.2.6"
 include = [
   "/src/**/*.rs",
   "/src/**/*.gql",
@@ -51,7 +51,7 @@ gix = { version = "0.84", default-features = false, features = [
 ] }
 graphql_client = "0.16"
 http = "1"
-jj-gh-config-derive = { path = "tools/jj-gh-config-derive", version = "0.1.1" }
+jj-gh-config-derive = { path = "tools/jj-gh-config-derive", version = "0.1.2" }
 log = "0.4"
 octocrab = "0.53"
 schemars = { version = "1", optional = true }
