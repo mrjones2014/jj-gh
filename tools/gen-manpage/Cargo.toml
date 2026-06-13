@@ -1,0 +1,10 @@
+[package]
+name = "gen-manpage"
+edition = "2024"
+version = "0.0.0"
+publish = false
+
+[dependencies]
+clap.workspace = true
+clap_mangen = "0.3"
+jj-gh = { path = "../.." }

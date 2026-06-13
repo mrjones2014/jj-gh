@@ -1,6 +1,6 @@
 # jj-gh
 
-`jj` tools for working with GitHub from your terminal.
+`jj` tools for working with GitHub PRs from your terminal.
 
 - Create PRs locally from your preferred editor, for any arbitrary revision ID
   - Intelligently supports stacked PRs by choosing the correct base if the revision has an ancestor bookmark for which an open PR exists
@@ -49,6 +49,7 @@ Add the flake input:
 ```
 
 You can either use the overlay directly, or use the `home-manager` module.
+The Nix package installs the manpage automatically. Run `man jj-gh` to view it.
 
 ```nix
 { jj-gh, pkgs, ... }:
@@ -88,8 +89,18 @@ Public Key: `jj-gh.cachix.org-1:N1uFBMDd9znlhDa68BRqLSXYzXXJ2+WHVuwxpGxCtDo=`
 
   <summary>Precompiled binary</summary>
 
-Download and extract the archive for your platform from the [latest GitHub release](https://github.com/mrjones2014/jj-gh/releases/latest), then
-place the `jj-gh` binary somewhere in your `$PATH`.
+Download and extract the archive for your platform from the [latest GitHub release](https://github.com/mrjones2014/jj-gh/releases/latest).
+The Linux and macOS archives contain the `jj-gh` binary and its manpage. For
+example, to install them under `~/.local`:
+
+```sh
+mkdir -p ~/.local/bin ~/.local/share/man/man1
+install -m 755 jj-gh ~/.local/bin/jj-gh
+install -m 644 jj-gh.1 ~/.local/share/man/man1/jj-gh.1
+```
+
+Ensure `~/.local/bin` is in your `PATH` and `~/.local/share/man` is in your
+`MANPATH`.
 
 </details>
 
