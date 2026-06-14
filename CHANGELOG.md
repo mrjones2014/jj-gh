@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.7](https://github.com/mrjones2014/jj-gh/compare/jj-gh-v0.2.6...jj-gh-v0.2.7) - 2026-06-14
+
+### Added
+
+- *(pr)* Add `pr url` subcommand to print URL to a PR by number or rev
+- *(pr-create)* Add `--no-edit` option
+- *(pr-edit)* Show diffs in edit view
+- *(pr-create)* add `--title-template` an `--pick-title` options
+
+### Fixed
+
+- *(editor)* Force editor to run interactively when part of a piped cmd
+- *(auth)* Get GH token lazily
+- *(log)* Fix logging format
+
+### Other
+
+- *(config)* Make config merging less verbose
+- *(docs)* Update README.md
+- *(api)* Refactor architecture to abstract repeated algorithms
+- *(docs)* Update README.md
+- *(docs)* Generate manpage for `jj-gh`
+
 ## [0.2.6](https://github.com/mrjones2014/jj-gh/compare/jj-gh-v0.2.5...jj-gh-v0.2.6) - 2026-06-13
 
 ### Added
