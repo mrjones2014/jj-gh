@@ -1,5 +1,5 @@
 [package]
-description = "Opinionated `jj` tools for working with GitHub from your terminal"
+description = "`jj` tools for working with GitHub PRs from your terminal"
 edition = "2024"
 license = "MIT"
 name = "jj-gh"

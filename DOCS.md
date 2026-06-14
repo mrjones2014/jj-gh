@@ -25,7 +25,7 @@ This document contains the help content for the `jj-gh` command-line program.
 
 ## `jj-gh`
 
-Opinionated `jj` tools for working with GitHub from your terminal
+`jj` tools for working with GitHub PRs from your terminal
 
 **Usage:** `jj-gh [OPTIONS] <COMMAND>`
 

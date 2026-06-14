@@ -41,7 +41,7 @@ let
 in
 {
   options.programs.jujutsu.gh = {
-    enable = mkEnableOption "jj-gh, opinionated jj tools for GitHub PR workflows";
+    enable = mkEnableOption "jj-gh, jj tools for working with GitHub PRs from your terminal.";
 
     package = mkOption {
       type = types.package;
