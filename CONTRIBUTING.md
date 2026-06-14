@@ -94,4 +94,6 @@ cargo check --all-targets   # run checks
 ast-grep scan --error       # enforce structural hygiene rules
 ast-grep test               # test structural hygiene rules and diagnostics
 cargo run -- pr help        # run the CLI
+
+cargo run --quiet --package gen-manpage | man -l /dev/stdin # preview man page
 ```
