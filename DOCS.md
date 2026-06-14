@@ -8,13 +8,14 @@ This document contains the help content for the `jj-gh` command-line program.
 
 - [`jj-gh`↴](#jj-gh)
 - [`jj-gh pr`↴](#jj-gh-pr)
-- [`jj-gh pr create`↴](#jj-gh-pr-create)
-- [`jj-gh pr fetch`↴](#jj-gh-pr-fetch)
 - [`jj-gh pr auto-merge`↴](#jj-gh-pr-auto-merge)
+- [`jj-gh pr create`↴](#jj-gh-pr-create)
 - [`jj-gh pr edit`↴](#jj-gh-pr-edit)
+- [`jj-gh pr fetch`↴](#jj-gh-pr-fetch)
 - [`jj-gh pr log`↴](#jj-gh-pr-log)
 - [`jj-gh pr restack`↴](#jj-gh-pr-restack)
 - [`jj-gh pr retry-failed`↴](#jj-gh-pr-retry-failed)
+- [`jj-gh pr url`↴](#jj-gh-pr-url)
 - [`jj-gh debug`↴](#jj-gh-debug)
 - [`jj-gh debug config`↴](#jj-gh-debug-config)
 - [`jj-gh debug auth`↴](#jj-gh-debug-auth)
@@ -52,13 +53,34 @@ Commands to work with PRs
 
 ###### **Subcommands:**
 
-- `create` — Open your preferred editor to create a PR from a revision
-- `fetch` — Fetch a pull request into a local bookmark
 - `auto-merge` — Enable auto-merge on a PR
+- `create` — Open your preferred editor to create a PR from a revision
 - `edit` — Edit an existing PR's title, body, base, labels, reviewers, draft state, and auto-merge settings via the markdown frontmatter editor flow
+- `fetch` — Fetch a pull request into a local bookmark
 - `log` — Like `jj log`, but injects PR metadata (e.g. number, CI status, URL)
 - `restack` — Push the current `jj` stack shape up to GitHub by updating each PR's base branch to match its closest stacked ancestor bookmark
 - `retry-failed` — Re-run failed CI jobs on a PR, or on all local PRs with failed CI
+- `url` — Lookup the PR by the given number or revision ID and print its full URL. This is useful in pipes such as `jj-gh pr url <rev> | pbcopy` or `jj-gh pr url <rev> | wl-copy`
+
+## `jj-gh pr auto-merge`
+
+Enable auto-merge on a PR.
+
+Accepts either a PR number or a revision; with a revision, the PR is looked up by the rev's local bookmark. Fails if the repo does not allow auto-merge.
+
+**Usage:** `jj-gh pr auto-merge [OPTIONS] <PR_NUM|REV>`
+
+**Command Alias:** `am`
+
+###### **Arguments:**
+
+- `<PR_NUM|REV>` — PR number, or revision ID to look up a PR from
+
+###### **Options:**
+
+- `-m`, `--method <METHOD>` — Merge method used when enabling auto-merge. Overrides config `auto_merge_method` (default `merge`)
+
+  Possible values: `merge`, `squash`, `rebase`
 
 ## `jj-gh pr create`
 
@@ -107,6 +129,27 @@ Opens your editor to a markdown file where you can write the PR description, and
 - `--diffs <SHOW_DIFFS>` — Show a preview of the PR diffs while creating the PR body. Overrides `pr_create_show_diffs` configuration. Use `--no-diffs` to disable
 - `--no-diffs` — Hide the PR diff preview while creating the PR body. Overrides config
 
+## `jj-gh pr edit`
+
+Edit an existing PR's title, body, base, labels, reviewers, draft state, and auto-merge settings via the markdown frontmatter editor flow.
+
+Resolves the PR from a revision (via its local bookmark) or a PR number, fetches its current state, and opens your editor. By default, the editor includes a read-only preview of the PR diff. Applies only metadata you change: labels you didn't touch keep whatever others (CI bots, etc.) set.
+
+**Usage:** `jj-gh pr edit [OPTIONS] <PR_NUM|REV>`
+
+**Command Alias:** `e`
+
+###### **Arguments:**
+
+- `<PR_NUM|REV>` — PR number, or revision ID to look up a PR from
+
+###### **Options:**
+
+- `-f`, `--force` — Edit even if the PR body is empty. By default, `jj-gh` refuses to edit an empty body to avoid clobbering one that exists but failed to load
+- `-e`, `--editor <CMD>` — Editor command, e.g. `--editor "nvim +7"`. Default: `editor` in config, then `$VISUAL`, then `$EDITOR`
+- `--diffs <SHOW_DIFFS>` — Show a preview of the PR diffs while editing the PR. Overrides `pr_edit_show_diffs` configuration. Use `--no-diffs` to disable
+- `--no-diffs` — Hide the PR diff preview while editing the PR. Overrides config
+
 ## `jj-gh pr fetch`
 
 Fetch a pull request into a local bookmark.
@@ -145,47 +188,6 @@ See: <https://github.com/jj-vcs/jj/issues/4388>
   - `pr_slug`: sanitized lowercase ASCII slug of the title (max 50 chars), suitable for embedding in a bookmark name.
 
 - `-f`, `--force` — Replace an existing local bookmark of the same name
-
-## `jj-gh pr auto-merge`
-
-Enable auto-merge on a PR.
-
-Accepts either a PR number or a revision; with a revision, the PR is looked up by the rev's local bookmark. Fails if the repo does not allow auto-merge.
-
-**Usage:** `jj-gh pr auto-merge [OPTIONS] <PR_NUM|REV>`
-
-**Command Alias:** `am`
-
-###### **Arguments:**
-
-- `<PR_NUM|REV>` — PR number, or revision ID to look up a PR from
-
-###### **Options:**
-
-- `-m`, `--method <METHOD>` — Merge method used when enabling auto-merge. Overrides config `auto_merge_method` (default `merge`)
-
-  Possible values: `merge`, `squash`, `rebase`
-
-## `jj-gh pr edit`
-
-Edit an existing PR's title, body, base, labels, reviewers, draft state, and auto-merge settings via the markdown frontmatter editor flow.
-
-Resolves the PR from a revision (via its local bookmark) or a PR number, fetches its current state, and opens your editor. By default, the editor includes a read-only preview of the PR diff. Applies only metadata you change: labels you didn't touch keep whatever others (CI bots, etc.) set.
-
-**Usage:** `jj-gh pr edit [OPTIONS] <PR_NUM|REV>`
-
-**Command Alias:** `e`
-
-###### **Arguments:**
-
-- `<PR_NUM|REV>` — PR number, or revision ID to look up a PR from
-
-###### **Options:**
-
-- `-f`, `--force` — Edit even if the PR body is empty. By default, `jj-gh` refuses to edit an empty body to avoid clobbering one that exists but failed to load
-- `-e`, `--editor <CMD>` — Editor command, e.g. `--editor "nvim +7"`. Default: `editor` in config, then `$VISUAL`, then `$EDITOR`
-- `--diffs <SHOW_DIFFS>` — Show a preview of the PR diffs while editing the PR. Overrides `pr_edit_show_diffs` configuration. Use `--no-diffs` to disable
-- `--no-diffs` — Hide the PR diff preview while editing the PR. Overrides config
 
 ## `jj-gh pr log`
 
@@ -263,6 +265,21 @@ With `--cancel`, in-progress runs are cancelled first; once they finalize, every
 - `--cancel-timeout <SECS>` — Seconds to wait for cancelled runs to finalize before re-running. Only meaningful with --cancel
 
   Default value: `30`
+
+## `jj-gh pr url`
+
+Lookup the PR by the given number or revision ID and print its full URL. This is useful in pipes such as `jj-gh pr url <rev> | pbcopy` or `jj-gh pr url <rev> | wl-copy`
+
+**Usage:** `jj-gh pr url [OPTIONS] <PR_NUM|REV>`
+
+###### **Arguments:**
+
+- `<PR_NUM|REV>` — PR number or revision ID to lookup PR from
+
+###### **Options:**
+
+- `--remote <NAME>` — Git remote used for the user's own pushes and PR head lookups. Default: `origin` (or `default_remote` in config)
+- `--upstream-remote <NAME>` — Git remote used as the PR target in fork workflows. Default: `upstream` (or `upstream_remote` in config)
 
 ## `jj-gh debug`
 

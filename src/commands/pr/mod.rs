@@ -10,9 +10,11 @@ pub mod fetch;
 mod log;
 mod restack;
 mod retry_failed;
+mod url;
 
 use crate::{
     cli::{GlobalOpts, GlobalOptsInput},
+    commands::pr::url::{PrUrlArgs, PrUrlArgsInput},
     config,
     model::ModelImpl,
     ui::Spinner,
@@ -43,6 +45,13 @@ struct ConfigOverrides<'a, T> {
 #[derive(Debug, Serialize, Subcommand)]
 #[serde(untagged)] // NB: `untagged` here is important for config merging
 pub enum PrAction {
+    /// Enable auto-merge on a PR.
+    ///
+    /// Accepts either a PR number or a revision; with a revision, the PR is looked up by the rev's
+    /// local bookmark. Fails if the repo does not allow auto-merge.
+    #[command(visible_alias = "am")]
+    AutoMerge(AutoMergeArgsInput),
+
     /// Open your preferred editor to create a PR from a revision.
     ///
     /// Opens your editor to a markdown file where you can write the PR description,
@@ -51,21 +60,7 @@ pub enum PrAction {
     /// if one exists, otherwise `trunk()`.
     #[command(visible_alias = "c")]
     Create(CreateArgsInput),
-    /// Fetch a pull request into a local bookmark.
-    ///
-    /// This command accepts either a revision ID or a PR number. If given a revision ID, the
-    /// PR number will be looked up via the API. Requires a colocated git repository; the special
-    /// `refs/pull/123/head` ref is fetched via `git` because `jj` cannot yet fetch arbitrary refs.
-    ///
-    /// See: <https://github.com/jj-vcs/jj/issues/4388>
-    #[command(visible_alias = "f")]
-    Fetch(FetchArgsInput),
-    /// Enable auto-merge on a PR.
-    ///
-    /// Accepts either a PR number or a revision; with a revision, the PR is looked up by the rev's
-    /// local bookmark. Fails if the repo does not allow auto-merge.
-    #[command(visible_alias = "am")]
-    AutoMerge(AutoMergeArgsInput),
+
     /// Edit an existing PR's title, body, base, labels, reviewers, draft state,
     /// and auto-merge settings via the markdown frontmatter editor flow.
     ///
@@ -75,6 +70,16 @@ pub enum PrAction {
     /// change: labels you didn't touch keep whatever others (CI bots, etc.) set.
     #[command(visible_alias = "e")]
     Edit(EditArgsInput),
+
+    /// Fetch a pull request into a local bookmark.
+    ///
+    /// This command accepts either a revision ID or a PR number. If given a revision ID, the
+    /// PR number will be looked up via the API. Requires a colocated git repository; the special
+    /// `refs/pull/123/head` ref is fetched via `git` because `jj` cannot yet fetch arbitrary refs.
+    ///
+    /// See: <https://github.com/jj-vcs/jj/issues/4388>
+    #[command(visible_alias = "f")]
+    Fetch(FetchArgsInput),
 
     /// Like `jj log`, but injects PR metadata (e.g. number, CI status, URL).
     ///
@@ -112,6 +117,11 @@ pub enum PrAction {
         group = clap::ArgGroup::new("retry_target").required(true).multiple(false)
     )]
     RetryFailed(RetryFailedArgsInput),
+
+    /// Lookup the PR by the given number or revision ID and print its
+    /// full URL. This is useful in pipes such as `jj-gh pr url <rev> | pbcopy`
+    /// or `jj-gh pr url <rev> | wl-copy`.
+    Url(PrUrlArgsInput),
 }
 
 /// Dispatch the `pr` subcommand to the matching handler.
@@ -159,6 +169,10 @@ pub async fn dispatch(global: GlobalOptsInput, action: PrAction) -> Result<()> {
         PrAction::RetryFailed(input) => {
             let args = RetryFailedArgs::resolve(input, &config, &globals);
             retry_failed::run(&model, &args).await?;
+        }
+        PrAction::Url(input) => {
+            let args = PrUrlArgs::resolve(input, &config, &globals);
+            url::run(&model, &args).await?;
         }
     }
     Ok(())
