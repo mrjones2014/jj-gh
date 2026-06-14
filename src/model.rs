@@ -5,7 +5,8 @@
 //! have one canonical home.
 
 use crate::{
-    auth::{EnvReader, OsEnv},
+    auth::{self, EnvReader, OsEnv},
+    config::Config,
     editor::{Editor, TempfileEditor},
     gh::{
         Gh, PrDetails, PrWithCiStatus,
@@ -17,8 +18,8 @@ use crate::{
     jj::{Jj, JjExt, PushedBookmark, real::JjCli},
 };
 use anyhow::{Result, anyhow};
-use secrecy::SecretString;
-use std::{path::PathBuf, rc::Rc};
+use std::rc::Rc;
+use tokio::sync::OnceCell;
 
 pub trait Model {
     type Editor: Editor;
@@ -29,7 +30,7 @@ pub trait Model {
 
     fn editor(&self) -> &Self::Editor;
     fn env(&self) -> &Self::Env;
-    fn gh(&self) -> &Self::Gh;
+    async fn gh(&self) -> Result<&Self::Gh>;
     fn git(&self) -> &Self::Git;
     fn jj(&self) -> &Self::Jj;
 
@@ -48,6 +49,7 @@ pub trait Model {
             .collect::<Vec<_>>();
         let prs = self
             .gh()
+            .await?
             .local_pulls(&target.owner, &target.repo, target.origin_owner(), &names)
             .await?;
         Ok(LocalPulls {
@@ -66,7 +68,7 @@ pub trait Model {
         let remote = self.jj().resolve_default_remote(remote).await?;
         pr_lookup::get_pr(
             self.jj(),
-            self.gh(),
+            self.gh().await?,
             &remote,
             upstream_remote,
             number_or_rev,
@@ -91,7 +93,7 @@ pub trait Model {
             ..
         } = pr_lookup::resolve_pr_for_rev(
             self.jj(),
-            self.gh(),
+            self.gh().await?,
             &remote,
             upstream_remote,
             number_or_rev,
@@ -112,7 +114,7 @@ pub trait Model {
         let remote = self.jj().resolve_default_remote(remote).await?;
         pr_lookup::resolve_pr_with_target(
             self.jj(),
-            self.gh(),
+            self.gh().await?,
             &remote,
             upstream_remote,
             number_or_rev,
@@ -140,32 +142,37 @@ pub trait Model {
     }
 }
 
-pub struct ModelImpl {
+pub struct ModelImpl<'a> {
+    config: &'a Config,
     editor: TempfileEditor,
     env: OsEnv,
-    gh: OctocrabGh,
+    gh: OnceCell<OctocrabGh>,
     git: RealGit,
     jj: JjCli,
 }
 
-impl ModelImpl {
-    pub fn new(
-        repo: gix::Repository,
-        workspace_root: PathBuf,
-        token: &SecretString,
-    ) -> Result<Self> {
+impl<'a> ModelImpl<'a> {
+    /// Discover the current workspace and construct its local jj/git clients.
+    /// GitHub auth and client construction remain lazy until [`Model::gh`].
+    ///
+    /// # Errors
+    ///
+    /// Propagates failures from workspace or colocated git-store discovery.
+    pub async fn new(config: &'a Config) -> Result<Self> {
+        let (repo, workspace_root) = crate::jj::real::discover_workspace().await?;
         let repo = Rc::new(repo);
         Ok(Self {
+            config,
             editor: TempfileEditor,
             env: OsEnv,
-            gh: OctocrabGh::new(token)?,
+            gh: OnceCell::new(),
             git: RealGit::new(Rc::clone(&repo)),
             jj: JjCli::from_repository(repo, workspace_root),
         })
     }
 }
 
-impl Model for ModelImpl {
+impl Model for ModelImpl<'_> {
     type Editor = TempfileEditor;
     type Env = OsEnv;
     type Gh = OctocrabGh;
@@ -180,8 +187,13 @@ impl Model for ModelImpl {
         &self.env
     }
 
-    fn gh(&self) -> &Self::Gh {
-        &self.gh
+    async fn gh(&self) -> Result<&Self::Gh> {
+        self.gh
+            .get_or_try_init(|| async {
+                let token = auth::resolve_token(self.config).await?;
+                OctocrabGh::new(&token)
+            })
+            .await
     }
 
     fn git(&self) -> &Self::Git {
@@ -244,8 +256,8 @@ impl<J: Jj, G: Gh, GO: GitOps> Model for TestModel<'_, J, G, GO> {
         &self.env
     }
 
-    fn gh(&self) -> &Self::Gh {
-        self.gh
+    async fn gh(&self) -> Result<&Self::Gh> {
+        Ok(self.gh)
     }
 
     fn git(&self) -> &Self::Git {

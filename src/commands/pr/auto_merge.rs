@@ -17,7 +17,7 @@ subcommand_args! {
 }
 
 pub async fn run(model: &impl Model, args: &AutoMergeArgs) -> Result<()> {
-    let gh = model.gh();
+    let gh = model.gh().await?;
     let AutoMergeArgs {
         number_or_rev,
         auto_merge_method,

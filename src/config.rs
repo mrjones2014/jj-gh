@@ -181,6 +181,18 @@ pub fn extract(fig: &Figment) -> Result<Config> {
     fig.extract().map_err(Into::into)
 }
 
+/// Resolve config from all persistent/env layers plus serialized CLI
+/// overrides.
+///
+/// # Errors
+///
+/// Returns an error if a config layer cannot be read or the merged config
+/// cannot be extracted.
+pub fn resolve(overrides: &impl Serialize) -> Result<Config> {
+    let fig = load_figment().merge(Serialized::defaults(overrides));
+    extract(&fig)
+}
+
 fn discover_layers() -> Vec<PathBuf> {
     // The three `jj config path` calls are independent cold subprocess spawns;
     // run them concurrently so startup pays one spawn's latency, not three.

@@ -95,7 +95,7 @@ subcommand_args! {
 /// import, template eval).
 pub async fn run(model: &impl Model, args: &FetchArgs) -> Result<()> {
     let jj = model.jj();
-    let gh = model.gh();
+    let gh = model.gh().await?;
     let FetchArgs {
         pr: pr_num,
         template,

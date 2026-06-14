@@ -144,7 +144,7 @@ subcommand_args! {
 #[expect(clippy::too_many_lines)]
 pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
     let jj = model.jj();
-    let gh = model.gh();
+    let gh = model.gh().await?;
     let env = model.env();
     let editor = model.editor();
     let args @ CreateArgs {

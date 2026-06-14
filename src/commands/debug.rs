@@ -10,7 +10,6 @@ use crate::{
     ui::Spinner,
 };
 use anyhow::Result;
-use figment::providers::Serialized;
 
 /// Dispatch a `jj-gh debug` invocation.
 ///
@@ -32,8 +31,7 @@ pub async fn dispatch(global: GlobalOptsInput, action: DebugAction) -> Result<()
 }
 
 fn resolve_globals(global: GlobalOptsInput) -> Result<(GlobalOpts, Config)> {
-    let fig = config::load_figment().merge(Serialized::defaults(&global));
-    let config = config::extract(&fig)?;
+    let config = config::resolve(&global)?;
     let globals = GlobalOpts::resolve(global, &config);
     Ok((globals, config))
 }
