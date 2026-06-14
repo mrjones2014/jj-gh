@@ -5,8 +5,10 @@
 //! - [`capture`] pipes and collects stdout for commands whose output we parse,
 //!   normalizing a non-zero exit via [`subprocess_error`].
 //! - [`stream`] inherits the parent's stdio so output streams live and keeps
-//!   color/tty (display, progress, and interactive commands). The child prints
-//!   its own stderr, so a failure needs no captured message.
+//!   color/tty for display and progress commands. The child prints its own
+//!   stderr, so a failure needs no captured message.
+//! - [`interactive`] attaches to the controlling terminal, so interactive
+//!   commands still work when the parent's stdout is piped.
 //! - [`capture_sync`] is the synchronous variant for pre-runtime config
 //!   assembly, before the async runtime exists.
 //!
@@ -90,6 +92,60 @@ pub async fn stream(argv: &[&str]) -> Result<()> {
     let (prog, rest) = split(argv)?;
     let status = Command::new(prog)
         .args(rest)
+        .status()
+        .await
+        .with_context(|| format!("failed to spawn `{prog}`"))?;
+    if !status.success() {
+        return Err(anyhow!("`{prog}` exited with {status}"));
+    }
+    Ok(())
+}
+
+/// Run `argv` attached to the controlling terminal.
+///
+/// This keeps interactive programs usable when this process's stdout is piped.
+/// If no controlling terminal or console is available, falls back to inheriting
+/// the parent's stdio.
+pub async fn interactive(argv: &[&str]) -> Result<()> {
+    let (prog, rest) = split(argv)?;
+    let mut command = Command::new(prog);
+    command.args(rest);
+
+    #[cfg(unix)]
+    if let Ok(tty) = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/tty")
+    {
+        use std::process::Stdio;
+
+        let tty_stdout = tty
+            .try_clone()
+            .context("could not clone controlling terminal for stdout")?;
+        let tty_stderr = tty
+            .try_clone()
+            .context("could not clone controlling terminal for stderr")?;
+        command
+            .stdin(Stdio::from(tty))
+            .stdout(Stdio::from(tty_stdout))
+            .stderr(Stdio::from(tty_stderr));
+    }
+
+    #[cfg(windows)]
+    if let (Ok(stdin), Ok(stdout), Ok(stderr)) = (
+        std::fs::OpenOptions::new().read(true).open("CONIN$"),
+        std::fs::OpenOptions::new().write(true).open("CONOUT$"),
+        std::fs::OpenOptions::new().write(true).open("CONOUT$"),
+    ) {
+        use std::process::Stdio;
+
+        command
+            .stdin(Stdio::from(stdin))
+            .stdout(Stdio::from(stdout))
+            .stderr(Stdio::from(stderr));
+    }
+
+    let status = command
         .status()
         .await
         .with_context(|| format!("failed to spawn `{prog}`"))?;

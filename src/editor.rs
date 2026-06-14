@@ -211,7 +211,7 @@ impl Editor for TempfileEditor {
             .map(String::as_str)
             .chain(std::iter::once(tmp_arg.as_str()))
             .collect::<Vec<&str>>();
-        crate::proc::stream(&full).await?;
+        crate::proc::interactive(&full).await?;
 
         std::fs::read_to_string(tmp.path()).context("could not read edited buffer")
     }

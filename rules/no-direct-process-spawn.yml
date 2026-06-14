@@ -3,7 +3,7 @@ language: Rust
 severity: error
 message: Spawn external processes through src/proc.rs, not Command directly.
 note: >-
-  Use proc::capture (parse output), proc::stream (display/progress/interactive), proc::capture_sync (pre-runtime config), or the ProcessRunner trait. They centralize stdio mode, color/tty handling, and error normalization so call sites cannot reintroduce regressions like stripped color or buffered output.
+  Use proc::capture (parse output), proc::stream (display/progress), proc::interactive (interactive terminal), proc::capture_sync (pre-runtime config), or the ProcessRunner trait. They centralize stdio mode, color/tty handling, and error normalization so call sites cannot reintroduce regressions like stripped color or buffered output.
 files:
   - src/**/*.rs
 ignores:
