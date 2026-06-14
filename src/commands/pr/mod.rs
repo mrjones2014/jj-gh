@@ -40,7 +40,8 @@ struct ConfigOverrides<'a, T> {
     action: &'a T,
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Debug, Serialize, Subcommand)]
+#[serde(untagged)] // NB: `untagged` here is important for config merging
 pub enum PrAction {
     /// Open your preferred editor to create a PR from a revision.
     ///
@@ -123,38 +124,11 @@ pub enum PrAction {
 pub async fn dispatch(global: GlobalOptsInput, action: PrAction) -> Result<()> {
     let startup = Spinner::start("Resolving workspace");
 
-    let config = match &action {
-        PrAction::Create(action) => config::resolve(&ConfigOverrides {
-            global: &global,
-            action,
-        })?,
-        PrAction::Fetch(action) => config::resolve(&ConfigOverrides {
-            global: &global,
-            action,
-        })?,
-        PrAction::AutoMerge(action) => config::resolve(&ConfigOverrides {
-            global: &global,
-            action,
-        })?,
-        PrAction::Edit(action) => config::resolve(&ConfigOverrides {
-            global: &global,
-            action,
-        })?,
-        PrAction::Log(action) => config::resolve(&ConfigOverrides {
-            global: &global,
-            action,
-        })?,
-        PrAction::Restack(action) => config::resolve(&ConfigOverrides {
-            global: &global,
-            action,
-        })?,
-        PrAction::RetryFailed(action) => config::resolve(&ConfigOverrides {
-            global: &global,
-            action,
-        })?,
-    };
+    let config = config::resolve(&ConfigOverrides {
+        global: &global,
+        action: &action,
+    })?;
     let globals = GlobalOpts::resolve(global, &config);
-
     let model = ModelImpl::new(&config).await?;
     startup.stop();
     match action {
@@ -243,6 +217,16 @@ mod tests {
         PrLogArgsParser::try_parse_from(argv.iter().copied())
             .expect("PrLogArgsInput failed to parse")
             .args
+    }
+
+    #[test]
+    fn action_serializes_as_flat_config_overlay() {
+        let action = PrAction::Create(parse_create(&["@-", "--draft"]));
+        let value = serde_json::to_value(action).unwrap();
+
+        assert_eq!(value.get("draft"), Some(&serde_json::Value::Bool(true)));
+        assert!(value.get("Create").is_none());
+        assert!(value.get("create").is_none());
     }
 
     #[test]
