@@ -114,6 +114,11 @@ subcommand_args! {
         #[config]
         pub editor: Option<Vec<String>>,
 
+        /// Create the PR without opening an editor. Useful when combined with
+        /// `--draft`.
+        #[arg(long)]
+        pub no_edit: bool,
+
         /// Show a preview of the PR diffs while creating the PR body.
         /// Overrides `pr_create_show_diffs` configuration. Use `--no-diffs` to disable.
         #[arg(
@@ -158,6 +163,7 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
         draft,
         auto_merge,
         editor: editor_argv,
+        no_edit,
         auto_merge_method,
         template: _,
         show_diffs,
@@ -260,27 +266,31 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
         auto_merge: *auto_merge,
         auto_merge_method: *auto_merge_method,
     };
-    let editor_argv = resolve_editor_argv(editor_argv.as_deref(), env)?;
-    let diff_preview = if *show_diffs {
-        jj.diff(&title_revset)
-            .await
-            .inspect_err(|e| log::debug!("could not render diff preview: {e:#}"))
-            .ok()
+    let (final_fm, body) = if *no_edit {
+        (initial_fm, raw_template.unwrap_or_default())
     } else {
-        None
+        let editor_argv = resolve_editor_argv(editor_argv.as_deref(), env)?;
+        let diff_preview = if *show_diffs {
+            jj.diff(&title_revset)
+                .await
+                .inspect_err(|e| log::debug!("could not render diff preview: {e:#}"))
+                .ok()
+        } else {
+            None
+        };
+        let preview = diff_preview
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        editor::round_trip(
+            editor,
+            &editor_argv,
+            &initial_fm,
+            raw_template.as_deref().unwrap_or_default(),
+            preview,
+        )
+        .await?
     };
-    let preview = diff_preview
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty());
-    let (final_fm, body) = editor::round_trip(
-        editor,
-        &editor_argv,
-        &initial_fm,
-        raw_template.as_deref().unwrap_or_default(),
-        preview,
-    )
-    .await?;
     final_fm.validate()?;
     let final_base_branch = remote::branch_from_base_spec(&target.owner, &final_fm.base)?;
     let final_base_lookup = if final_base_branch == base_branch {

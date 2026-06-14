@@ -103,6 +103,7 @@ Opens your editor to a markdown file where you can write the PR description, and
 - `--pick-title` — Interactively choose which commit supplies the PR title
 - `--title-template <TEMPLATE>` — jj template string used to render candidate PR titles. Evaluated once per commit in the PR revset
 - `-e`, `--editor <CMD>` — Editor command, e.g. `--editor "nvim +7"`. Default: `editor` in config, then `$VISUAL`, then `$EDITOR`
+- `--no-edit` — Create the PR without opening an editor. Useful when combined with `--draft`
 - `--diffs <SHOW_DIFFS>` — Show a preview of the PR diffs while creating the PR body. Overrides `pr_create_show_diffs` configuration. Use `--no-diffs` to disable
 - `--no-diffs` — Hide the PR diff preview while creating the PR body. Overrides config
 
