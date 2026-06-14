@@ -8,6 +8,7 @@ craneLib.buildPackage (
   // {
     inherit cargoArtifacts;
     cargoExtraArgs = "--package jj-gh";
+    CARGO_PROFILE = "dev";
     doCheck = false;
   }
 )
