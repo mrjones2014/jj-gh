@@ -9,6 +9,7 @@ query GetPrInternal($owner: String!, $name: String!, $number: Int!) {
       headRefName
       baseRefName
       headRefOid
+      baseRefOid
       body
       mergeQueue {
         id

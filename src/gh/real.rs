@@ -308,6 +308,7 @@ impl Gh for OctocrabGh {
             head_ref_name,
             base_ref_name,
             head_ref_oid,
+            base_ref_oid,
             merge_queue,
             head_repository,
             labels,
@@ -331,6 +332,7 @@ impl Gh for OctocrabGh {
             head_ref: head_ref_name,
             base_ref: base_ref_name,
             head_sha: head_ref_oid,
+            base_sha: base_ref_oid,
             head_user_login,
             head_repo_name,
             graphql_node_id: id,
@@ -376,6 +378,15 @@ impl Gh for OctocrabGh {
                 })
                 .unwrap_or_default(),
         })
+    }
+
+    async fn get_pr_diff(&self, owner: &str, repo: &str, number: u64) -> Result<String> {
+        self.octo
+            .pulls(owner, repo)
+            .get_diff(number)
+            .await
+            .map_err(humanize)
+            .with_context(|| format!("fetching diff for {owner}/{repo}#{number}"))
     }
 
     async fn enable_auto_merge(&self, pr_node_id: &str, method: AutoMergeMethod) -> Result<()> {

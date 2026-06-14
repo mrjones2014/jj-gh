@@ -60,8 +60,9 @@ pub enum PrAction {
     /// and auto-merge settings via the markdown frontmatter editor flow.
     ///
     /// Resolves the PR from a revision (via its local bookmark) or a PR number,
-    /// fetches its current state, opens your editor, and applies only the diffs:
-    /// labels you didn't touch keep whatever others (CI bots, etc.) set.
+    /// fetches its current state, and opens your editor. By default, the editor
+    /// includes a read-only preview of the PR diff. Applies only metadata you
+    /// change: labels you didn't touch keep whatever others (CI bots, etc.) set.
     #[command(visible_alias = "e")]
     Edit(EditArgsInput),
 
@@ -186,6 +187,13 @@ mod tests {
 
     #[derive(clap::Parser, Debug)]
     #[command(no_binary_name = true)]
+    struct EditArgsParser {
+        #[command(flatten)]
+        args: EditArgsInput,
+    }
+
+    #[derive(clap::Parser, Debug)]
+    #[command(no_binary_name = true)]
     struct PrLogArgsParser {
         #[command(flatten)]
         args: PrLogArgsInput,
@@ -204,6 +212,12 @@ mod tests {
     fn parse_create(argv: &[&str]) -> CreateArgsInput {
         CreateArgsParser::try_parse_from(argv.iter().copied())
             .expect("CreateArgsInput failed to parse")
+            .args
+    }
+
+    fn parse_edit(argv: &[&str]) -> EditArgsInput {
+        EditArgsParser::try_parse_from(argv.iter().copied())
+            .expect("EditArgsInput failed to parse")
             .args
     }
 
@@ -237,6 +251,14 @@ mod tests {
 
     fn merged_create(argv: &[&str], toml_config: &str) -> Config {
         let argv = parse_create(argv);
+        let fig = config::defaults_figment()
+            .merge(config::JjConfProvider::from_memory("test", toml_config))
+            .merge(Serialized::defaults(&argv));
+        config::extract(&fig).unwrap()
+    }
+
+    fn merged_edit(argv: &[&str], toml_config: &str) -> Config {
+        let argv = parse_edit(argv);
         let fig = config::defaults_figment()
             .merge(config::JjConfProvider::from_memory("test", toml_config))
             .merge(Serialized::defaults(&argv));
@@ -340,6 +362,39 @@ mod tests {
         assert!(!c.draft);
         assert!(!c.auto_merge);
         assert!(!c.pr_create_show_diffs);
+    }
+
+    #[test]
+    fn edit_bare_argv_lets_diff_config_win() {
+        let c = merged_edit(
+            &["42"],
+            "\
+            [jj-gh]\n\
+            pr_edit_show_diffs = false\n\
+            ",
+        );
+        assert!(!c.pr_edit_show_diffs);
+    }
+
+    #[test]
+    fn edit_diff_flags_override_config() {
+        let c = merged_edit(
+            &["42", "--diffs"],
+            "\
+            [jj-gh]\n\
+            pr_edit_show_diffs = false\n\
+            ",
+        );
+        assert!(c.pr_edit_show_diffs);
+
+        let c = merged_edit(
+            &["42", "--no-diffs"],
+            "\
+            [jj-gh]\n\
+            pr_edit_show_diffs = true\n\
+            ",
+        );
+        assert!(!c.pr_edit_show_diffs);
     }
 
     #[test]

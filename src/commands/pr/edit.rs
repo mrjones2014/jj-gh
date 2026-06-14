@@ -3,6 +3,7 @@ use crate::{
     editor::{self, ApplyChangesCtx, resolve_editor_argv},
     frontmatter::Frontmatter,
     gh::{Gh, PrDetails},
+    jj::Jj,
     model::Model,
     ui::Spinner,
 };
@@ -26,24 +27,41 @@ subcommand_args! {
         #[arg(short = 'e', long, value_name = "CMD", value_parser = shell_words::split)]
         #[config]
         pub editor: Option<Vec<String>>,
+
+        /// Show a preview of the PR diffs while editing the PR.
+        /// Overrides `pr_edit_show_diffs` configuration. Use `--no-diffs` to disable.
+        #[arg(
+            long = "diffs",
+            num_args = 0,
+            default_missing_value = "true",
+            default_value_if("no_diffs", "true", Some("false"))
+        )]
+        #[config(maps_to = "pr_edit_show_diffs")]
+        pub show_diffs: bool,
+
+        /// Hide the PR diff preview while editing the PR. Overrides config.
+        #[arg(long = "no-diffs", conflicts_with = "show_diffs")]
+        pub no_diffs: bool,
     }
 }
 
-/// Fetch a PR, open the editor, and apply only the diff. Properties the user
-/// didn't touch (labels added by a bot, etc.) keep their current value because
-/// the editor buffer is seeded from the current PR state.
+/// Fetch a PR, open the editor with its diff as a read-only preview, and apply
+/// only the metadata changes. Properties the user didn't touch (labels added
+/// by a bot, etc.) keep their current value because the editor buffer is seeded
+/// from the current PR state.
 ///
 /// # Errors
 ///
 /// Returns an error from any step (rev resolution, GH API, editor, etc.).
 pub async fn run(model: &impl Model, args: &EditArgs) -> Result<()> {
     let gh = model.gh();
-    let env = model.env();
     let editor = model.editor();
     let EditArgs {
         number_or_rev,
         force,
         editor: editor_cfg,
+        show_diffs,
+        no_diffs: _,
         globals:
             GlobalOpts {
                 remote,
@@ -55,8 +73,7 @@ pub async fn run(model: &impl Model, args: &EditArgs) -> Result<()> {
                 askpass_timeout_secs: _,
             },
     } = args;
-
-    let editor_argv = resolve_editor_argv(editor_cfg.as_deref(), env)?;
+    let editor_argv = resolve_editor_argv(editor_cfg.as_deref(), model.env())?;
     let spinner = Spinner::start("Resolving PR");
 
     let (target, pr_number) = model
@@ -67,6 +84,25 @@ pub async fn run(model: &impl Model, args: &EditArgs) -> Result<()> {
         .await
         .context("fetching PR from GitHub")?;
 
+    let diff = if *show_diffs {
+        match model
+            .jj()
+            .pr_diff(&details.base_sha, &details.head_sha)
+            .await
+        {
+            Ok(diff) => Some(diff),
+            Err(e) => {
+                log::debug!("could not render PR diff from local commits: {e:#}");
+                spinner.set_message("Loading diffs from GitHub".to_string());
+                gh.get_pr_diff(&target.owner, &target.repo, details.number)
+                    .await
+                    .inspect_err(|e| log::warn!("Could not load PR diff preview: {e:#}"))
+                    .ok()
+            }
+        }
+    } else {
+        None
+    };
     spinner.stop();
 
     let PrDetails {
@@ -100,35 +136,14 @@ pub async fn run(model: &impl Model, args: &EditArgs) -> Result<()> {
         auto_merge_method: auto_merge_method.unwrap_or_default(),
     };
 
+    let preview = diff
+        .as_deref()
+        .map(str::trim)
+        .filter(|diff| !diff.is_empty());
     let (after_fm, after_body) =
-        editor::round_trip(editor, &editor_argv, &before_fm, &before_body, None).await?;
+        editor::round_trip(editor, &editor_argv, &before_fm, &before_body, preview).await?;
 
-    if after_body.is_empty() {
-        if *force {
-            log::warn!("PR body is empty, but `--force` was passed");
-        } else {
-            bail!(
-                "PR body is empty when attempting to edit. Refusing to edit to avoid data loss. Pass `--force` to override."
-            );
-        }
-    }
-
-    if after_fm.title.trim().is_empty() {
-        bail!("title is empty");
-    }
-    if after_fm.base.trim().is_empty() {
-        bail!("base is empty");
-    }
-
-    if after_body.trim().is_empty() {
-        if *force {
-            log::warn!("PR body is empty, but `--force` was passed");
-        } else {
-            bail!(
-                "PR body is empty when attempting to edit. Refusing to edit to avoid data loss. Pass `--force` to override."
-            );
-        }
-    }
+    validate_edit(&after_fm, &after_body, *force)?;
 
     let ctx = ApplyChangesCtx {
         owner: &target.owner,
@@ -144,5 +159,33 @@ pub async fn run(model: &impl Model, args: &EditArgs) -> Result<()> {
 
     log::info!("Updated PR #{number}");
     println!("{html_url}");
+    Ok(())
+}
+
+fn validate_edit(frontmatter: &Frontmatter, body: &str, force: bool) -> Result<()> {
+    if body.is_empty() {
+        if force {
+            log::warn!("PR body is empty, but `--force` was passed");
+        } else {
+            bail!(
+                "PR body is empty when attempting to edit. Refusing to edit to avoid data loss. Pass `--force` to override."
+            );
+        }
+    }
+    if frontmatter.title.trim().is_empty() {
+        bail!("title is empty");
+    }
+    if frontmatter.base.trim().is_empty() {
+        bail!("base is empty");
+    }
+    if body.trim().is_empty() {
+        if force {
+            log::warn!("PR body is empty, but `--force` was passed");
+        } else {
+            bail!(
+                "PR body is empty when attempting to edit. Refusing to edit to avoid data loss. Pass `--force` to override."
+            );
+        }
+    }
     Ok(())
 }
