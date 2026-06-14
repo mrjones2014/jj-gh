@@ -202,6 +202,11 @@ impl Jj for JjCli {
         String::from_utf8(stdout).context("jj diff output is not UTF-8")
     }
 
+    async fn pr_diff(&self, base_oid: &str, head_oid: &str) -> Result<String> {
+        let stdout = run_jj_strs(&pr_diff_argv(base_oid, head_oid)).await?;
+        String::from_utf8(stdout).context("jj diff output is not UTF-8")
+    }
+
     async fn pushed_bookmarks(&self, remote: &str) -> Result<Vec<PushedBookmark>> {
         // `jj bookmark list --tracked --remote <remote>` emits one entry per
         // local/remote side of each tracked bookmark; filtering on
@@ -310,6 +315,19 @@ fn eval_template_argv(
     argv
 }
 
+/// Build a three-dot-style diff from the best common ancestor to the PR head.
+fn pr_diff_argv(base_oid: &str, head_oid: &str) -> Vec<String> {
+    vec![
+        "diff".into(),
+        "--git".into(),
+        "--from".into(),
+        format!("heads(::({base_oid}) & ::({head_oid}))"),
+        "--to".into(),
+        head_oid.into(),
+        "--color=never".into(),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -362,5 +380,21 @@ mod tests {
         let log_idx = argv.iter().position(|s| s == "log").unwrap();
         let cfg_idx = argv.iter().position(|s| s == "--config-file").unwrap();
         assert!(cfg_idx < log_idx, "--config-file must precede `log`");
+    }
+
+    #[test]
+    fn pr_diff_argv_uses_merge_base_and_remote_head_oid() {
+        assert_eq!(
+            pr_diff_argv("base", "head"),
+            vec![
+                "diff",
+                "--git",
+                "--from",
+                "heads(::(base) & ::(head))",
+                "--to",
+                "head",
+                "--color=never",
+            ]
+        );
     }
 }

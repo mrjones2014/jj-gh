@@ -39,6 +39,8 @@ pub struct PrDetails {
     pub base_ref: String,
     /// In GraphQL this is called `headRefOid`
     pub head_sha: String,
+    /// In GraphQL this is called `baseRefOid`
+    pub base_sha: String,
     pub head_user_login: Option<String>,
     pub head_repo_name: Option<String>,
     pub graphql_node_id: String,
@@ -273,6 +275,13 @@ pub trait Gh {
     ///
     /// Returns a clear "not found" error on 404; propagates other API errors.
     async fn get_pr(&self, owner: &str, repo: &str, number: u64) -> Result<PrDetails>;
+
+    /// Fetch the literal diff GitHub renders for a pull request.
+    ///
+    /// # Errors
+    ///
+    /// Propagates API errors.
+    async fn get_pr_diff(&self, owner: &str, repo: &str, number: u64) -> Result<String>;
 
     /// Enable "merge when ready" on a PR via `enablePullRequestAutoMerge`.
     /// Callers must check [`PrDetails::in_merge_queue`] /

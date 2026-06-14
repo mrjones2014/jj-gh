@@ -340,6 +340,7 @@ mod tests {
             head_ref: "feat".into(),
             base_ref: "main".into(),
             head_sha: sha.into(),
+            base_sha: "base".into(),
             head_user_login: Some("o".into()),
             head_repo_name: Some("r".into()),
             graphql_node_id: "node".into(),
@@ -429,6 +430,9 @@ mod tests {
         async fn diff(&self, _revset: &str) -> Result<String> {
             unimplemented!()
         }
+        async fn pr_diff(&self, _: &str, _: &str) -> Result<String> {
+            unimplemented!()
+        }
     }
 
     #[derive(Default)]
@@ -508,6 +512,9 @@ mod tests {
         }
         async fn get_pr(&self, _o: &str, _r: &str, _n: u64) -> Result<PrDetails> {
             Ok(self.pr.clone())
+        }
+        async fn get_pr_diff(&self, _: &str, _: &str, _: u64) -> Result<String> {
+            unimplemented!()
         }
         async fn enable_auto_merge(
             &self,

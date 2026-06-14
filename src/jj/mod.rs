@@ -152,6 +152,16 @@ pub trait Jj {
     ///
     /// Propagates jj failures.
     async fn diff(&self, revset: &str) -> Result<String>;
+
+    /// Git-format three-dot diff between two Git commit OIDs.
+    ///
+    /// Returns an error when either commit is unavailable locally or when
+    /// their merge base cannot be resolved. Callers may use a remote fallback.
+    ///
+    /// # Errors
+    ///
+    /// Propagates jj failures.
+    async fn pr_diff(&self, base_oid: &str, head_oid: &str) -> Result<String>;
 }
 
 pub trait JjExt {

@@ -169,7 +169,7 @@ Accepts either a PR number or a revision; with a revision, the PR is looked up b
 
 Edit an existing PR's title, body, base, labels, reviewers, draft state, and auto-merge settings via the markdown frontmatter editor flow.
 
-Resolves the PR from a revision (via its local bookmark) or a PR number, fetches its current state, opens your editor, and applies only the diffs: labels you didn't touch keep whatever others (CI bots, etc.) set.
+Resolves the PR from a revision (via its local bookmark) or a PR number, fetches its current state, and opens your editor. By default, the editor includes a read-only preview of the PR diff. Applies only metadata you change: labels you didn't touch keep whatever others (CI bots, etc.) set.
 
 **Usage:** `jj-gh pr edit [OPTIONS] <PR_NUM|REV>`
 
@@ -183,6 +183,8 @@ Resolves the PR from a revision (via its local bookmark) or a PR number, fetches
 
 - `-f`, `--force` — Edit even if the PR body is empty. By default, `jj-gh` refuses to edit an empty body to avoid clobbering one that exists but failed to load
 - `-e`, `--editor <CMD>` — Editor command, e.g. `--editor "nvim +7"`. Default: `editor` in config, then `$VISUAL`, then `$EDITOR`
+- `--diffs <SHOW_DIFFS>` — Show a preview of the PR diffs while editing the PR. Overrides `pr_edit_show_diffs` configuration. Use `--no-diffs` to disable
+- `--no-diffs` — Hide the PR diff preview while editing the PR. Overrides config
 
 ## `jj-gh pr log`
 

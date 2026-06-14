@@ -290,6 +290,9 @@ mod tests {
         async fn diff(&self, _revset: &str) -> Result<String> {
             unimplemented!("fetch does not call diff")
         }
+        async fn pr_diff(&self, _: &str, _: &str) -> Result<String> {
+            unimplemented!("fetch does not call pr_diff")
+        }
     }
 
     struct FakeGh {
@@ -350,6 +353,9 @@ mod tests {
             assert_eq!(repo, self.expected.1);
             assert_eq!(number, self.expected.2);
             Ok(self.pr.clone())
+        }
+        async fn get_pr_diff(&self, _: &str, _: &str, _: u64) -> Result<String> {
+            unimplemented!("fetch does not call get_pr_diff")
         }
         async fn enable_auto_merge(
             &self,
@@ -422,6 +428,7 @@ mod tests {
             head_ref: "feature/foo".into(),
             base_ref: "main".into(),
             head_sha: "abc123".into(),
+            base_sha: "def456".into(),
             head_user_login: Some("octocat".into()),
             head_repo_name: Some("r".into()),
             graphql_node_id: "PR_kwDOABCDEF".into(),

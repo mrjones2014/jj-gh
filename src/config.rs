@@ -83,6 +83,9 @@ config_schema! {
     /// Show a preview of the PR diffs while creating PR body.
     pr_create_show_diffs: bool = true,
 
+    /// Show a preview of the PR diffs while editing a PR.
+    pr_edit_show_diffs: bool = true,
+
     /// jj template used to render the bookmark name in `pr fetch`.
     pr_fetch_bookmark_template: Option<String> = None,
 
