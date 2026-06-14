@@ -1,7 +1,7 @@
-//! End-to-end orchestrator for the `pr` subcommand: loads config, resolves
-//! auth, builds the jj/GitHub clients, then dispatches to the matching handler.
-//! One module per CLI subcommand; PR lookup helpers live in
-//! [`crate::gh::pr_lookup`].
+//! End-to-end orchestrator for the `pr` subcommand: loads config, builds the
+//! model, then dispatches to the matching handler. The model resolves auth and
+//! builds the GitHub client lazily. One module per CLI subcommand; PR lookup
+//! helpers live in [`crate::gh::pr_lookup`].
 
 mod auto_merge;
 mod create;
@@ -12,15 +12,16 @@ mod restack;
 mod retry_failed;
 
 use crate::{
-    auth,
     cli::{GlobalOpts, GlobalOptsInput},
-    config, jj,
+    config,
     model::ModelImpl,
     ui::Spinner,
 };
 use anyhow::Result;
 use clap::Subcommand;
+#[cfg(test)]
 use figment::providers::Serialized;
+use serde::Serialize;
 
 use self::log::{PrLogArgs, PrLogArgsInput};
 use auto_merge::{AutoMergeArgs, AutoMergeArgsInput};
@@ -30,6 +31,14 @@ use restack::{RestackArgs, RestackArgsInput};
 use retry_failed::{RetryFailedArgs, RetryFailedArgsInput};
 
 pub use create::{CreateArgs, CreateArgsInput};
+
+#[derive(Serialize)]
+struct ConfigOverrides<'a, T> {
+    #[serde(flatten)]
+    global: &'a GlobalOptsInput,
+    #[serde(flatten)]
+    action: &'a T,
+}
 
 #[derive(Debug, Subcommand)]
 pub enum PrAction {
@@ -108,36 +117,45 @@ pub enum PrAction {
 ///
 /// # Errors
 ///
-/// Propagates errors from config loading, auth resolution, jj/GitHub API
+/// Propagates errors from config loading, lazy auth resolution, jj/GitHub API
 /// calls, the editor round-trip, or any sub-handler (`create`, `fetch`,
 /// `auto-merge`).
 pub async fn dispatch(global: GlobalOptsInput, action: PrAction) -> Result<()> {
     let startup = Spinner::start("Resolving workspace");
 
-    // Discovering the workspace (`jj workspace root` + gix) is independent of
-    // config/auth, so overlap the two cold-start chains. Within the config
-    // chain, auth must run after config loads (it reads `gh_askpass`/`gh_token`).
-    let workspace_fut = jj::real::discover_workspace();
-    let cfg_auth_fut = async {
-        let mut fig = config::load_figment().merge(Serialized::defaults(&global));
-        fig = match &action {
-            PrAction::Create(a) => fig.merge(Serialized::defaults(a)),
-            PrAction::Fetch(a) => fig.merge(Serialized::defaults(a)),
-            PrAction::AutoMerge(a) => fig.merge(Serialized::defaults(a)),
-            PrAction::Edit(a) => fig.merge(Serialized::defaults(a)),
-            PrAction::Log(a) => fig.merge(Serialized::defaults(a)),
-            PrAction::Restack(a) => fig.merge(Serialized::defaults(a)),
-            PrAction::RetryFailed(a) => fig.merge(Serialized::defaults(a)),
-        };
-        let config = config::extract(&fig)?;
-        let globals = GlobalOpts::resolve(global, &config);
-        let token = auth::resolve_token(&config).await?;
-        anyhow::Ok((config, globals, token))
+    let config = match &action {
+        PrAction::Create(action) => config::resolve(&ConfigOverrides {
+            global: &global,
+            action,
+        })?,
+        PrAction::Fetch(action) => config::resolve(&ConfigOverrides {
+            global: &global,
+            action,
+        })?,
+        PrAction::AutoMerge(action) => config::resolve(&ConfigOverrides {
+            global: &global,
+            action,
+        })?,
+        PrAction::Edit(action) => config::resolve(&ConfigOverrides {
+            global: &global,
+            action,
+        })?,
+        PrAction::Log(action) => config::resolve(&ConfigOverrides {
+            global: &global,
+            action,
+        })?,
+        PrAction::Restack(action) => config::resolve(&ConfigOverrides {
+            global: &global,
+            action,
+        })?,
+        PrAction::RetryFailed(action) => config::resolve(&ConfigOverrides {
+            global: &global,
+            action,
+        })?,
     };
-    let ((repo, workspace_root), (config, globals, token)) =
-        tokio::try_join!(workspace_fut, cfg_auth_fut)?;
+    let globals = GlobalOpts::resolve(global, &config);
 
-    let model = ModelImpl::new(repo, workspace_root, &token)?;
+    let model = ModelImpl::new(&config).await?;
     startup.stop();
     match action {
         PrAction::AutoMerge(input) => {

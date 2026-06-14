@@ -150,7 +150,7 @@ pub async fn run(model: &impl Model, args: &RestackArgs) -> Result<()> {
     }
 
     let decisions = interactive::run(model.jj(), &ctx, args).await?;
-    submit(model.gh(), &ctx, &decisions).await
+    submit(model.gh().await?, &ctx, &decisions).await
 }
 
 /// Bundle of everything restack needs after the initial fetch: PR metadata,

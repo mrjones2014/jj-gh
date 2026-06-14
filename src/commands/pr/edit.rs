@@ -54,7 +54,7 @@ subcommand_args! {
 ///
 /// Returns an error from any step (rev resolution, GH API, editor, etc.).
 pub async fn run(model: &impl Model, args: &EditArgs) -> Result<()> {
-    let gh = model.gh();
+    let gh = model.gh().await?;
     let editor = model.editor();
     let EditArgs {
         number_or_rev,

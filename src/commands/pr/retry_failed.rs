@@ -49,7 +49,7 @@ async fn run_with(
     args: &RetryFailedArgs,
     poll_interval: Duration,
 ) -> Result<()> {
-    let gh = model.gh();
+    let gh = model.gh().await?;
     let RetryFailedArgs {
         number_or_rev,
         all,
