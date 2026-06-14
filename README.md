@@ -20,9 +20,8 @@ See [DOCS.md](./DOCS.md) for all commands, flags, and features. PRs welcome and 
 
 ## Requirements
 
-`jj` must be on `PATH`. `pr fetch` additionally requires a colocated git repo
-and `git` on `PATH` (`jj` cannot yet fetch arbitrary refs like
-`refs/pull/123/head`, so the fetch step shells out to `git`).
+`jj` must be on `PATH`. `pr fetch` additionally requires a colocated Git repository because `jj` cannot yet fetch arbitrary refs
+like GitHub's special `refs/pull/123/head` refs, so it uses [gix](https://github.com/GitoxideLabs/gitoxide).
 
 ## Install
 
