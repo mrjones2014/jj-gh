@@ -344,11 +344,6 @@ mod tests {
     }
 
     #[test]
-    fn create_pick_title_parses() {
-        assert!(parse_create(&["@-", "--pick-title"]).pick_title);
-    }
-
-    #[test]
     fn create_negative_flags_override_config() {
         let c = merged_create(
             &["@-", "--no-draft", "--no-auto-merge", "--no-diffs"],

@@ -145,6 +145,7 @@ mod tests {
             pick_title: false,
             title_template: "description.first_line()".into(),
             editor: None,
+            no_edit: false,
             show_diffs: true,
             no_diffs: false,
             globals: crate::cli::GlobalOpts {
