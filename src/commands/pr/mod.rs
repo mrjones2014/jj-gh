@@ -139,7 +139,7 @@ pub async fn dispatch(global: GlobalOptsInput, action: PrAction) -> Result<()> {
         action: &action,
     })?;
     let globals = GlobalOpts::resolve(global, &config);
-    let model = ModelImpl::new(&config).await?;
+    let model = ModelImpl::new(&config, &globals).await?;
     startup.stop();
     match action {
         PrAction::AutoMerge(input) => {

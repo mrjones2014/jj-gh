@@ -331,14 +331,17 @@ pub fn config_schema(input: TokenStream) -> TokenStream {
             struct __EnvOverlay {
                 #(#env_struct_fields)*
             }
+            #[allow(dead_code)]
             fn __env_read_string(key: &str) -> ::std::option::Option<::std::string::String> {
                 ::std::env::var(key).ok().filter(|s| !s.is_empty())
             }
+            #[allow(dead_code)]
             fn __env_read_path(key: &str) -> ::std::option::Option<::std::path::PathBuf> {
                 ::std::env::var_os(key)
                     .filter(|s| !s.is_empty())
                     .map(::std::path::PathBuf::from)
             }
+            #[allow(dead_code)]
             fn __env_read_argv(key: &str) -> ::std::option::Option<::std::vec::Vec<::std::string::String>> {
                 let raw = ::std::env::var(key).ok().filter(|s| !s.is_empty())?;
                 ::shell_words::split(&raw).ok().filter(|v| !v.is_empty())

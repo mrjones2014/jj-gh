@@ -1,7 +1,41 @@
 //! Small reusable helpers.
 
 use anyhow::{Result, anyhow};
+use serde::{Deserialize, Serialize};
 use std::future::Future;
+
+/// A command line supplied as one shell-quoted string on the CLI
+/// (`--editor "nvim +7"`) or as an array in config (`["op", "read", "..."]`).
+/// Newtype so clap parses it as a single value instead of a multi-value `Vec`,
+/// which otherwise panics when paired with a `value_parser` that yields a
+/// whole `Vec<String>` per occurrence.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+#[cfg_attr(feature = "schema-validation", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema-validation", schemars(transparent))]
+pub struct ShellCommand(pub Vec<String>);
+
+impl std::ops::Deref for ShellCommand {
+    type Target = [String];
+    fn deref(&self) -> &[String] {
+        &self.0
+    }
+}
+
+impl From<Vec<String>> for ShellCommand {
+    fn from(v: Vec<String>) -> Self {
+        Self(v)
+    }
+}
+
+/// clap value parser: shell-split one string into a [`ShellCommand`].
+///
+/// # Errors
+///
+/// Returns a [`shell_words::ParseError`] when the string has unbalanced quotes.
+pub fn parse_shell_command(s: &str) -> Result<ShellCommand, shell_words::ParseError> {
+    shell_words::split(s).map(ShellCommand)
+}
 
 /// Normalize stderr from a subprocess for inclusion in a user-facing error.
 #[must_use]

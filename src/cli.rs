@@ -58,10 +58,10 @@ subcommand_args! {
 
         /// Askpass helper command that prints a GitHub token on stdout;
         /// shell-words split, e.g. `--gh-askpass "op read op://Vault/gh/token"`.
-        /// Default: `gh_askpass` in config, then `$GH_ASKPASS`.
-        #[arg(long, value_name = "CMD", value_parser = shell_words::split, global = true)]
-        #[config]
-        pub gh_askpass: Option<Vec<String>>,
+        /// Highest-priority token source; outranks `$GH_ASKPASS`, the token env
+        /// vars, and `gh_askpass` in config.
+        #[arg(long, value_name = "CMD", value_parser = crate::util::parse_shell_command, global = true)]
+        pub gh_askpass: Option<crate::util::ShellCommand>,
 
         /// Timeout in seconds for the askpass helper. Default: 20.
         #[arg(long = "askpass-timeout", value_name = "SECS", global = true)]

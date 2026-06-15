@@ -1,6 +1,6 @@
 use crate::{
     cli::GlobalOpts,
-    editor::{self, ApplyChangesCtx, resolve_editor_argv},
+    editor::{self, ApplyChangesCtx},
     frontmatter::Frontmatter,
     gh::{Gh, PrDetails},
     jj::Jj,
@@ -22,11 +22,11 @@ subcommand_args! {
         #[arg(short = 'f', long)]
         pub force: bool,
 
-        /// Editor command, e.g. `--editor "nvim +7"`. Default:
-        /// `editor` in config, then `$VISUAL`, then `$EDITOR`.
-        #[arg(short = 'e', long, value_name = "CMD", value_parser = shell_words::split)]
-        #[config]
-        pub editor: Option<Vec<String>>,
+        /// Editor command, e.g. `--editor "nvim +7"`. Precedence: this flag,
+        /// then `$VISUAL`, then `$EDITOR`, then `editor` in config.
+        #[arg(short = 'e', long, value_name = "CMD", value_parser = crate::util::parse_shell_command)]
+        #[config(fallback = "editor")]
+        pub editor: Option<crate::util::ShellCommand>,
 
         /// Show a preview of the PR diffs while editing the PR.
         /// Overrides `pr_edit_show_diffs` configuration. Use `--no-diffs` to disable.
@@ -73,7 +73,7 @@ pub async fn run(model: &impl Model, args: &EditArgs) -> Result<()> {
                 askpass_timeout_secs: _,
             },
     } = args;
-    let editor_argv = resolve_editor_argv(editor_cfg.as_deref(), model.env())?;
+    let editor_argv = editor::resolve_editor(editor_cfg, model.env()).await?;
     let spinner = Spinner::start("Resolving PR");
 
     let (target, pr_number) = model

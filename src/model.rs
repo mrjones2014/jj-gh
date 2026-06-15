@@ -6,6 +6,7 @@
 
 use crate::{
     auth::{self, EnvReader, OsEnv},
+    cli::GlobalOpts,
     config::Config,
     editor::{Editor, TempfileEditor},
     gh::{
@@ -144,6 +145,7 @@ pub trait Model {
 
 pub struct ModelImpl<'a> {
     config: &'a Config,
+    globals: &'a GlobalOpts,
     editor: TempfileEditor,
     env: OsEnv,
     gh: OnceCell<OctocrabGh>,
@@ -155,14 +157,18 @@ impl<'a> ModelImpl<'a> {
     /// Discover the current workspace and construct its local jj/git clients.
     /// GitHub auth and client construction remain lazy until [`Model::gh`].
     ///
+    /// Holds the resolved `globals` so token resolution can rank the
+    /// `--gh-askpass` flag above env vars and config.
+    ///
     /// # Errors
     ///
     /// Propagates failures from workspace or colocated git-store discovery.
-    pub async fn new(config: &'a Config) -> Result<Self> {
+    pub async fn new(config: &'a Config, globals: &'a GlobalOpts) -> Result<Self> {
         let (repo, workspace_root) = crate::jj::real::discover_workspace().await?;
         let repo = Rc::new(repo);
         Ok(Self {
             config,
+            globals,
             editor: TempfileEditor,
             env: OsEnv,
             gh: OnceCell::new(),
@@ -190,7 +196,8 @@ impl Model for ModelImpl<'_> {
     async fn gh(&self) -> Result<&Self::Gh> {
         self.gh
             .get_or_try_init(|| async {
-                let token = auth::resolve_token(self.config).await?;
+                let token =
+                    auth::resolve_token(self.globals.gh_askpass.as_deref(), self.config).await?;
                 OctocrabGh::new(&token)
             })
             .await
