@@ -24,7 +24,7 @@ pub async fn dispatch(global: GlobalOptsInput, action: DebugAction) -> Result<()
             println!("{config:#?}");
             Ok(())
         }
-        DebugAction::Auth => check_auth(&config).await,
+        DebugAction::Auth => check_auth(&globals, &config).await,
         DebugAction::Rev { rev } => print_rev(&globals, &config, &rev).await,
         DebugAction::PrLookup { rev } => print_pr_lookup(&globals, &config, &rev).await,
     }
@@ -36,8 +36,8 @@ fn resolve_globals(global: GlobalOptsInput) -> Result<(GlobalOpts, Config)> {
     Ok((globals, config))
 }
 
-async fn check_auth(config: &Config) -> Result<()> {
-    auth::resolve_token(config).await?;
+async fn check_auth(globals: &GlobalOpts, config: &Config) -> Result<()> {
+    auth::resolve_token(globals.gh_askpass.as_deref(), config).await?;
     println!("ok");
     Ok(())
 }
@@ -111,7 +111,7 @@ async fn print_pr_lookup(globals: &GlobalOpts, config: &Config, rev: &str) -> Re
     let spinner = Spinner::start("Resolving PR");
     let jj = JjCli::new().await?;
     let remote = jj.resolve_default_remote(remote.as_ref()).await?;
-    let token = auth::resolve_token(config).await?;
+    let token = auth::resolve_token(globals.gh_askpass.as_deref(), config).await?;
     let gh = OctocrabGh::new(&token)?;
 
     let lookup = pr_lookup::resolve_pr_for_rev(&jj, &gh, &remote, upstream_remote, rev).await?;

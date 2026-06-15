@@ -309,19 +309,21 @@ Config precedence (high to low):
 `JJ_GH_TEMPLATE_FILE` maps to `pr_create_template_file` (path to a markdown
 template).
 
-Token source precedence (high to low):
+Token source precedence (high to low), following the same flags > env > config
+rule as everything else:
 
 1. `--gh-askpass` CLI flag
-1. `gh_askpass` from merged config
+1. `$GH_ASKPASS` environment variable
 1. `$JJ_GH_TOKEN` environment variable
 1. `$GH_TOKEN` environment variable (matches the `gh` CLI convention)
-1. `gh_token` from merged config (plain text, less safe)
+1. `gh_askpass` from config files
+1. `gh_token` from config files (plain text, less safe)
 1. Attempting to run `gh auth token`
 
-Env vars override `gh_token` from config, but a configured `gh_askpass` still
-wins. Use `$JJ_GH_TOKEN` when you need a different token for `jj-gh` than for
-the `gh` CLI itself. You may also run `gh auth login` before running `jj-gh`
-to use the GitHub CLI's authentication.
+So flags and env vars always override a `gh_askpass`/`gh_token` set in a config
+file. Use `$JJ_GH_TOKEN` when you need a different token for `jj-gh` than for the
+`gh` CLI itself. You may also run `gh auth login` before running `jj-gh` to use
+the GitHub CLI's authentication.
 
 ## Template aliases
 

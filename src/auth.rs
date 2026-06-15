@@ -1,10 +1,13 @@
 //! GitHub token resolution.
 //!
-//! Source precedence:
-//! 1. `gh_askpass` helper, spawned with a configurable timeout.
-//! 2. `JJ_GH_TOKEN` environment variable.
-//! 3. `GH_TOKEN` environment variable (matches the `gh` CLI convention).
-//! 4. `gh_token` field in the merged config (plain text, less safe).
+//! Source precedence (high to low), so flags and env vars override config:
+//! 1. `--gh-askpass` flag, spawned with a configurable timeout.
+//! 2. `$GH_ASKPASS` env var, shell-split and spawned.
+//! 3. `$JJ_GH_TOKEN` env var.
+//! 4. `$GH_TOKEN` env var (matches the `gh` CLI convention).
+//! 5. `gh_askpass` from config files, spawned.
+//! 6. `gh_token` from config files (plain text, less safe).
+//! 7. `gh auth token`.
 //!
 //! If no source yields a token, [`resolve_token`] returns an error.
 //!
@@ -36,65 +39,88 @@ impl EnvReader for OsEnv {
     }
 }
 
-/// Resolve a [`SecretString`] using the production [`TokioProcessRunner`]. CLI
-/// `--gh-askpass` / `--askpass-timeout` flags are folded into `config` by the
-/// figment overlay in `pr::dispatch`.
+/// Resolve a [`SecretString`] using the production [`TokioProcessRunner`].
+///
+/// `flag_askpass` is the raw `--gh-askpass` CLI value (highest priority); the
+/// remaining sources come from `config` and the environment.
 ///
 /// # Errors
 ///
 /// See [`resolve_token_with`].
-pub async fn resolve_token(config: &Config) -> Result<SecretString> {
-    resolve_token_with(config, &TokioProcessRunner, &OsEnv).await
+pub async fn resolve_token(
+    flag_askpass: Option<&[String]>,
+    config: &Config,
+) -> Result<SecretString> {
+    resolve_token_with(flag_askpass, config, &TokioProcessRunner, &OsEnv).await
 }
 
 /// Resolve a [`SecretString`] using an explicit runner and env reader. Used in tests.
 ///
 /// # Errors
 ///
-/// Returns an error if the askpass helper fails (timeout, non-zero exit, empty
-/// or oversize output) or if no source is configured.
+/// Returns an error if a selected askpass helper fails (timeout, non-zero exit,
+/// empty or oversize output) or if no source is configured. Empty askpass argvs
+/// (flag, env, or config) are skipped rather than treated as an error.
 async fn resolve_token_with<R: ProcessRunner, E: EnvReader>(
+    flag_askpass: Option<&[String]>,
     config: &Config,
     runner: &R,
     env: &E,
 ) -> Result<SecretString> {
-    if let Some(argv) = config.gh_askpass.as_deref() {
-        if argv.is_empty() {
-            return Err(anyhow!("`gh_askpass` is set but empty"));
-        }
-        let dur = Duration::from_secs(config.askpass_timeout_secs);
-        return run_token_command(runner, argv, dur)
-            .await
-            .with_context(|| format!("askpass `{}` failed", shell_words::join(argv)));
+    let dur = Duration::from_secs(config.askpass_timeout_secs);
+
+    // 1. `--gh-askpass` flag.
+    if let Some(argv) = flag_askpass.filter(|a| !a.is_empty()) {
+        return run_askpass(runner, argv, dur).await;
     }
 
+    // 2. `$GH_ASKPASS` env var, shell-split.
+    if let Some(raw) = env.get("GH_ASKPASS").filter(|s| !s.trim().is_empty()) {
+        let argv = shell_words::split(&raw).context("could not split $GH_ASKPASS")?;
+        if !argv.is_empty() {
+            return run_askpass(runner, &argv, dur).await;
+        }
+    }
+
+    // 3-4. Token env vars.
     if let Some(token) = env.get("JJ_GH_TOKEN") {
         return Ok(SecretString::new(token.into()));
     }
-
     if let Some(token) = env.get("GH_TOKEN") {
         return Ok(SecretString::new(token.into()));
     }
 
+    // 5. `gh_askpass` from config files.
+    if let Some(argv) = config.gh_askpass.as_deref().filter(|a| !a.is_empty()) {
+        return run_askpass(runner, argv, dur).await;
+    }
+
+    // 6. Plain `gh_token` from config files.
     if let Some(token) = &config.gh_token {
         log::info!("using plain token from config; configure `gh_askpass` for a safer setup");
         return Ok(token.clone());
     }
 
-    if let Ok(token) = run_token_command(
-        runner,
-        &["gh", "auth", "token"],
-        Duration::from_secs(config.askpass_timeout_secs),
-    )
-    .await
-    {
+    // 7. `gh auth token`.
+    if let Ok(token) = run_token_command(runner, &["gh", "auth", "token"], dur).await {
         return Ok(token);
     }
 
     Err(anyhow!(
-        "no GitHub token available: use `--gh_askpass`, configure `gh_token`, set `JJ_GH_TOKEN` or \
+        "no GitHub token available: use `--gh-askpass`, configure `gh_token`, set `JJ_GH_TOKEN` or \
         `GH_TOKEN` environment variable, or run `gh auth login`"
     ))
+}
+
+/// Run an askpass argv and wrap failures with the rendered command for context.
+async fn run_askpass<R: ProcessRunner>(
+    runner: &R,
+    argv: &[String],
+    dur: Duration,
+) -> Result<SecretString> {
+    run_token_command(runner, argv, dur)
+        .await
+        .with_context(|| format!("askpass `{}` failed", shell_words::join(argv)))
 }
 
 async fn run_token_command<R: ProcessRunner>(
@@ -143,6 +169,7 @@ fn parse_completed(code: Option<i32>, stdout: &[u8], stderr: &[u8]) -> Result<Se
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::util::ShellCommand;
     use secrecy::ExposeSecret;
     use std::collections::HashMap;
 
@@ -188,10 +215,18 @@ mod tests {
 
     fn config_with_askpass() -> Config {
         Config {
-            gh_askpass: Some(vec!["/fake/askpass".into()]),
+            gh_askpass: Some(ShellCommand(vec!["/fake/askpass".into()])),
             askpass_timeout_secs: 5,
             ..Config::default()
         }
+    }
+
+    fn ok_runner(stdout: &[u8]) -> FakeRunner {
+        FakeRunner::new(SpawnOutcome::Completed {
+            code: Some(0),
+            stdout: stdout.to_vec(),
+            stderr: vec![],
+        })
     }
 
     #[tokio::test]
@@ -201,7 +236,7 @@ mod tests {
             stdout: b"ghp_from_askpass\n".to_vec(),
             stderr: vec![],
         });
-        let token = resolve_token_with(&config_with_askpass(), &runner, &empty_env())
+        let token = resolve_token_with(None, &config_with_askpass(), &runner, &empty_env())
             .await
             .unwrap();
         assert_eq!(token.expose_secret(), "ghp_from_askpass");
@@ -214,7 +249,7 @@ mod tests {
             stdout: vec![],
             stderr: b"something went wrong".to_vec(),
         });
-        let err = resolve_token_with(&config_with_askpass(), &runner, &empty_env())
+        let err = resolve_token_with(None, &config_with_askpass(), &runner, &empty_env())
             .await
             .unwrap_err();
         let msg = format!("{err:#}");
@@ -229,7 +264,7 @@ mod tests {
             stdout: vec![],
             stderr: vec![],
         });
-        let err = resolve_token_with(&config_with_askpass(), &runner, &empty_env())
+        let err = resolve_token_with(None, &config_with_askpass(), &runner, &empty_env())
             .await
             .unwrap_err();
         let msg = format!("{err:#}");
@@ -243,7 +278,7 @@ mod tests {
             stdout: vec![b'a'; ASKPASS_STDOUT_LIMIT + 1],
             stderr: vec![],
         });
-        let err = resolve_token_with(&config_with_askpass(), &runner, &empty_env())
+        let err = resolve_token_with(None, &config_with_askpass(), &runner, &empty_env())
             .await
             .unwrap_err();
         let msg = format!("{err:#}");
@@ -253,7 +288,7 @@ mod tests {
     #[tokio::test]
     async fn errors_on_timeout() {
         let runner = FakeRunner::new(SpawnOutcome::TimedOut);
-        let err = resolve_token_with(&config_with_askpass(), &runner, &empty_env())
+        let err = resolve_token_with(None, &config_with_askpass(), &runner, &empty_env())
             .await
             .unwrap_err();
         let msg = format!("{err:#}");
@@ -265,7 +300,7 @@ mod tests {
         let runner = FakeRunner::new(SpawnOutcome::SpawnFailed(
             "no such file or directory".into(),
         ));
-        let err = resolve_token_with(&config_with_askpass(), &runner, &empty_env())
+        let err = resolve_token_with(None, &config_with_askpass(), &runner, &empty_env())
             .await
             .unwrap_err();
         let msg = format!("{err:#}");
@@ -279,7 +314,7 @@ mod tests {
             gh_token: Some(SecretString::from("ghp_plain".to_string())),
             ..Config::default()
         };
-        let token = resolve_token_with(&config, &runner, &empty_env())
+        let token = resolve_token_with(None, &config, &runner, &empty_env())
             .await
             .unwrap();
         assert_eq!(token.expose_secret(), "ghp_plain");
@@ -288,7 +323,7 @@ mod tests {
     #[tokio::test]
     async fn errors_when_no_source_configured() {
         let runner = FakeRunner::new(SpawnOutcome::TimedOut);
-        let err = resolve_token_with(&Config::default(), &runner, &empty_env())
+        let err = resolve_token_with(None, &Config::default(), &runner, &empty_env())
             .await
             .unwrap_err();
         let msg = format!("{err:#}");
@@ -302,24 +337,26 @@ mod tests {
             stdout: b"ghp_from_gh_cli\n".to_vec(),
             stderr: vec![],
         });
-        let token = resolve_token_with(&Config::default(), &runner, &empty_env())
+        let token = resolve_token_with(None, &Config::default(), &runner, &empty_env())
             .await
             .unwrap();
         assert_eq!(token.expose_secret(), "ghp_from_gh_cli");
     }
 
     #[tokio::test]
-    async fn errors_when_askpass_argv_is_empty() {
-        let runner = FakeRunner::new(SpawnOutcome::TimedOut); // unused
+    async fn empty_askpass_argv_is_skipped() {
+        let runner = FakeRunner::new(SpawnOutcome::TimedOut); // gh-auth fallback unused
         let config = Config {
-            gh_askpass: Some(vec![]),
+            gh_askpass: Some(ShellCommand(vec![])),
             ..Config::default()
         };
-        let err = resolve_token_with(&config, &runner, &empty_env())
+        // Empty askpass is skipped, not an error; with nothing else configured
+        // we fall through to the "no token" error.
+        let err = resolve_token_with(None, &config, &runner, &empty_env())
             .await
             .unwrap_err();
         let msg = format!("{err:#}");
-        assert!(msg.contains("`gh_askpass` is set but empty"), "msg: {msg}");
+        assert!(msg.contains("no GitHub token"), "msg: {msg}");
     }
 
     #[tokio::test]
@@ -330,15 +367,15 @@ mod tests {
             stderr: vec![],
         });
         let config = Config {
-            gh_askpass: Some(vec![
+            gh_askpass: Some(ShellCommand(vec![
                 "op".into(),
                 "read".into(),
                 "op://Vault/github/token".into(),
-            ]),
+            ])),
             askpass_timeout_secs: 5,
             ..Config::default()
         };
-        let token = resolve_token_with(&config, &runner, &empty_env())
+        let token = resolve_token_with(None, &config, &runner, &empty_env())
             .await
             .unwrap();
         assert_eq!(token.expose_secret(), "ghp_from_op");
@@ -348,7 +385,7 @@ mod tests {
     async fn resolves_via_jj_gh_token_env() {
         let runner = FakeRunner::new(SpawnOutcome::TimedOut); // unused
         let env = FakeEnv::with(&[("JJ_GH_TOKEN", "ghp_from_jj_env")]);
-        let token = resolve_token_with(&Config::default(), &runner, &env)
+        let token = resolve_token_with(None, &Config::default(), &runner, &env)
             .await
             .unwrap();
         assert_eq!(token.expose_secret(), "ghp_from_jj_env");
@@ -358,7 +395,7 @@ mod tests {
     async fn resolves_via_gh_token_env() {
         let runner = FakeRunner::new(SpawnOutcome::TimedOut); // unused
         let env = FakeEnv::with(&[("GH_TOKEN", "ghp_from_gh_env")]);
-        let token = resolve_token_with(&Config::default(), &runner, &env)
+        let token = resolve_token_with(None, &Config::default(), &runner, &env)
             .await
             .unwrap();
         assert_eq!(token.expose_secret(), "ghp_from_gh_env");
@@ -371,7 +408,7 @@ mod tests {
             ("JJ_GH_TOKEN", "ghp_from_jj_env"),
             ("GH_TOKEN", "ghp_from_gh_env"),
         ]);
-        let token = resolve_token_with(&Config::default(), &runner, &env)
+        let token = resolve_token_with(None, &Config::default(), &runner, &env)
             .await
             .unwrap();
         assert_eq!(token.expose_secret(), "ghp_from_jj_env");
@@ -385,22 +422,75 @@ mod tests {
             ..Config::default()
         };
         let env = FakeEnv::with(&[("GH_TOKEN", "ghp_from_env")]);
-        let token = resolve_token_with(&config, &runner, &env).await.unwrap();
+        let token = resolve_token_with(None, &config, &runner, &env)
+            .await
+            .unwrap();
         assert_eq!(token.expose_secret(), "ghp_from_env");
     }
 
+    /// Runner that echoes the argv it was given as the token, so tests can
+    /// assert *which* askpass command was selected.
+    struct EchoRunner;
+
+    impl ProcessRunner for EchoRunner {
+        async fn run(&self, argv: &[impl AsRef<OsStr>], _: Duration) -> SpawnOutcome {
+            let joined = argv
+                .iter()
+                .map(|a| a.as_ref().to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+                .join(" ");
+            SpawnOutcome::Completed {
+                code: Some(0),
+                stdout: joined.into_bytes(),
+                stderr: vec![],
+            }
+        }
+    }
+
     #[tokio::test]
-    async fn askpass_beats_env() {
-        let runner = FakeRunner::new(SpawnOutcome::Completed {
-            code: Some(0),
-            stdout: b"ghp_from_askpass\n".to_vec(),
-            stderr: vec![],
-        });
+    async fn flag_askpass_beats_env_tokens() {
+        let runner = ok_runner(b"ghp_from_flag_askpass\n");
         let env = FakeEnv::with(&[
             ("JJ_GH_TOKEN", "ghp_from_jj_env"),
             ("GH_TOKEN", "ghp_from_gh_env"),
         ]);
-        let token = resolve_token_with(&config_with_askpass(), &runner, &env)
+        let flag = vec!["op".to_string(), "read".into()];
+        let token = resolve_token_with(Some(&flag), &Config::default(), &runner, &env)
+            .await
+            .unwrap();
+        assert_eq!(token.expose_secret(), "ghp_from_flag_askpass");
+    }
+
+    #[tokio::test]
+    async fn gh_askpass_env_beats_config_askpass() {
+        let env = FakeEnv::with(&[("GH_ASKPASS", "env-helper")]);
+        let token = resolve_token_with(None, &config_with_askpass(), &EchoRunner, &env)
+            .await
+            .unwrap();
+        assert_eq!(token.expose_secret(), "env-helper");
+    }
+
+    #[tokio::test]
+    async fn env_token_beats_config_askpass() {
+        // The reported bug: a config-file `gh_askpass` must not outrank env tokens.
+        let runner = ok_runner(b"ghp_from_askpass\n");
+        let env = FakeEnv::with(&[("JJ_GH_TOKEN", "ghp_from_jj_env")]);
+        let token = resolve_token_with(None, &config_with_askpass(), &runner, &env)
+            .await
+            .unwrap();
+        assert_eq!(token.expose_secret(), "ghp_from_jj_env");
+    }
+
+    #[tokio::test]
+    async fn config_askpass_beats_plain_token_and_gh_auth() {
+        // No flag, no env: config-file askpass still outranks `gh_token` and
+        // the `gh auth token` fallback.
+        let runner = ok_runner(b"ghp_from_askpass\n");
+        let config = Config {
+            gh_token: Some(SecretString::from("ghp_plain".to_string())),
+            ..config_with_askpass()
+        };
+        let token = resolve_token_with(None, &config, &runner, &empty_env())
             .await
             .unwrap();
         assert_eq!(token.expose_secret(), "ghp_from_askpass");

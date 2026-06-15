@@ -1,7 +1,7 @@
 use crate::{
     cli::GlobalOpts,
     config::{self, AutoMergeMethod},
-    editor::{self, ApplyChangesCtx, resolve_editor_argv},
+    editor::{self, ApplyChangesCtx},
     frontmatter::Frontmatter,
     fs::RealFs,
     gh::{CreatePrRequest, Gh, remote},
@@ -108,11 +108,11 @@ subcommand_args! {
         #[config(maps_to = "pr_create_title_template")]
         pub title_template: String,
 
-        /// Editor command, e.g. `--editor "nvim +7"`. Default:
-        /// `editor` in config, then `$VISUAL`, then `$EDITOR`.
-        #[arg(short = 'e', long, value_name = "CMD", value_parser = shell_words::split)]
-        #[config]
-        pub editor: Option<Vec<String>>,
+        /// Editor command, e.g. `--editor "nvim +7"`. Precedence: this flag,
+        /// then `$VISUAL`, then `$EDITOR`, then `editor` in config.
+        #[arg(short = 'e', long, value_name = "CMD", value_parser = crate::util::parse_shell_command)]
+        #[config(fallback = "editor")]
+        pub editor: Option<crate::util::ShellCommand>,
 
         /// Create the PR without opening an editor. Useful when combined with
         /// `--draft`.
@@ -269,7 +269,7 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
     let (final_fm, body) = if *no_edit {
         (initial_fm, raw_template.unwrap_or_default())
     } else {
-        let editor_argv = resolve_editor_argv(editor_argv.as_deref(), env)?;
+        let editor_argv = editor::resolve_editor(editor_argv, env).await?;
         let diff_preview = if *show_diffs {
             jj.diff(&title_revset)
                 .await

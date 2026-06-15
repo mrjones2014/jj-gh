@@ -7,6 +7,7 @@ use crate::{
     auth::EnvReader,
     frontmatter::Frontmatter,
     gh::{Gh, Reviewer, UpdatePr, remote},
+    util::{EvalWithCfgFallback, ShellCommand},
 };
 use anyhow::{Context, Result, anyhow, bail};
 use std::collections::HashMap;
@@ -20,39 +21,45 @@ pub trait Editor {
     async fn edit(&self, argv: &[String], initial: &str) -> Result<String>;
 }
 
-/// Resolve the editor argv from the merged config and shell env. CLI
-/// `--editor` is folded into `config.editor` by the figment overlay in
-/// `pr::dispatch`.
+/// Editor argv from the shell environment: `$VISUAL` then `$EDITOR`, each
+/// shell-split. Returns the first non-empty, parseable value.
 ///
-/// Precedence (high to low):
-/// 1. `editor` in (merged) config, including `--editor` if passed
-/// 2. `$VISUAL`
-/// 3. `$EDITOR`
+/// Sits between the `--editor` flag and the config `editor` in the precedence
+/// chain (flag > `$VISUAL` > `$EDITOR` > config), wired via the
+/// `EvalWithCfgFallback` resolved field in `pr create` / `pr edit`. A value that
+/// fails to shell-split is logged and skipped so a malformed env var does not
+/// abort the whole flow.
+pub fn editor_from_env<E: EnvReader>(env: &E) -> Option<ShellCommand> {
+    for (name, value) in [("VISUAL", env.get("VISUAL")), ("EDITOR", env.get("EDITOR"))] {
+        let Some(raw) = value.filter(|s| !s.trim().is_empty()) else {
+            continue;
+        };
+        match shell_words::split(&raw) {
+            Ok(parts) if !parts.is_empty() => return Some(ShellCommand(parts)),
+            Ok(_) => {}
+            Err(e) => log::warn!("ignoring ${name}: could not shell-split: {e}"),
+        }
+    }
+    None
+}
+
+/// Resolve the editor argv: `--editor` flag, then `$VISUAL`/`$EDITOR`, then the
+/// config `editor`.
 ///
 /// # Errors
 ///
-/// Returns an error if no source produced a non-empty argv.
-pub fn resolve_editor_argv<E: EnvReader>(
-    editor: Option<&[String]>,
+/// Returns an error when every source is empty.
+pub async fn resolve_editor<E: EnvReader>(
+    editor: &EvalWithCfgFallback<ShellCommand>,
     env: &E,
-) -> Result<Vec<String>> {
-    if let Some(argv) = editor.filter(|v| !v.is_empty()) {
-        return Ok(argv.to_vec());
-    }
-
-    for (name, value) in [("VISUAL", env.get("VISUAL")), ("EDITOR", env.get("EDITOR"))] {
-        if let Some(raw) = value.filter(|s| !s.trim().is_empty()) {
-            let parts =
-                shell_words::split(&raw).with_context(|| format!("could not split ${name}"))?;
-            if !parts.is_empty() {
-                return Ok(parts);
-            }
-        }
-    }
-
-    Err(anyhow!(
-        "no editor configured; set --editor, `editor` in config, $VISUAL, or $EDITOR"
-    ))
+) -> Result<ShellCommand> {
+    editor
+        .resolve(|| async { editor_from_env(env) })
+        .await
+        .filter(|c| !c.is_empty())
+        .ok_or_else(|| {
+            anyhow!("no editor configured; set --editor, `editor` in config, $VISUAL, or $EDITOR")
+        })
 }
 
 /// Render `fm` + `body` into the editor buffer, run the editor, and parse the
@@ -242,47 +249,76 @@ mod tests {
         }
     }
 
-    #[test]
-    fn config_used_when_set() {
-        let argv_cfg = vec!["code".to_string(), "--wait".into()];
-        let env = FakeEnv::with(&[("VISUAL", "vim"), ("EDITOR", "vi")]);
-        let argv = resolve_editor_argv(Some(&argv_cfg), &env).unwrap();
-        assert_eq!(argv, vec!["code".to_string(), "--wait".into()]);
+    fn cmd(parts: &[&str]) -> ShellCommand {
+        ShellCommand(parts.iter().map(|s| (*s).to_string()).collect())
+    }
+
+    /// Mirror how `pr create` / `pr edit` resolve the editor: CLI flag, then
+    /// `$VISUAL`/`$EDITOR`, then config fallback.
+    async fn resolve(
+        flag: Option<ShellCommand>,
+        cfg: Option<ShellCommand>,
+        env: &FakeEnv,
+    ) -> Option<ShellCommand> {
+        crate::util::EvalWithCfgFallback::new(flag, cfg)
+            .resolve(|| async { editor_from_env(env) })
+            .await
+            .filter(|c| !c.is_empty())
     }
 
     #[test]
     fn visual_outranks_editor() {
         let env = FakeEnv::with(&[("VISUAL", "nvim +7"), ("EDITOR", "vi")]);
-        let argv = resolve_editor_argv(None, &env).unwrap();
-        assert_eq!(argv, vec!["nvim".to_string(), "+7".into()]);
+        assert_eq!(editor_from_env(&env), Some(cmd(&["nvim", "+7"])));
     }
 
     #[test]
     fn editor_env_used_when_visual_absent() {
         let env = FakeEnv::with(&[("EDITOR", "vi")]);
-        let argv = resolve_editor_argv(None, &env).unwrap();
-        assert_eq!(argv, vec!["vi".to_string()]);
+        assert_eq!(editor_from_env(&env), Some(cmd(&["vi"])));
     }
 
     #[test]
     fn empty_visual_falls_through_to_editor() {
         let env = FakeEnv::with(&[("VISUAL", ""), ("EDITOR", "vi")]);
-        let argv = resolve_editor_argv(None, &env).unwrap();
-        assert_eq!(argv, vec!["vi".to_string()]);
+        assert_eq!(editor_from_env(&env), Some(cmd(&["vi"])));
     }
 
     #[test]
-    fn empty_config_editor_falls_through() {
-        let empty = Vec::<String>::new();
-        let env = FakeEnv::with(&[("EDITOR", "vi")]);
-        let argv = resolve_editor_argv(Some(&empty), &env).unwrap();
-        assert_eq!(argv, vec!["vi".to_string()]);
+    fn malformed_env_is_skipped() {
+        let env = FakeEnv::with(&[("VISUAL", "nvim '"), ("EDITOR", "vi")]);
+        assert_eq!(editor_from_env(&env), Some(cmd(&["vi"])));
     }
 
     #[test]
-    fn no_sources_errors() {
+    fn no_env_returns_none() {
+        assert_eq!(editor_from_env(&FakeEnv::default()), None);
+    }
+
+    #[tokio::test]
+    async fn flag_outranks_env_and_config() {
+        let env = FakeEnv::with(&[("VISUAL", "vim"), ("EDITOR", "vi")]);
+        let got = resolve(Some(cmd(&["code", "--wait"])), Some(cmd(&["nano"])), &env).await;
+        assert_eq!(got, Some(cmd(&["code", "--wait"])));
+    }
+
+    #[tokio::test]
+    async fn env_outranks_config() {
+        let env = FakeEnv::with(&[("VISUAL", "vim")]);
+        let got = resolve(None, Some(cmd(&["nano"])), &env).await;
+        assert_eq!(got, Some(cmd(&["vim"])));
+    }
+
+    #[tokio::test]
+    async fn config_used_when_no_flag_or_env() {
         let env = FakeEnv::default();
-        let err = resolve_editor_argv(None, &env).unwrap_err();
-        assert!(err.to_string().contains("no editor configured"));
+        let got = resolve(None, Some(cmd(&["nano"])), &env).await;
+        assert_eq!(got, Some(cmd(&["nano"])));
+    }
+
+    #[tokio::test]
+    async fn none_when_all_empty() {
+        let env = FakeEnv::default();
+        assert_eq!(resolve(None, None, &env).await, None);
     }
 }

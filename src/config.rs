@@ -6,7 +6,11 @@
 //! 3. jj repo config (`jj config path --repo`).
 //! 4. jj workspace config (`jj config path --workspace`).
 //! 5. File pointed to by `$JJ_GH_EXTRA_CONFIG`.
-//! 6. Env overlay (`GH_ASKPASS`, `JJ_GH_TEMPLATE`, `JJ_GH_TEMPLATE_FILE`).
+//! 6. Env overlay (`JJ_GH_TEMPLATE`, `JJ_GH_TEMPLATE_FILE`).
+//!
+//! Token sources (`--gh-askpass`, `$GH_ASKPASS`, `$JJ_GH_TOKEN`, `$GH_TOKEN`,
+//! `gh_token`) and the editor env (`$VISUAL`/`$EDITOR`) are resolved outside
+//! this figment stack, in [`crate::auth`] and [`crate::editor`] respectively.
 //!
 //! Layer paths come from `jj config path --<level>` so we track whatever
 //! storage layout jj uses (XDG dirs in 0.41+, legacy `.jj/repo/config.toml`
@@ -30,9 +34,9 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 config_schema! {
-    /// Askpass helper command that prints a GitHub token on stdout.
-    #[env("GH_ASKPASS", argv)]
-    gh_askpass: Option<Vec<String>> = None,
+    /// Askpass helper command that prints a GitHub token on stdout. Lowest of
+    /// the askpass sources: `--gh-askpass` and `$GH_ASKPASS` outrank it.
+    gh_askpass: Option<crate::util::ShellCommand> = None,
 
     /// Timeout in seconds for the askpass helper.
     askpass_timeout_secs: u64 = 20,
@@ -78,7 +82,7 @@ config_schema! {
     auto_merge_method: AutoMergeMethod = AutoMergeMethod::Merge,
 
     /// Editor command for the PR editor flow.
-    editor: Option<Vec<String>> = None,
+    editor: Option<crate::util::ShellCommand> = None,
 
     /// Show a preview of the PR diffs while creating PR body.
     pr_create_show_diffs: bool = true,

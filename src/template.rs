@@ -144,7 +144,7 @@ mod tests {
             no_template: false,
             pick_title: false,
             title_template: "description.first_line()".into(),
-            editor: None,
+            editor: crate::util::EvalWithCfgFallback::new(None, None),
             no_edit: false,
             show_diffs: true,
             no_diffs: false,
