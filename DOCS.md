@@ -42,7 +42,7 @@ This document contains the help content for the `jj-gh` command-line program.
 - `--log-level <LEVEL>` — Set log level explicitly, overrides `-v` and `-q`
 - `--remote <NAME>` — Git remote used for the user's own pushes and PR head lookups. Default: `origin` (or `default_remote` in config)
 - `--upstream-remote <NAME>` — Git remote used as the PR target in fork workflows. Default: `upstream` (or `upstream_remote` in config)
-- `--gh-askpass <CMD>` — Askpass helper command that prints a GitHub token on stdout; shell-words split, e.g. `--gh-askpass "op read op://Vault/gh/token"`. Highest-priority token source; outranks `$GH_ASKPASS`, the token env vars, and `gh_askpass` in config
+- `--gh-askpass <CMD>` — Askpass helper command that prints a GitHub token on stdout; e.g. `--gh-askpass "op read op://Vault/gh/token"`. Highest-priority token source; outranks `$GH_ASKPASS`, the token env vars, and `gh_askpass` in config
 - `--askpass-timeout <SECS>` — Timeout in seconds for the askpass helper. Default: 20
 
 ## `jj-gh pr`
@@ -124,7 +124,7 @@ Opens your editor to a markdown file where you can write the PR description, and
 - `--no-template` — Skip body templating entirely
 - `--pick-title` — Interactively choose which commit supplies the PR title
 - `--title-template <TEMPLATE>` — jj template string used to render candidate PR titles. Evaluated once per commit in the PR revset
-- `-e`, `--editor <CMD>` — Editor command, e.g. `--editor "nvim +7"`. Precedence: this flag, then `$VISUAL`, then `$EDITOR`, then `editor` in config
+- `-e`, `--editor <CMD>` — Editor command, e.g. `--editor "nvim +7"`. Precedence: this flag, then `editor` in config, then `$VISUAL`, then `$EDITOR`
 - `--no-edit` — Create the PR without opening an editor. Useful when combined with `--draft`
 - `--diffs <SHOW_DIFFS>` — Show a preview of the PR diffs while creating the PR body. Overrides `pr_create_show_diffs` configuration. Use `--no-diffs` to disable
 - `--no-diffs` — Hide the PR diff preview while creating the PR body. Overrides config
@@ -146,7 +146,7 @@ Resolves the PR from a revision (via its local bookmark) or a PR number, fetches
 ###### **Options:**
 
 - `-f`, `--force` — Edit even if the PR body is empty. By default, `jj-gh` refuses to edit an empty body to avoid clobbering one that exists but failed to load
-- `-e`, `--editor <CMD>` — Editor command, e.g. `--editor "nvim +7"`. Precedence: this flag, then `$VISUAL`, then `$EDITOR`, then `editor` in config
+- `-e`, `--editor <CMD>` — Editor command, e.g. `--editor "nvim +7"`. Precedence: this flag, then `editor` in config, then `$VISUAL`, then `$EDITOR`
 - `--diffs <SHOW_DIFFS>` — Show a preview of the PR diffs while editing the PR. Overrides `pr_edit_show_diffs` configuration. Use `--no-diffs` to disable
 - `--no-diffs` — Hide the PR diff preview while editing the PR. Overrides config
 

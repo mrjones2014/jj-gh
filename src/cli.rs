@@ -57,7 +57,7 @@ subcommand_args! {
         pub upstream_remote: String,
 
         /// Askpass helper command that prints a GitHub token on stdout;
-        /// shell-words split, e.g. `--gh-askpass "op read op://Vault/gh/token"`.
+        /// e.g. `--gh-askpass "op read op://Vault/gh/token"`.
         /// Highest-priority token source; outranks `$GH_ASKPASS`, the token env
         /// vars, and `gh_askpass` in config.
         #[arg(long, value_name = "CMD", value_parser = crate::util::parse_shell_command, global = true)]
