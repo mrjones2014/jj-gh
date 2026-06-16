@@ -23,9 +23,9 @@ subcommand_args! {
         pub force: bool,
 
         /// Editor command, e.g. `--editor "nvim +7"`. Precedence: this flag,
-        /// then `$VISUAL`, then `$EDITOR`, then `editor` in config.
+        /// then `editor` in config, then `$VISUAL`, then `$EDITOR`.
         #[arg(short = 'e', long, value_name = "CMD", value_parser = crate::util::parse_shell_command)]
-        #[config(fallback = "editor")]
+        #[config]
         pub editor: Option<crate::util::ShellCommand>,
 
         /// Show a preview of the PR diffs while editing the PR.
@@ -73,7 +73,7 @@ pub async fn run(model: &impl Model, args: &EditArgs) -> Result<()> {
                 askpass_timeout_secs: _,
             },
     } = args;
-    let editor_argv = editor::resolve_editor(editor_cfg, model.env()).await?;
+    let editor_argv = editor::resolve_editor(editor_cfg.as_ref(), model.env())?;
     let spinner = Spinner::start("Resolving PR");
 
     let (target, pr_number) = model

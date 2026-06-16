@@ -7,7 +7,7 @@ use crate::{
     auth::EnvReader,
     frontmatter::Frontmatter,
     gh::{Gh, Reviewer, UpdatePr, remote},
-    util::{EvalWithCfgFallback, ShellCommand},
+    util::ShellCommand,
 };
 use anyhow::{Context, Result, anyhow, bail};
 use std::collections::HashMap;
@@ -24,11 +24,10 @@ pub trait Editor {
 /// Editor argv from the shell environment: `$VISUAL` then `$EDITOR`, each
 /// shell-split. Returns the first non-empty, parseable value.
 ///
-/// Sits between the `--editor` flag and the config `editor` in the precedence
-/// chain (flag > `$VISUAL` > `$EDITOR` > config), wired via the
-/// `EvalWithCfgFallback` resolved field in `pr create` / `pr edit`. A value that
-/// fails to shell-split is logged and skipped so a malformed env var does not
-/// abort the whole flow.
+/// Last resort in the precedence chain (flag > config > `$VISUAL` > `$EDITOR`),
+/// consulted by `resolve_editor` only when neither the `--editor` flag nor the
+/// config `editor` is set. A value that fails to shell-split is logged and
+/// skipped so a malformed env var does not abort the whole flow.
 pub fn editor_from_env<E: EnvReader>(env: &E) -> Option<ShellCommand> {
     for (name, value) in [("VISUAL", env.get("VISUAL")), ("EDITOR", env.get("EDITOR"))] {
         let Some(raw) = value.filter(|s| !s.trim().is_empty()) else {
@@ -43,20 +42,21 @@ pub fn editor_from_env<E: EnvReader>(env: &E) -> Option<ShellCommand> {
     None
 }
 
-/// Resolve the editor argv: `--editor` flag, then `$VISUAL`/`$EDITOR`, then the
-/// config `editor`.
+/// Resolve the editor argv. `editor` carries the `--editor` flag merged over the
+/// config `editor` (flag wins); when both are absent it falls back to
+/// `$VISUAL`/`$EDITOR`. Precedence: flag > config > `$VISUAL` > `$EDITOR`.
 ///
 /// # Errors
 ///
 /// Returns an error when every source is empty.
-pub async fn resolve_editor<E: EnvReader>(
-    editor: &EvalWithCfgFallback<ShellCommand>,
+pub fn resolve_editor<E: EnvReader>(
+    editor: Option<&ShellCommand>,
     env: &E,
 ) -> Result<ShellCommand> {
     editor
-        .resolve(|| async { editor_from_env(env) })
-        .await
         .filter(|c| !c.is_empty())
+        .cloned()
+        .or_else(|| editor_from_env(env))
         .ok_or_else(|| {
             anyhow!("no editor configured; set --editor, `editor` in config, $VISUAL, or $EDITOR")
         })
@@ -254,16 +254,15 @@ mod tests {
     }
 
     /// Mirror how `pr create` / `pr edit` resolve the editor: CLI flag, then
-    /// `$VISUAL`/`$EDITOR`, then config fallback.
+    /// config, then `$VISUAL`/`$EDITOR`. `flag.or(cfg)` models the figment merge
+    /// where a present `--editor` wins over the config value.
     async fn resolve(
         flag: Option<ShellCommand>,
         cfg: Option<ShellCommand>,
         env: &FakeEnv,
     ) -> Option<ShellCommand> {
-        crate::util::EvalWithCfgFallback::new(flag, cfg)
-            .resolve(|| async { editor_from_env(env) })
-            .await
-            .filter(|c| !c.is_empty())
+        let merged = flag.or(cfg);
+        resolve_editor(merged.as_ref(), env).ok()
     }
 
     #[test]
@@ -303,10 +302,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn env_outranks_config() {
+    async fn config_outranks_env() {
         let env = FakeEnv::with(&[("VISUAL", "vim")]);
         let got = resolve(None, Some(cmd(&["nano"])), &env).await;
-        assert_eq!(got, Some(cmd(&["vim"])));
+        assert_eq!(got, Some(cmd(&["nano"])));
     }
 
     #[tokio::test]
@@ -314,6 +313,13 @@ mod tests {
         let env = FakeEnv::default();
         let got = resolve(None, Some(cmd(&["nano"])), &env).await;
         assert_eq!(got, Some(cmd(&["nano"])));
+    }
+
+    #[tokio::test]
+    async fn env_used_when_no_flag_or_config() {
+        let env = FakeEnv::with(&[("EDITOR", "vi")]);
+        let got = resolve(None, None, &env).await;
+        assert_eq!(got, Some(cmd(&["vi"])));
     }
 
     #[tokio::test]

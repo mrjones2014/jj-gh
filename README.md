@@ -279,7 +279,8 @@ pr_log_template = 'format_short_commit_header(self) ++ "#" ++ surround(" ", "", 
 # separately
 pr_restack_template = 'format_short_commit_header(self) ++ "#" ++ surround(" ", "", pr_number)'
 
-# Editor command, shell-words split. Falls back to $VISUAL, then $EDITOR.
+# Editor command. Outranks $VISUAL and $EDITOR; the
+# --editor flag still wins over this.
 editor = [
   "nvim",
   "+10",  # +10 jumps your cursor past the frontmatter

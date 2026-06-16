@@ -109,9 +109,9 @@ subcommand_args! {
         pub title_template: String,
 
         /// Editor command, e.g. `--editor "nvim +7"`. Precedence: this flag,
-        /// then `$VISUAL`, then `$EDITOR`, then `editor` in config.
+        /// then `editor` in config, then `$VISUAL`, then `$EDITOR`.
         #[arg(short = 'e', long, value_name = "CMD", value_parser = crate::util::parse_shell_command)]
-        #[config(fallback = "editor")]
+        #[config]
         pub editor: Option<crate::util::ShellCommand>,
 
         /// Create the PR without opening an editor. Useful when combined with
@@ -269,7 +269,7 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
     let (final_fm, body) = if *no_edit {
         (initial_fm, raw_template.unwrap_or_default())
     } else {
-        let editor_argv = editor::resolve_editor(editor_argv, env).await?;
+        let editor_argv = editor::resolve_editor(editor_argv.as_ref(), env)?;
         let diff_preview = if *show_diffs {
             jj.diff(&title_revset)
                 .await
