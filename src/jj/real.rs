@@ -130,10 +130,16 @@ impl Jj for JjCli {
         }))
     }
 
-    async fn push(&self, rev: &str, remote: String) -> Result<()> {
-        run_jj_passthrough(&["git", "push", "--remote", &remote, "-c", rev])
-            .await
-            .context("pushing revision")
+    async fn push(&self, rev: &str, bookmark: Option<&str>, remote: String) -> Result<()> {
+        let argv = ["git", "push", "--remote", &remote]
+            .into_iter()
+            .chain(match bookmark {
+                Some(b) => ["-b", b],
+                None => ["-c", rev],
+            })
+            .collect::<Vec<_>>();
+
+        run_jj_passthrough(&argv).await.context("pushing revision")
     }
 
     async fn trunk_branch(&self) -> Result<Option<String>> {

@@ -309,7 +309,7 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
         lookup
     };
 
-    jj.push(rev, remote).await?;
+    jj.push(rev, existing_branch.as_deref(), remote).await?;
 
     let branch = if let Some(b) = existing_branch {
         b

@@ -75,12 +75,14 @@ pub trait Jj {
     /// Propagates jj errors.
     async fn remote_bookmark_sha(&self, bookmark: &str, remote: &str) -> Result<Option<String>>;
 
-    /// `jj git push --remote <remote> -c <rev>`. Pushes the change and creates a bookmark if needed.
+    /// Pushes `rev` to `remote`. With an existing `bookmark`, pushes it via
+    /// `-b <bookmark>`; otherwise `-c <rev>`, which creates a `push-<change_id>`
+    /// bookmark.
     ///
     /// # Errors
     ///
     /// Propagates jj failures.
-    async fn push(&self, rev: &str, remote: String) -> Result<()>;
+    async fn push(&self, rev: &str, bookmark: Option<&str>, remote: String) -> Result<()>;
 
     /// Bookmark at jj's `trunk()` revset, or `Ok(None)` if `trunk()` is empty.
     ///
