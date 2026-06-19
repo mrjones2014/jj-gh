@@ -15,7 +15,7 @@ jobs:
     outputs:
       targets: ${{ steps.checks.outputs.targets }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: cachix/install-nix-action@v31
         with:
           extra_nix_config: |
@@ -32,7 +32,7 @@ jobs:
         target: ${{ fromJSON(needs.discover_checks.outputs.targets) }}
     steps:
       - uses: wimpysworld/nothing-but-nix@main
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: cachix/install-nix-action@v31
         with:
           extra_nix_config: |
@@ -61,7 +61,7 @@ jobs:
     if: ${{ github.event_name != 'pull_request' }}
     steps:
       - uses: wimpysworld/nothing-but-nix@main
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: cachix/install-nix-action@v31
         with:
           extra_nix_config: |
@@ -87,7 +87,7 @@ jobs:
       cancel-in-progress: false
     steps:
       - uses: wimpysworld/nothing-but-nix@main
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           token: ${{ secrets.RELEASE_PLZ_GITHUB_TOKEN }}
