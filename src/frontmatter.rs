@@ -22,12 +22,13 @@
 use crate::{config::AutoMergeMethod, gh::Reviewer};
 use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
+use std::ops::Not;
 
 /// Sentinel heading that marks the start of the read-only diff preview in the
 /// `pr create` editor buffer. The marker line and everything after it are
 /// stripped on parse. Whole-line exact match (after trimming trailing
 /// whitespace).
-pub const PREVIEW_MARKER: &str = "# 8< jj-gh: below this line removed on submit >8";
+pub const PREVIEW_MARKER: &str = "8< jj-gh: below this line removed on submit >8";
 
 const TITLE_WARN_LEN: usize = 72;
 
@@ -70,12 +71,12 @@ impl Frontmatter {
         // apply some extra `\n` for comfort in the editor
         if orig_body_empty {
             Ok(format!(
-                "{body}\n\n\n\n{PREVIEW_MARKER}\n\n```diff\n{diff}\n```\n"
+                "{body}\n\n\n\n# {PREVIEW_MARKER}\n\n```diff\n{diff}\n```\n"
             ))
         } else {
             let trimmed = body.trim_end();
             Ok(format!(
-                "{trimmed}\n\n\n\n\n{PREVIEW_MARKER}\n\n```diff\n{diff}\n```\n"
+                "{trimmed}\n\n\n\n\n# {PREVIEW_MARKER}\n\n```diff\n{diff}\n```\n"
             ))
         }
     }
@@ -87,7 +88,9 @@ impl Frontmatter {
     /// Returns an error if the document is missing or has an unterminated
     /// frontmatter block, or if the YAML fails to deserialize.
     pub fn parse(buffer: &str) -> Result<(Self, String)> {
-        let trimmed = strip_preview(buffer);
+        // normalize `\r\n` to `\n`
+        let buffer = buffer.replace("\r\n", "\n");
+        let trimmed = strip_preview(&buffer);
         let rest = trimmed
             .strip_prefix("---\n")
             .ok_or_else(|| anyhow!("missing leading `---` frontmatter delimiter"))?;
@@ -128,13 +131,21 @@ impl Frontmatter {
 
 /// Truncate `buffer` at the first line equal to [`PREVIEW_MARKER`] (after
 /// trimming trailing whitespace). Returns the original buffer if absent.
+/// Matches by trimming leading markdown heading syntax entirely, then checking
+/// for a match, this makes it robust against misbehaving markdown formatters.
 fn strip_preview(buffer: &str) -> &str {
     let user_body_len = buffer
         .split_inclusive('\n')
-        .take_while(|line| line.trim() != PREVIEW_MARKER)
+        .take_while(|line| line_is_marker(line).not())
         .map(str::len)
         .sum();
     &buffer[..user_body_len]
+}
+
+fn line_is_marker(line: &&str) -> bool {
+    line.trim_start_matches(|c: char| c == '#' || c.is_whitespace())
+        .trim()
+        .eq(PREVIEW_MARKER)
 }
 
 #[cfg(test)]
