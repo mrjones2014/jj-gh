@@ -4,7 +4,7 @@ edition = "2024"
 license = "MIT"
 name = "jj-gh"
 repository = "https://github.com/mrjones2014/jj-gh"
-version = "0.2.8"
+version = "0.2.9"
 include = [
   "/src/**/*.rs",
   "/src/**/*.gql",

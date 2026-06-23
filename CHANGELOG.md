@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.9](https://github.com/mrjones2014/jj-gh/compare/jj-gh-v0.2.8...jj-gh-v0.2.9) - 2026-06-23
+
+### Fixed
+
+- *(diffs)* make marker matching robust against misbehaving formatters
+- *(deps)* update cargo minor and patch
+- *(bookmarks)* Fix logic to use existing bookmark if one exists
+- *(editor)* Fix editor option precedence
+
 ## [0.2.8](https://github.com/mrjones2014/jj-gh/compare/jj-gh-v0.2.7...jj-gh-v0.2.8) - 2026-06-15
 
 ### Fixed

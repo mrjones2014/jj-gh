@@ -2235,7 +2235,7 @@ dependencies = [
 
 [[package]]
 name = "jj-gh"
-version = "0.2.8"
+version = "0.2.9"
 dependencies = [
  "anstyle",
  "anyhow",
