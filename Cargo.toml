@@ -44,7 +44,7 @@ figment = { version = "0.10", features = ["toml"] }
 flexi_logger = { version = "0.31", default-features = false, features = [
   "colors",
 ] }
-gix = { version = "0.84", default-features = false, features = [
+gix = { version = "0.85", default-features = false, features = [
   "max-performance-safe",
   "comfort",
   "basic",
