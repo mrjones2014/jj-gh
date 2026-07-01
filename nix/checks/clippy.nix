@@ -7,6 +7,6 @@ craneLib.cargoClippy (
   commonArgs
   // {
     inherit cargoArtifacts;
-    cargoClippyExtraArgs = "--workspace -- -D warnings";
+    cargoClippyExtraArgs = "--workspace --all-targets -- -D warnings";
   }
 )
