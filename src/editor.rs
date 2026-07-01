@@ -256,7 +256,7 @@ mod tests {
     /// Mirror how `pr create` / `pr edit` resolve the editor: CLI flag, then
     /// config, then `$VISUAL`/`$EDITOR`. `flag.or(cfg)` models the figment merge
     /// where a present `--editor` wins over the config value.
-    async fn resolve(
+    fn resolve(
         flag: Option<ShellCommand>,
         cfg: Option<ShellCommand>,
         env: &FakeEnv,
@@ -297,34 +297,34 @@ mod tests {
     #[tokio::test]
     async fn flag_outranks_env_and_config() {
         let env = FakeEnv::with(&[("VISUAL", "vim"), ("EDITOR", "vi")]);
-        let got = resolve(Some(cmd(&["code", "--wait"])), Some(cmd(&["nano"])), &env).await;
+        let got = resolve(Some(cmd(&["code", "--wait"])), Some(cmd(&["nano"])), &env);
         assert_eq!(got, Some(cmd(&["code", "--wait"])));
     }
 
     #[tokio::test]
     async fn config_outranks_env() {
         let env = FakeEnv::with(&[("VISUAL", "vim")]);
-        let got = resolve(None, Some(cmd(&["nano"])), &env).await;
+        let got = resolve(None, Some(cmd(&["nano"])), &env);
         assert_eq!(got, Some(cmd(&["nano"])));
     }
 
     #[tokio::test]
     async fn config_used_when_no_flag_or_env() {
         let env = FakeEnv::default();
-        let got = resolve(None, Some(cmd(&["nano"])), &env).await;
+        let got = resolve(None, Some(cmd(&["nano"])), &env);
         assert_eq!(got, Some(cmd(&["nano"])));
     }
 
     #[tokio::test]
     async fn env_used_when_no_flag_or_config() {
         let env = FakeEnv::with(&[("EDITOR", "vi")]);
-        let got = resolve(None, None, &env).await;
+        let got = resolve(None, None, &env);
         assert_eq!(got, Some(cmd(&["vi"])));
     }
 
     #[tokio::test]
     async fn none_when_all_empty() {
         let env = FakeEnv::default();
-        assert_eq!(resolve(None, None, &env).await, None);
+        assert_eq!(resolve(None, None, &env), None);
     }
 }
