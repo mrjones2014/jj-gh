@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.10](https://github.com/mrjones2014/jj-gh/compare/jj-gh-v0.2.9...jj-gh-v0.2.10) - 2026-07-01
+
+### Fixed
+
+- *(lint)* Resolve lint warning and fix CI check
+- *(pr-restack)* Add `is:open` filter to PR queries
+- *(deps)* update cargo minor and patch
+
+### Other
+
+- Merge pull request #222 from mrjones2014/renovate/lock-file-maintenance
+
 ## [0.2.9](https://github.com/mrjones2014/jj-gh/compare/jj-gh-v0.2.8...jj-gh-v0.2.9) - 2026-06-23
 
 ### Fixed
