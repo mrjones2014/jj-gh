@@ -98,6 +98,7 @@ input AddAssigneesToAssignableInput {
       concreteTypes: ["Bot", "EnterpriseUserAccount", "Mannequin", "Organization", "User"]
       abstractType: "Actor"
     )
+    assignees: [AssigneeUpdateInput!]
     clientMutationId: String
 }
 type AddAssigneesToAssignablePayload {
@@ -167,6 +168,7 @@ input AddLabelsToLabelableInput {
     clientMutationId: String
     labelIds: [ID!] @possibleTypes(concreteTypes: ["Label"])
     labelableId: ID! @possibleTypes(concreteTypes: ["Discussion", "Issue", "PullRequest"], abstractType: "Labelable")
+    labels: [LabelUpdateInput!]
 }
 type AddLabelsToLabelablePayload {
     clientMutationId: String
@@ -479,6 +481,7 @@ interface Assignable @docsCategory(name: "issues") {
         last: Int
         query: String
   ): AssigneeConnection!
+    viewerCanAssign: Boolean!
 }
 type AssignedEvent implements Node @docsCategory(name: "issues") {
     actor: Actor
@@ -499,6 +502,16 @@ type AssigneeConnection {
 type AssigneeEdge {
     cursor: String!
     node: Assignee
+}
+input AssigneeUpdateInput @docsCategory(name: "issues") {
+    actorId: ID!
+    @possibleTypes(
+      concreteTypes: ["Bot", "EnterpriseUserAccount", "Mannequin", "Organization", "User"]
+      abstractType: "Actor"
+    )
+    confidence: IssueEventConfidenceLevel
+    rationale: String
+    suggest: Boolean
 }
 interface AuditEntry @docsCategory(name: "enterprise-admin") {
     action: String!
@@ -1209,8 +1222,11 @@ type CloseDiscussionPayload {
 }
 input CloseIssueInput {
     clientMutationId: String
+    confidence: IssueEventConfidenceLevel
     duplicateIssueId: ID @possibleTypes(concreteTypes: ["Issue"])
+    isSuggestion: Boolean
     issueId: ID! @possibleTypes(concreteTypes: ["Issue"])
+    rationale: String
     stateReason: IssueClosedStateReason
 }
 type CloseIssuePayload {
@@ -4910,14 +4926,18 @@ type Issue implements Assignable & Closable & Comment & Deletable & Labelable & 
         first: Int
         last: Int
   ): UserContentEditConnection
+    viewerCanAssign: Boolean!
     viewerCanClose: Boolean!
     viewerCanDelete: Boolean!
     viewerCanLabel: Boolean!
     viewerCanReact: Boolean!
     viewerCanReopen: Boolean!
     viewerCanSetFields: Boolean
+    viewerCanSetMilestone: Boolean!
     viewerCanSubscribe: Boolean!
+    viewerCanType: Boolean
     viewerCanUpdate: Boolean!
+    viewerCanUpdateMetadata: Boolean
     viewerCannotUpdateReasons: [CommentCannotUpdateReason!]!
     viewerDidAuthor: Boolean!
     viewerSubscription: SubscriptionState
@@ -5048,6 +5068,11 @@ type IssueEdge {
     cursor: String!
     node: Issue
 }
+enum IssueEventConfidenceLevel @docsCategory(name: "issues") {
+    HIGH
+    LOW
+    MEDIUM
+}
 type IssueFieldAddedEvent implements Node @docsCategory(name: "issues") {
     actor: Actor
     color: String
@@ -5078,12 +5103,15 @@ interface IssueFieldCommon @docsCategory(name: "issues") {
     visibility: IssueFieldVisibility!
 }
 input IssueFieldCreateOrUpdateInput @docsCategory(name: "issues") {
+    confidence: IssueEventConfidenceLevel
     dateValue: String
     delete: Boolean
     fieldId: ID!
     multiSelectOptionIds: [ID!]
     numberValue: Float
+    rationale: String
     singleSelectOptionId: ID
+    suggest: Boolean
     textValue: String
 }
 enum IssueFieldDataType @docsCategory(name: "issues") {
@@ -5529,6 +5557,12 @@ type IssueTypeRemovedEvent implements Node @docsCategory(name: "issues") {
     id: ID!
     issueType: IssueType
 }
+input IssueTypeUpdateInput @docsCategory(name: "issues") {
+    confidence: IssueEventConfidenceLevel
+    issueTypeId: ID
+    rationale: String
+    suggest: Boolean
+}
 type JoinedGitHubContribution implements Contribution @docsCategory(name: "users") {
     isRestricted: Boolean!
     occurredAt: DateTime!
@@ -5587,6 +5621,12 @@ enum LabelOrderField @docsCategory(name: "issues") {
     CREATED_AT
     ISSUE_COUNT
     NAME
+}
+input LabelUpdateInput @docsCategory(name: "issues") {
+    confidence: IssueEventConfidenceLevel
+    labelId: ID! @possibleTypes(concreteTypes: ["Label"])
+    rationale: String
+    suggest: Boolean
 }
 interface Labelable @docsCategory(name: "issues") {
     labels(
@@ -12262,6 +12302,7 @@ type PullRequest implements Assignable & Closable & Comment & Labelable & Lockab
         last: Int
   ): UserContentEditConnection
     viewerCanApplySuggestion: Boolean!
+    viewerCanAssign: Boolean!
     viewerCanClose: Boolean!
     viewerCanDeleteHeadRef: Boolean!
     viewerCanDisableAutoMerge: Boolean!
@@ -12815,6 +12856,7 @@ enum PullRequestTimelineItemsItemType {
     ADDED_TO_MERGE_QUEUE_EVENT
     ADDED_TO_PROJECT_EVENT
     ADDED_TO_PROJECT_V2_EVENT
+    ARCHIVED_EVENT
     ASSIGNED_EVENT
     AUTOMATIC_BASE_CHANGE_FAILED_EVENT
     AUTOMATIC_BASE_CHANGE_SUCCEEDED_EVENT
@@ -12883,6 +12925,7 @@ enum PullRequestTimelineItemsItemType {
     SUB_ISSUE_ADDED_EVENT
     SUB_ISSUE_REMOVED_EVENT
     TRANSFERRED_EVENT
+    UNARCHIVED_EVENT
     UNASSIGNED_EVENT
     UNLABELED_EVENT
     UNLOCKED_EVENT
@@ -13610,6 +13653,7 @@ input ReplaceActorsForAssignableInput {
     actorLogins: [String!]
     agentAssignment: AgentAssignmentInput
     assignableId: ID! @possibleTypes(concreteTypes: ["Issue", "PullRequest"], abstractType: "Assignable")
+    assignees: [AssigneeUpdateInput!]
     clientMutationId: String
 }
 type ReplaceActorsForAssignablePayload {
@@ -19151,11 +19195,14 @@ input UpdateIssueInput {
       concreteTypes: ["Bot", "EnterpriseUserAccount", "Mannequin", "Organization", "User"]
       abstractType: "Actor"
     )
+    assignees: [AssigneeUpdateInput!]
     body: String
     clientMutationId: String
     id: ID! @possibleTypes(concreteTypes: ["Issue"])
+    issueType: IssueTypeUpdateInput
     issueTypeId: ID
     labelIds: [ID!] @possibleTypes(concreteTypes: ["Label"])
+    labels: [LabelUpdateInput!]
     milestoneId: ID @possibleTypes(concreteTypes: ["Milestone"])
     projectIds: [ID!]
     state: IssueState
