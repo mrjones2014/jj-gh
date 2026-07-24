@@ -418,6 +418,20 @@ type App implements Node @docsCategory(name: "apps") {
     updatedAt: DateTime!
     url: URI!
 }
+input ApplyPendingIssueSuggestionsInput {
+    actorId: ID!
+    @possibleTypes(
+      concreteTypes: ["Bot", "EnterpriseUserAccount", "Mannequin", "Organization", "User"]
+      abstractType: "Actor"
+    )
+    clientMutationId: String
+    issueId: ID! @possibleTypes(concreteTypes: ["Issue"])
+    suggestions: [PendingIssueSuggestionRef!]!
+}
+type ApplyPendingIssueSuggestionsPayload {
+    clientMutationId: String
+    issue: Issue
+}
 input ApproveDeploymentsInput {
     clientMutationId: String
     comment: String = ""
@@ -489,6 +503,7 @@ type AssignedEvent implements Node @docsCategory(name: "issues") {
     assignee: Assignee
     createdAt: DateTime!
     id: ID!
+    intent: IssueUpdateIntent
     user: User
     @deprecated(reason: "Assignees can now be mannequins. Use the `assignee` field instead. Removal on 2020-01-01 UTC.")
 }
@@ -1248,6 +1263,7 @@ type ClosedEvent implements Node & UniformResourceLocatable @docsCategory(name: 
     createdAt: DateTime!
     duplicateOf: IssueOrPullRequest
     id: ID!
+    intent: IssueUpdateIntent
     resourcePath: URI!
     stateReason: IssueStateReason
     url: URI!
@@ -4784,6 +4800,7 @@ type Issue implements Assignable & Closable & Comment & Deletable & Labelable & 
     databaseId: Int
     duplicateOf: Issue
     editor: Actor
+    eventRationales: [IssueEventRationale!]!
     fullDatabaseId: BigInt
     hovercard(
         includeNotificationContexts: Boolean = true
@@ -4824,6 +4841,7 @@ type Issue implements Assignable & Closable & Comment & Deletable & Labelable & 
         first: Int
         last: Int
   ): UserConnection!
+    pendingSuggestions: [PendingIssueSuggestion!]
     pinnedIssueComment: PinnedIssueComment
     projectCards(
         after: String
@@ -5073,19 +5091,38 @@ enum IssueEventConfidenceLevel @docsCategory(name: "issues") {
     LOW
     MEDIUM
 }
+type IssueEventRationale {
+    actor: Actor
+    createdAt: DateTime!
+    issueEvent: IssueEventWithRationale
+    rationale: String!
+}
+union IssueEventWithRationale @docsCategory(name: "issues") =
+  | ClosedEvent
+  | IssueFieldAddedEvent
+  | IssueFieldChangedEvent
+  | IssueFieldRemovedEvent
+  | IssueTypeAddedEvent
+  | IssueTypeChangedEvent
+  | IssueTypeRemovedEvent
+  | LabeledEvent
+  | UnlabeledEvent
 type IssueFieldAddedEvent implements Node @docsCategory(name: "issues") {
     actor: Actor
     color: String
     createdAt: DateTime!
     id: ID!
+    intent: IssueUpdateIntent
     issueField: IssueFields
     options: [IssueFieldTimelineOption!]
+    rationale: IssueEventRationale
     value: String
 }
 type IssueFieldChangedEvent implements Node @docsCategory(name: "issues") {
     actor: Actor
     createdAt: DateTime!
     id: ID!
+    intent: IssueUpdateIntent
     issueField: IssueFields
     newColor: String
     newOptions: [IssueFieldTimelineOption!]
@@ -5093,6 +5130,7 @@ type IssueFieldChangedEvent implements Node @docsCategory(name: "issues") {
     previousColor: String
     previousOptions: [IssueFieldTimelineOption!]
     previousValue: String
+    rationale: IssueEventRationale
 }
 interface IssueFieldCommon @docsCategory(name: "issues") {
     createdAt: DateTime!
@@ -5177,8 +5215,10 @@ type IssueFieldRemovedEvent implements Node @docsCategory(name: "issues") {
     actor: Actor
     createdAt: DateTime!
     id: ID!
+    intent: IssueUpdateIntent
     issueField: IssueFields
     options: [IssueFieldTimelineOption!]
+    rationale: IssueEventRationale
 }
 type IssueFieldSingleSelect implements IssueFieldCommon & Node @docsCategory(name: "issues") {
     createdAt: DateTime!
@@ -5317,6 +5357,14 @@ enum IssueStateReason @docsCategory(name: "issues") {
     DUPLICATE
     NOT_PLANNED
     REOPENED
+}
+input IssueStateUpdateInput @docsCategory(name: "issues") {
+    confidence: IssueEventConfidenceLevel
+    duplicateIssueId: ID @possibleTypes(concreteTypes: ["Issue"])
+    rationale: String
+    stateReason: IssueClosedStateReason
+    suggest: Boolean
+    value: IssueState!
 }
 type IssueTemplate @docsCategory(name: "issues") {
     about: String
@@ -5514,14 +5562,18 @@ type IssueTypeAddedEvent implements Node @docsCategory(name: "issues") {
     actor: Actor
     createdAt: DateTime!
     id: ID!
+    intent: IssueUpdateIntent
     issueType: IssueType
+    rationale: IssueEventRationale
 }
 type IssueTypeChangedEvent implements Node @docsCategory(name: "issues") {
     actor: Actor
     createdAt: DateTime!
     id: ID!
+    intent: IssueUpdateIntent
     issueType: IssueType
     prevIssueType: IssueType
+    rationale: IssueEventRationale
 }
 enum IssueTypeColor @docsCategory(name: "issues") {
     BLUE
@@ -5555,13 +5607,21 @@ type IssueTypeRemovedEvent implements Node @docsCategory(name: "issues") {
     actor: Actor
     createdAt: DateTime!
     id: ID!
+    intent: IssueUpdateIntent
     issueType: IssueType
+    rationale: IssueEventRationale
 }
 input IssueTypeUpdateInput @docsCategory(name: "issues") {
     confidence: IssueEventConfidenceLevel
     issueTypeId: ID
     rationale: String
     suggest: Boolean
+}
+type IssueUpdateIntent @docsCategory(name: "issues") {
+    confidence: IssueEventConfidenceLevel
+    databaseId: Int
+    intentId: String
+    rationale: String
 }
 type JoinedGitHubContribution implements Contribution @docsCategory(name: "users") {
     isRestricted: Boolean!
@@ -5642,8 +5702,10 @@ type LabeledEvent implements Node @docsCategory(name: "issues") {
     actor: Actor
     createdAt: DateTime!
     id: ID!
+    intent: IssueUpdateIntent
     label: Label!
     labelable: Labelable!
+    rationale: IssueEventRationale
 }
 type Language implements Node @docsCategory(name: "repos") {
     color: String
@@ -6602,6 +6664,9 @@ type Mutation @docsCategory(name: "meta") {
     addVerifiableDomain(
         input: AddVerifiableDomainInput!
   ): AddVerifiableDomainPayload @docsCategory(name: "orgs")
+    applyPendingIssueSuggestions(
+        input: ApplyPendingIssueSuggestionsInput!
+  ): ApplyPendingIssueSuggestionsPayload @docsCategory(name: "issues")
     approveDeployments(
         input: ApproveDeploymentsInput!
   ): ApproveDeploymentsPayload @docsCategory(name: "deployments")
@@ -6993,6 +7058,9 @@ type Mutation @docsCategory(name: "meta") {
     rejectDeployments(
         input: RejectDeploymentsInput!
   ): RejectDeploymentsPayload @docsCategory(name: "deployments")
+    rejectPendingIssueSuggestions(
+        input: RejectPendingIssueSuggestionsInput!
+  ): RejectPendingIssueSuggestionsPayload @docsCategory(name: "issues")
     removeAssigneesFromAssignable(
         input: RemoveAssigneesFromAssignableInput!
   ): RemoveAssigneesFromAssignablePayload @docsCategory(name: "issues")
@@ -7225,6 +7293,9 @@ type Mutation @docsCategory(name: "meta") {
     updateEnterpriseProfile(
         input: UpdateEnterpriseProfileInput!
   ): UpdateEnterpriseProfilePayload @docsCategory(name: "enterprise-admin")
+    updateEnterpriseProofOfPresenceRequiredSetting(
+        input: UpdateEnterpriseProofOfPresenceRequiredSettingInput!
+  ): UpdateEnterpriseProofOfPresenceRequiredSettingPayload @docsCategory(name: "enterprise-admin")
     updateEnterpriseRepositoryProjectsSetting(
         input: UpdateEnterpriseRepositoryProjectsSettingInput!
   ): UpdateEnterpriseRepositoryProjectsSettingPayload @docsCategory(name: "enterprise-admin")
@@ -10596,6 +10667,63 @@ enum PatchStatus @docsCategory(name: "pulls") {
     MODIFIED
     RENAMED
 }
+type PendingAssigneeSuggestion @docsCategory(name: "issues") {
+    actor: Actor
+    assignee: Assignee
+    createdAt: DateTime!
+    rationale: String
+    updatedAt: DateTime
+}
+type PendingCloseSuggestion @docsCategory(name: "issues") {
+    actor: Actor
+    createdAt: DateTime!
+    duplicateOf: IssueOrPullRequest
+    rationale: String
+    stateReason: IssueStateReason
+    updatedAt: DateTime
+}
+type PendingFieldSuggestion @docsCategory(name: "issues") {
+    actor: Actor
+    createdAt: DateTime!
+    issueField: IssueFields
+    rationale: String
+    suggestedValue: String
+    updatedAt: DateTime
+}
+union PendingIssueSuggestion @docsCategory(name: "issues") =
+  | PendingAssigneeSuggestion
+  | PendingCloseSuggestion
+  | PendingFieldSuggestion
+  | PendingLabelSuggestion
+  | PendingTypeSuggestion
+enum PendingIssueSuggestionKind @docsCategory(name: "issues") {
+    ASSIGNEE
+    CLOSE
+    FIELD
+    LABEL
+    TYPE
+}
+input PendingIssueSuggestionRef @docsCategory(name: "issues") {
+    assigneeId: ID
+    issueFieldId: ID
+    issueTypeId: ID
+    kind: PendingIssueSuggestionKind!
+    labelId: ID
+}
+type PendingLabelSuggestion @docsCategory(name: "issues") {
+    actor: Actor
+    createdAt: DateTime!
+    label: Label
+    rationale: String
+    updatedAt: DateTime
+}
+type PendingTypeSuggestion @docsCategory(name: "issues") {
+    actor: Actor
+    createdAt: DateTime!
+    issueType: IssueType
+    rationale: String
+    updatedAt: DateTime
+}
 union PermissionGranter @docsCategory(name: "orgs") = EnterpriseTeam | Organization | Repository | Team
 type PermissionSource @docsCategory(name: "repos") {
     organization: Organization!
@@ -12031,6 +12159,11 @@ type PromoteRepositoryCustomPropertyPayload {
     clientMutationId: String
     repositoryCustomProperty: RepositoryCustomProperty
 }
+enum ProofOfPresenceRequirement @docsCategory(name: "enterprise-admin") {
+    MFA
+    NO_POLICY
+    REAUTH
+}
 type PropertyTargetDefinition @docsCategory(name: "repos") {
     name: String!
     propertyValues: [String!]!
@@ -12256,6 +12389,8 @@ type PullRequest implements Assignable & Closable & Comment & Labelable & Lockab
         last: Int
         states: [PullRequestReviewState!]
   ): PullRequestReviewConnection
+    stack: PullRequestStack
+    stackEntry: PullRequestStackEntry
     state: PullRequestState!
     statusCheckRollup: StatusCheckRollup
     suggestedActors(
@@ -12680,6 +12815,34 @@ type PullRequestRevisionMarker @docsCategory(name: "pulls") {
     createdAt: DateTime!
     lastSeenCommit: Commit!
     pullRequest: PullRequest!
+}
+type PullRequestStack implements Node @docsCategory(name: "pulls") {
+    baseRefName: String!
+    entries(
+        after: String
+        before: String
+        first: Int
+        last: Int
+  ): PullRequestStackEntryConnection!
+    id: ID!
+    number: Int!
+    size: Int!
+}
+type PullRequestStackEntry implements Node @docsCategory(name: "pulls") {
+    id: ID!
+    position: Int!
+    pullRequest: PullRequest
+    stack: PullRequestStack
+}
+type PullRequestStackEntryConnection {
+    edges: [PullRequestStackEntryEdge]
+    nodes: [PullRequestStackEntry]
+    pageInfo: PageInfo!
+    totalCount: Int!
+}
+type PullRequestStackEntryEdge {
+    cursor: String!
+    node: PullRequestStackEntry
 }
 enum PullRequestState @docsCategory(name: "pulls") {
     CLOSED
@@ -13319,6 +13482,20 @@ input RejectDeploymentsInput {
 type RejectDeploymentsPayload {
     clientMutationId: String
     deployments: [Deployment!]
+}
+input RejectPendingIssueSuggestionsInput {
+    actorId: ID!
+    @possibleTypes(
+      concreteTypes: ["Bot", "EnterpriseUserAccount", "Mannequin", "Organization", "User"]
+      abstractType: "Actor"
+    )
+    clientMutationId: String
+    issueId: ID! @possibleTypes(concreteTypes: ["Issue"])
+    suggestions: [PendingIssueSuggestionRef!]!
+}
+type RejectPendingIssueSuggestionsPayload {
+    clientMutationId: String
+    issue: Issue
 }
 type Release implements Node & Reactable & UniformResourceLocatable @docsCategory(name: "releases") {
     author: User
@@ -18678,8 +18855,10 @@ type UnlabeledEvent implements Node @docsCategory(name: "issues") {
     actor: Actor
     createdAt: DateTime!
     id: ID!
+    intent: IssueUpdateIntent
     label: Label!
     labelable: Labelable!
+    rationale: IssueEventRationale
 }
 input UnlinkProjectV2FromRepositoryInput {
     clientMutationId: String
@@ -19068,6 +19247,16 @@ type UpdateEnterpriseProfilePayload {
     clientMutationId: String
     enterprise: Enterprise
 }
+input UpdateEnterpriseProofOfPresenceRequiredSettingInput {
+    clientMutationId: String
+    enterpriseId: ID! @possibleTypes(concreteTypes: ["Enterprise"])
+    settingValue: ProofOfPresenceRequirement!
+}
+type UpdateEnterpriseProofOfPresenceRequiredSettingPayload {
+    clientMutationId: String
+    enterprise: Enterprise
+    message: String
+}
 input UpdateEnterpriseRepositoryProjectsSettingInput {
     clientMutationId: String
     enterpriseId: ID! @possibleTypes(concreteTypes: ["Enterprise"])
@@ -19206,6 +19395,7 @@ input UpdateIssueInput {
     milestoneId: ID @possibleTypes(concreteTypes: ["Milestone"])
     projectIds: [ID!]
     state: IssueState
+    stateInput: IssueStateUpdateInput
     title: String
 }
 input UpdateIssueIssueTypeInput {
