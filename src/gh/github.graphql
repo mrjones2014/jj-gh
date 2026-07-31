@@ -1183,7 +1183,12 @@ input ClearProjectV2ItemFieldValueInput {
     clientMutationId: String
     fieldId: ID!
     @possibleTypes(
-      concreteTypes: ["ProjectV2Field", "ProjectV2IterationField", "ProjectV2SingleSelectField"]
+      concreteTypes: [
+        "ProjectV2Field"
+        "ProjectV2IterationField"
+        "ProjectV2MultiSelectField"
+        "ProjectV2SingleSelectField"
+      ]
       abstractType: "ProjectV2FieldConfiguration"
     )
     itemId: ID! @possibleTypes(concreteTypes: ["ProjectV2Item"])
@@ -1861,6 +1866,7 @@ input CopilotCodeReviewParametersInput @docsCategory(name: "pulls") {
 }
 type CopilotEndpoints @docsCategory(name: "copilot") {
     api: String!
+    exp: String
     originTracker: String!
     proxy: String!
     telemetry: String!
@@ -2150,6 +2156,7 @@ input CreateProjectV2FieldInput {
     clientMutationId: String
     dataType: ProjectV2CustomFieldType!
     iterationConfiguration: ProjectV2IterationFieldConfigurationInput
+    multiSelectOptions: [ProjectV2MultiSelectFieldOptionInput!]
     name: String!
     projectId: ID! @possibleTypes(concreteTypes: ["ProjectV2"])
     singleSelectOptions: [ProjectV2SingleSelectFieldOptionInput!]
@@ -2199,6 +2206,17 @@ input CreateProjectV2StatusUpdateInput {
 type CreateProjectV2StatusUpdatePayload {
     clientMutationId: String
     statusUpdate: ProjectV2StatusUpdate
+}
+input CreateProjectV2ViewInput {
+    clientMutationId: String
+    configuration: ProjectV2ViewConfigurationInput
+    layout: ProjectV2ViewLayout!
+    name: String!
+    projectId: ID! @possibleTypes(concreteTypes: ["ProjectV2"])
+}
+type CreateProjectV2ViewPayload {
+    clientMutationId: String
+    projectV2View: ProjectV2View
 }
 input CreatePullRequestInput {
     baseRefName: String!
@@ -2643,7 +2661,12 @@ input DeleteProjectV2FieldInput {
     clientMutationId: String
     fieldId: ID!
     @possibleTypes(
-      concreteTypes: ["ProjectV2Field", "ProjectV2IterationField", "ProjectV2SingleSelectField"]
+      concreteTypes: [
+        "ProjectV2Field"
+        "ProjectV2IterationField"
+        "ProjectV2MultiSelectField"
+        "ProjectV2SingleSelectField"
+      ]
       abstractType: "ProjectV2FieldConfiguration"
     )
 }
@@ -2676,6 +2699,14 @@ type DeleteProjectV2StatusUpdatePayload {
     clientMutationId: String
     deletedStatusUpdateId: ID
     projectV2: ProjectV2
+}
+input DeleteProjectV2ViewInput {
+    clientMutationId: String
+    viewId: ID! @possibleTypes(concreteTypes: ["ProjectV2View"])
+}
+type DeleteProjectV2ViewPayload {
+    clientMutationId: String
+    projectV2View: ProjectV2View
 }
 input DeleteProjectV2WorkflowInput {
     clientMutationId: String
@@ -4801,6 +4832,9 @@ type Issue implements Assignable & Closable & Comment & Deletable & Labelable & 
     duplicateOf: Issue
     editor: Actor
     eventRationales: [IssueEventRationale!]!
+    @deprecated(
+      reason: "Use the `intent` field on individual timeline events instead. This field is being removed and now always returns an empty list."
+    )
     fullDatabaseId: BigInt
     hovercard(
         includeNotificationContexts: Boolean = true
@@ -5091,7 +5125,7 @@ enum IssueEventConfidenceLevel @docsCategory(name: "issues") {
     LOW
     MEDIUM
 }
-type IssueEventRationale {
+type IssueEventRationale @docsCategory(name: "issues") {
     actor: Actor
     createdAt: DateTime!
     issueEvent: IssueEventWithRationale
@@ -5116,6 +5150,7 @@ type IssueFieldAddedEvent implements Node @docsCategory(name: "issues") {
     issueField: IssueFields
     options: [IssueFieldTimelineOption!]
     rationale: IssueEventRationale
+    @deprecated(reason: "Use `intent` instead. This field is being removed and now always returns null.")
     value: String
 }
 type IssueFieldChangedEvent implements Node @docsCategory(name: "issues") {
@@ -5131,6 +5166,7 @@ type IssueFieldChangedEvent implements Node @docsCategory(name: "issues") {
     previousOptions: [IssueFieldTimelineOption!]
     previousValue: String
     rationale: IssueEventRationale
+    @deprecated(reason: "Use `intent` instead. This field is being removed and now always returns null.")
 }
 interface IssueFieldCommon @docsCategory(name: "issues") {
     createdAt: DateTime!
@@ -5219,6 +5255,7 @@ type IssueFieldRemovedEvent implements Node @docsCategory(name: "issues") {
     issueField: IssueFields
     options: [IssueFieldTimelineOption!]
     rationale: IssueEventRationale
+    @deprecated(reason: "Use `intent` instead. This field is being removed and now always returns null.")
 }
 type IssueFieldSingleSelect implements IssueFieldCommon & Node @docsCategory(name: "issues") {
     createdAt: DateTime!
@@ -5565,6 +5602,7 @@ type IssueTypeAddedEvent implements Node @docsCategory(name: "issues") {
     intent: IssueUpdateIntent
     issueType: IssueType
     rationale: IssueEventRationale
+    @deprecated(reason: "Use `intent` instead. This field is being removed and now always returns null.")
 }
 type IssueTypeChangedEvent implements Node @docsCategory(name: "issues") {
     actor: Actor
@@ -5574,6 +5612,7 @@ type IssueTypeChangedEvent implements Node @docsCategory(name: "issues") {
     issueType: IssueType
     prevIssueType: IssueType
     rationale: IssueEventRationale
+    @deprecated(reason: "Use `intent` instead. This field is being removed and now always returns null.")
 }
 enum IssueTypeColor @docsCategory(name: "issues") {
     BLUE
@@ -5610,6 +5649,7 @@ type IssueTypeRemovedEvent implements Node @docsCategory(name: "issues") {
     intent: IssueUpdateIntent
     issueType: IssueType
     rationale: IssueEventRationale
+    @deprecated(reason: "Use `intent` instead. This field is being removed and now always returns null.")
 }
 input IssueTypeUpdateInput @docsCategory(name: "issues") {
     confidence: IssueEventConfidenceLevel
@@ -5706,6 +5746,7 @@ type LabeledEvent implements Node @docsCategory(name: "issues") {
     label: Label!
     labelable: Labelable!
     rationale: IssueEventRationale
+    @deprecated(reason: "Use `intent` instead. This field is being removed and now always returns null.")
 }
 type Language implements Node @docsCategory(name: "repos") {
     color: String
@@ -6808,6 +6849,9 @@ type Mutation @docsCategory(name: "meta") {
     createProjectV2StatusUpdate(
         input: CreateProjectV2StatusUpdateInput!
   ): CreateProjectV2StatusUpdatePayload @docsCategory(name: "projects")
+    createProjectV2View(
+        input: CreateProjectV2ViewInput!
+  ): CreateProjectV2ViewPayload @docsCategory(name: "projects")
     createPullRequest(
         input: CreatePullRequestInput!
   ): CreatePullRequestPayload @docsCategory(name: "pulls")
@@ -6916,6 +6960,9 @@ type Mutation @docsCategory(name: "meta") {
     deleteProjectV2StatusUpdate(
         input: DeleteProjectV2StatusUpdateInput!
   ): DeleteProjectV2StatusUpdatePayload @docsCategory(name: "projects")
+    deleteProjectV2View(
+        input: DeleteProjectV2ViewInput!
+  ): DeleteProjectV2ViewPayload @docsCategory(name: "projects")
     deleteProjectV2Workflow(
         input: DeleteProjectV2WorkflowInput!
   ): DeleteProjectV2WorkflowPayload @docsCategory(name: "projects")
@@ -7395,6 +7442,9 @@ type Mutation @docsCategory(name: "meta") {
     updateProjectV2StatusUpdate(
         input: UpdateProjectV2StatusUpdateInput!
   ): UpdateProjectV2StatusUpdatePayload @docsCategory(name: "projects")
+    updateProjectV2View(
+        input: UpdateProjectV2ViewInput!
+  ): UpdateProjectV2ViewPayload @docsCategory(name: "projects")
     updatePullRequest(
         input: UpdatePullRequestInput!
   ): UpdatePullRequestPayload @docsCategory(name: "pulls")
@@ -11515,6 +11565,7 @@ type ProjectV2Connection {
 enum ProjectV2CustomFieldType @docsCategory(name: "projects") {
     DATE
     ITERATION
+    MULTI_SELECT
     NUMBER
     SINGLE_SELECT
     TEXT
@@ -11548,6 +11599,7 @@ interface ProjectV2FieldCommon @docsCategory(name: "projects") {
 union ProjectV2FieldConfiguration @docsCategory(name: "projects") =
   | ProjectV2Field
   | ProjectV2IterationField
+  | ProjectV2MultiSelectField
   | ProjectV2SingleSelectField
 type ProjectV2FieldConfigurationConnection {
     edges: [ProjectV2FieldConfigurationEdge]
@@ -11588,6 +11640,7 @@ enum ProjectV2FieldType @docsCategory(name: "projects") {
     LABELS
     LINKED_PULL_REQUESTS
     MILESTONE
+    MULTI_SELECT
     NUMBER
     PARENT_ISSUE
     REPOSITORY
@@ -11603,6 +11656,7 @@ enum ProjectV2FieldType @docsCategory(name: "projects") {
 input ProjectV2FieldValue @docsCategory(name: "projects") {
     date: Date
     iterationId: String
+    multiSelectOptionIds: [String!]
     number: Float
     singleSelectOptionId: String
     text: String
@@ -11693,6 +11747,18 @@ type ProjectV2ItemFieldMilestoneValue @docsCategory(name: "projects") {
     field: ProjectV2FieldConfiguration!
     milestone: Milestone
 }
+type ProjectV2ItemFieldMultiSelectValue implements Node & ProjectV2ItemFieldValueCommon
+  @docsCategory(name: "projects") {
+    createdAt: DateTime!
+    creator: Actor
+    databaseId: Int
+    field: ProjectV2FieldConfiguration!
+    id: ID!
+    item: ProjectV2Item!
+    options: [ProjectV2MultiSelectFieldOption!]
+    updatedAt: DateTime!
+    value: String!
+}
 type ProjectV2ItemFieldNumberValue implements Node & ProjectV2ItemFieldValueCommon @docsCategory(name: "projects") {
     createdAt: DateTime!
     creator: Actor
@@ -11766,6 +11832,7 @@ union ProjectV2ItemFieldValue @docsCategory(name: "projects") =
   | ProjectV2ItemFieldIterationValue
   | ProjectV2ItemFieldLabelValue
   | ProjectV2ItemFieldMilestoneValue
+  | ProjectV2ItemFieldMultiSelectValue
   | ProjectV2ItemFieldNumberValue
   | ProjectV2ItemFieldPullRequestValue
   | ProjectV2ItemFieldRepositoryValue
@@ -11858,6 +11925,32 @@ type ProjectV2IterationFieldIteration @docsCategory(name: "projects") {
     startDate: Date!
     title: String!
     titleHTML: String!
+}
+type ProjectV2MultiSelectField implements Node & ProjectV2FieldCommon @docsCategory(name: "projects") {
+    createdAt: DateTime!
+    dataType: ProjectV2FieldType!
+    databaseId: Int
+    id: ID!
+    multiSelectOptions(
+        names: [String!]
+  ): [ProjectV2MultiSelectFieldOption!]!
+    name: String!
+    project: ProjectV2!
+    updatedAt: DateTime!
+}
+type ProjectV2MultiSelectFieldOption @docsCategory(name: "projects") {
+    color: ProjectV2SingleSelectFieldOptionColor!
+    description: String!
+    descriptionHTML: String!
+    id: String!
+    name: String!
+    nameHTML: String!
+}
+input ProjectV2MultiSelectFieldOptionInput @docsCategory(name: "projects") {
+    color: ProjectV2SingleSelectFieldOptionColor!
+    description: String!
+    id: String
+    name: String!
 }
 input ProjectV2Order @docsCategory(name: "projects") {
     direction: OrderDirection!
@@ -12013,6 +12106,7 @@ enum ProjectV2StatusUpdateStatus @docsCategory(name: "projects") {
     ON_TRACK
 }
 type ProjectV2View implements Node @docsCategory(name: "projects") {
+    configuration: ProjectV2ViewConfiguration!
     createdAt: DateTime!
     databaseId: Int
     @deprecated(
@@ -12093,6 +12187,26 @@ type ProjectV2View implements Node @docsCategory(name: "projects") {
       reason: "The `ProjectV2View#visibleFields` API is deprecated in favour of the more capable `ProjectV2View#fields` API. Check out the `ProjectV2View#fields` API as an example for the more capable alternative. Removal on 2023-01-01 UTC."
     )
 }
+type ProjectV2ViewConfiguration @docsCategory(name: "projects") {
+    visibleFields(
+        after: String
+        before: String
+        first: Int
+        last: Int
+  ): ProjectV2FieldConfigurationConnection!
+}
+input ProjectV2ViewConfigurationInput @docsCategory(name: "projects") {
+    visibleFieldIds: [ID!]
+    @possibleTypes(
+      concreteTypes: [
+        "ProjectV2Field"
+        "ProjectV2IterationField"
+        "ProjectV2MultiSelectField"
+        "ProjectV2SingleSelectField"
+      ]
+      abstractType: "ProjectV2FieldConfiguration"
+    )
+}
 type ProjectV2ViewConnection {
     edges: [ProjectV2ViewEdge]
     nodes: [ProjectV2View]
@@ -12163,6 +12277,7 @@ enum ProofOfPresenceRequirement @docsCategory(name: "enterprise-admin") {
     MFA
     NO_POLICY
     REAUTH
+    SECURITY_KEY
 }
 type PropertyTargetDefinition @docsCategory(name: "repos") {
     name: String!
@@ -18859,6 +18974,7 @@ type UnlabeledEvent implements Node @docsCategory(name: "issues") {
     label: Label!
     labelable: Labelable!
     rationale: IssueEventRationale
+    @deprecated(reason: "Use `intent` instead. This field is being removed and now always returns null.")
 }
 input UnlinkProjectV2FromRepositoryInput {
     clientMutationId: String
@@ -19539,10 +19655,16 @@ input UpdateProjectV2FieldInput {
     clientMutationId: String
     fieldId: ID!
     @possibleTypes(
-      concreteTypes: ["ProjectV2Field", "ProjectV2IterationField", "ProjectV2SingleSelectField"]
+      concreteTypes: [
+        "ProjectV2Field"
+        "ProjectV2IterationField"
+        "ProjectV2MultiSelectField"
+        "ProjectV2SingleSelectField"
+      ]
       abstractType: "ProjectV2FieldConfiguration"
     )
     iterationConfiguration: ProjectV2IterationFieldConfigurationInput
+    multiSelectOptions: [ProjectV2MultiSelectFieldOptionInput!]
     name: String
     singleSelectOptions: [ProjectV2SingleSelectFieldOptionInput!]
 }
@@ -19563,7 +19685,12 @@ input UpdateProjectV2ItemFieldValueInput {
     clientMutationId: String
     fieldId: ID!
     @possibleTypes(
-      concreteTypes: ["ProjectV2Field", "ProjectV2IterationField", "ProjectV2SingleSelectField"]
+      concreteTypes: [
+        "ProjectV2Field"
+        "ProjectV2IterationField"
+        "ProjectV2MultiSelectField"
+        "ProjectV2SingleSelectField"
+      ]
       abstractType: "ProjectV2FieldConfiguration"
     )
     itemId: ID! @possibleTypes(concreteTypes: ["ProjectV2Item"])
@@ -19604,6 +19731,18 @@ input UpdateProjectV2StatusUpdateInput {
 type UpdateProjectV2StatusUpdatePayload {
     clientMutationId: String
     statusUpdate: ProjectV2StatusUpdate
+}
+input UpdateProjectV2ViewInput {
+    clientMutationId: String
+    configuration: ProjectV2ViewConfigurationInput
+    filter: String
+    layout: ProjectV2ViewLayout
+    name: String
+    viewId: ID! @possibleTypes(concreteTypes: ["ProjectV2View"])
+}
+type UpdateProjectV2ViewPayload {
+    clientMutationId: String
+    projectV2View: ProjectV2View
 }
 input UpdatePullRequestBranchInput {
     clientMutationId: String
