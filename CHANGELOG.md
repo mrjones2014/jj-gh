@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.11](https://github.com/mrjones2014/jj-gh/compare/jj-gh-v0.2.10...jj-gh-v0.2.11) - 2026-08-07
+
+### Added
+
+- *(completions)* add `nushell` completions
+- *(nix)* use `home-manager`'s standard idiom for shell integration
+
+### Fixed
+
+- *(deps)* update cargo minor and patch
+- *(deps)* update rust crate syn to v3
+- *(nix)* use `zsh.initContent` instead of `zsh.initExtra`
+- *(deps)* update cargo minor and patch
+- *(deps)* update cargo minor and patch
+
+### Other
+
+- *(deps)* lock file maintenance
+- *(dpes)* update GitHub GraphQL schema ([#252](https://github.com/mrjones2014/jj-gh/pull/252))
+- *(dpes)* update GitHub GraphQL schema ([#241](https://github.com/mrjones2014/jj-gh/pull/241))
+- *(dpes)* update GitHub GraphQL schema ([#239](https://github.com/mrjones2014/jj-gh/pull/239))
+- *(dpes)* update GitHub GraphQL schema ([#237](https://github.com/mrjones2014/jj-gh/pull/237))
+- *(dpes)* update GitHub GraphQL schema
+
 ## [0.2.10](https://github.com/mrjones2014/jj-gh/compare/jj-gh-v0.2.9...jj-gh-v0.2.10) - 2026-07-09
 
 ### Fixed
