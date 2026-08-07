@@ -6457,6 +6457,7 @@ enum MigrationSourceType @docsCategory(name: "migrations") {
     AZURE_DEVOPS
     BITBUCKET_SERVER
     GITHUB_ARCHIVE
+    GITLAB
 }
 enum MigrationState @docsCategory(name: "migrations") {
     FAILED
