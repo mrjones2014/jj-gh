@@ -1469,8 +1469,14 @@ input CommitAuthorEmailPatternParametersInput @docsCategory(name: "commits") {
     operator: String!
     pattern: String!
 }
-type CommitComment implements Comment & Deletable & Minimizable & Node & Reactable & RepositoryNode & Updatable & UpdatableComment
-  @docsCategory(name: "commits") {
+type CommitComment implements Comment &
+  Deletable &
+  Minimizable &
+  Node &
+  Reactable &
+  RepositoryNode &
+  Updatable &
+  UpdatableComment @docsCategory(name: "commits") {
     author: Actor
     authorAssociation: CommentAuthorAssociation!
     body: String!
@@ -2098,7 +2104,7 @@ input CreateIssueTypeInput {
     description: String
     isEnabled: Boolean!
     name: String!
-    ownerId: ID! @possibleTypes(concreteTypes: ["Organization"])
+    ownerId: ID!
 }
 type CreateIssueTypePayload {
     clientMutationId: String
@@ -3088,8 +3094,17 @@ type DisconnectedEvent implements Node @docsCategory(name: "issues") {
     source: ReferencedSubject!
     subject: ReferencedSubject!
 }
-type Discussion implements Closable & Comment & Deletable & Labelable & Lockable & Node & Reactable & RepositoryNode & Subscribable & Updatable & Votable
-  @docsCategory(name: "discussions") {
+type Discussion implements Closable &
+  Comment &
+  Deletable &
+  Labelable &
+  Lockable &
+  Node &
+  Reactable &
+  RepositoryNode &
+  Subscribable &
+  Updatable &
+  Votable @docsCategory(name: "discussions") {
     activeLockReason: LockReason
     answer: DiscussionComment
     answerChosenAt: DateTime
@@ -3188,8 +3203,14 @@ enum DiscussionCloseReason @docsCategory(name: "discussions") {
     OUTDATED
     RESOLVED
 }
-type DiscussionComment implements Comment & Deletable & Minimizable & Node & Reactable & Updatable & UpdatableComment & Votable
-  @docsCategory(name: "discussions") {
+type DiscussionComment implements Comment &
+  Deletable &
+  Minimizable &
+  Node &
+  Reactable &
+  Updatable &
+  UpdatableComment &
+  Votable @docsCategory(name: "discussions") {
     author: Actor
     authorAssociation: CommentAuthorAssociation!
     body: String!
@@ -4772,8 +4793,21 @@ enum IpAllowListUserLevelEnforcementEnabledSettingValue @docsCategory(name: "ent
     DISABLED
     ENABLED
 }
-type Issue implements Assignable & Closable & Comment & Deletable & Labelable & Lockable & Node & ProjectV2Owner & Reactable & RepositoryNode & Subscribable & SubscribableThread & UniformResourceLocatable & Updatable & UpdatableComment
-  @docsCategory(name: "issues") {
+type Issue implements Assignable &
+  Closable &
+  Comment &
+  Deletable &
+  Labelable &
+  Lockable &
+  Node &
+  ProjectV2Owner &
+  Reactable &
+  RepositoryNode &
+  Subscribable &
+  SubscribableThread &
+  UniformResourceLocatable &
+  Updatable &
+  UpdatableComment @docsCategory(name: "issues") {
     activeLockReason: LockReason
     assignedActors(
         after: String
@@ -5001,8 +5035,15 @@ enum IssueClosedStateReason @docsCategory(name: "issues") {
     DUPLICATE
     NOT_PLANNED
 }
-type IssueComment implements Comment & Deletable & Minimizable & Node & Pinnable & Reactable & RepositoryNode & Updatable & UpdatableComment
-  @docsCategory(name: "issues") {
+type IssueComment implements Comment &
+  Deletable &
+  Minimizable &
+  Node &
+  Pinnable &
+  Reactable &
+  RepositoryNode &
+  Updatable &
+  UpdatableComment @docsCategory(name: "issues") {
     author: Actor
     authorAssociation: CommentAuthorAssociation!
     body: String!
@@ -5338,6 +5379,17 @@ type IssueFieldValueEdge {
     cursor: String!
     node: IssueFieldValue
 }
+input IssueFieldValueFilter {
+    dateValue: String
+    fieldId: ID
+    fieldName: String
+    multiSelectOptionIds: [ID!]
+    multiSelectOptionValues: [String!]
+    numberValue: Float
+    singleSelectOptionId: ID
+    singleSelectOptionValue: String
+    textValue: String
+}
 enum IssueFieldVisibility @docsCategory(name: "issues") {
     ALL
     ORG_ONLY
@@ -5361,6 +5413,7 @@ type IssueFieldsEdge {
 input IssueFilters @docsCategory(name: "issues") {
     assignee: String
     createdBy: String
+    issueFieldValues: [IssueFieldValueFilter!]
     labels: [String!]
     mentioned: String
     milestone: String
@@ -6054,8 +6107,10 @@ interface MemberStatusable @docsCategory(name: "users") {
         orderBy: UserStatusOrder = {field: UPDATED_AT, direction: DESC}
   ): UserStatusConnection!
 }
-type MembersCanDeleteReposClearAuditEntry implements AuditEntry & EnterpriseAuditEntryData & Node & OrganizationAuditEntryData
-  @docsCategory(name: "enterprise-admin") {
+type MembersCanDeleteReposClearAuditEntry implements AuditEntry &
+  EnterpriseAuditEntryData &
+  Node &
+  OrganizationAuditEntryData @docsCategory(name: "enterprise-admin") {
     action: String!
     @deprecated(
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
@@ -6129,8 +6184,10 @@ type MembersCanDeleteReposClearAuditEntry implements AuditEntry & EnterpriseAudi
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
     )
 }
-type MembersCanDeleteReposDisableAuditEntry implements AuditEntry & EnterpriseAuditEntryData & Node & OrganizationAuditEntryData
-  @docsCategory(name: "enterprise-admin") {
+type MembersCanDeleteReposDisableAuditEntry implements AuditEntry &
+  EnterpriseAuditEntryData &
+  Node &
+  OrganizationAuditEntryData @docsCategory(name: "enterprise-admin") {
     action: String!
     @deprecated(
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
@@ -6204,8 +6261,10 @@ type MembersCanDeleteReposDisableAuditEntry implements AuditEntry & EnterpriseAu
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
     )
 }
-type MembersCanDeleteReposEnableAuditEntry implements AuditEntry & EnterpriseAuditEntryData & Node & OrganizationAuditEntryData
-  @docsCategory(name: "enterprise-admin") {
+type MembersCanDeleteReposEnableAuditEntry implements AuditEntry &
+  EnterpriseAuditEntryData &
+  Node &
+  OrganizationAuditEntryData @docsCategory(name: "enterprise-admin") {
     action: String!
     @deprecated(
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
@@ -7531,8 +7590,10 @@ interface OauthApplicationAuditEntryData @docsCategory(name: "apps") {
     oauthApplicationResourcePath: URI
     oauthApplicationUrl: URI
 }
-type OauthApplicationCreateAuditEntry implements AuditEntry & Node & OauthApplicationAuditEntryData & OrganizationAuditEntryData
-  @docsCategory(name: "enterprise-admin") {
+type OauthApplicationCreateAuditEntry implements AuditEntry &
+  Node &
+  OauthApplicationAuditEntryData &
+  OrganizationAuditEntryData @docsCategory(name: "enterprise-admin") {
     action: String!
     @deprecated(
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
@@ -8731,8 +8792,10 @@ type OrgInviteToBusinessAuditEntry implements AuditEntry & EnterpriseAuditEntryD
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
     )
 }
-type OrgOauthAppAccessApprovedAuditEntry implements AuditEntry & Node & OauthApplicationAuditEntryData & OrganizationAuditEntryData
-  @docsCategory(name: "orgs") {
+type OrgOauthAppAccessApprovedAuditEntry implements AuditEntry &
+  Node &
+  OauthApplicationAuditEntryData &
+  OrganizationAuditEntryData @docsCategory(name: "orgs") {
     action: String!
     @deprecated(
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
@@ -8806,8 +8869,10 @@ type OrgOauthAppAccessApprovedAuditEntry implements AuditEntry & Node & OauthApp
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
     )
 }
-type OrgOauthAppAccessBlockedAuditEntry implements AuditEntry & Node & OauthApplicationAuditEntryData & OrganizationAuditEntryData
-  @docsCategory(name: "orgs") {
+type OrgOauthAppAccessBlockedAuditEntry implements AuditEntry &
+  Node &
+  OauthApplicationAuditEntryData &
+  OrganizationAuditEntryData @docsCategory(name: "orgs") {
     action: String!
     @deprecated(
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
@@ -8881,8 +8946,10 @@ type OrgOauthAppAccessBlockedAuditEntry implements AuditEntry & Node & OauthAppl
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
     )
 }
-type OrgOauthAppAccessDeniedAuditEntry implements AuditEntry & Node & OauthApplicationAuditEntryData & OrganizationAuditEntryData
-  @docsCategory(name: "orgs") {
+type OrgOauthAppAccessDeniedAuditEntry implements AuditEntry &
+  Node &
+  OauthApplicationAuditEntryData &
+  OrganizationAuditEntryData @docsCategory(name: "orgs") {
     action: String!
     @deprecated(
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
@@ -8956,8 +9023,10 @@ type OrgOauthAppAccessDeniedAuditEntry implements AuditEntry & Node & OauthAppli
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
     )
 }
-type OrgOauthAppAccessRequestedAuditEntry implements AuditEntry & Node & OauthApplicationAuditEntryData & OrganizationAuditEntryData
-  @docsCategory(name: "orgs") {
+type OrgOauthAppAccessRequestedAuditEntry implements AuditEntry &
+  Node &
+  OauthApplicationAuditEntryData &
+  OrganizationAuditEntryData @docsCategory(name: "orgs") {
     action: String!
     @deprecated(
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
@@ -9031,8 +9100,10 @@ type OrgOauthAppAccessRequestedAuditEntry implements AuditEntry & Node & OauthAp
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
     )
 }
-type OrgOauthAppAccessUnblockedAuditEntry implements AuditEntry & Node & OauthApplicationAuditEntryData & OrganizationAuditEntryData
-  @docsCategory(name: "orgs") {
+type OrgOauthAppAccessUnblockedAuditEntry implements AuditEntry &
+  Node &
+  OauthApplicationAuditEntryData &
+  OrganizationAuditEntryData @docsCategory(name: "orgs") {
     action: String!
     @deprecated(
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
@@ -9927,8 +9998,19 @@ type OrgUpdateMemberRepositoryInvitationPermissionAuditEntry implements AuditEnt
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
     )
 }
-type Organization implements Actor & MemberStatusable & Node & PackageOwner & ProfileOwner & ProjectOwner & ProjectV2Owner & ProjectV2Recent & RepositoryDiscussionAuthor & RepositoryDiscussionCommentAuthor & RepositoryOwner & Sponsorable & UniformResourceLocatable
-  @docsCategory(name: "orgs") {
+type Organization implements Actor &
+  MemberStatusable &
+  Node &
+  PackageOwner &
+  ProfileOwner &
+  ProjectOwner &
+  ProjectV2Owner &
+  ProjectV2Recent &
+  RepositoryDiscussionAuthor &
+  RepositoryDiscussionCommentAuthor &
+  RepositoryOwner &
+  Sponsorable &
+  UniformResourceLocatable @docsCategory(name: "orgs") {
     announcementBanner: AnnouncementBanner
     anyPinnableItems(
         type: PinnableItemType
@@ -10064,6 +10146,12 @@ type Organization implements Actor & MemberStatusable & Node & PackageOwner & Pr
         last: Int
         types: [PinnableItemType!]
   ): PinnableItemConnection!
+    pinnedIssueFields(
+        after: String
+        before: String
+        first: Int
+        last: Int
+  ): IssueFieldsConnection
     pinnedItems(
         after: String
         before: String
@@ -10932,8 +11020,11 @@ type PinnedIssueEdge {
     node: PinnedIssue
 }
 scalar PreciseDateTime
-type PrivateRepositoryForkingDisableAuditEntry implements AuditEntry & EnterpriseAuditEntryData & Node & OrganizationAuditEntryData & RepositoryAuditEntryData
-  @docsCategory(name: "enterprise-admin") {
+type PrivateRepositoryForkingDisableAuditEntry implements AuditEntry &
+  EnterpriseAuditEntryData &
+  Node &
+  OrganizationAuditEntryData &
+  RepositoryAuditEntryData @docsCategory(name: "enterprise-admin") {
     action: String!
     @deprecated(
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
@@ -11011,8 +11102,11 @@ type PrivateRepositoryForkingDisableAuditEntry implements AuditEntry & Enterpris
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
     )
 }
-type PrivateRepositoryForkingEnableAuditEntry implements AuditEntry & EnterpriseAuditEntryData & Node & OrganizationAuditEntryData & RepositoryAuditEntryData
-  @docsCategory(name: "enterprise-admin") {
+type PrivateRepositoryForkingEnableAuditEntry implements AuditEntry &
+  EnterpriseAuditEntryData &
+  Node &
+  OrganizationAuditEntryData &
+  RepositoryAuditEntryData @docsCategory(name: "enterprise-admin") {
     action: String!
     @deprecated(
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
@@ -11584,6 +11678,8 @@ type ProjectV2Field implements Node & ProjectV2FieldCommon @docsCategory(name: "
     dataType: ProjectV2FieldType!
     databaseId: Int
     id: ID!
+    isIssueField: Boolean!
+    issueField: IssueFields
     name: String!
     project: ProjectV2!
     updatedAt: DateTime!
@@ -11593,6 +11689,7 @@ interface ProjectV2FieldCommon @docsCategory(name: "projects") {
     dataType: ProjectV2FieldType!
     databaseId: Int
     id: ID!
+    isIssueField: Boolean!
     name: String!
     project: ProjectV2!
     updatedAt: DateTime!
@@ -11905,6 +12002,7 @@ type ProjectV2IterationField implements Node & ProjectV2FieldCommon @docsCategor
     dataType: ProjectV2FieldType!
     databaseId: Int
     id: ID!
+    isIssueField: Boolean!
     name: String!
     project: ProjectV2!
     updatedAt: DateTime!
@@ -11932,6 +12030,8 @@ type ProjectV2MultiSelectField implements Node & ProjectV2FieldCommon @docsCateg
     dataType: ProjectV2FieldType!
     databaseId: Int
     id: ID!
+    isIssueField: Boolean!
+    issueField: IssueFields
     multiSelectOptions(
         names: [String!]
   ): [ProjectV2MultiSelectFieldOption!]!
@@ -12002,6 +12102,8 @@ type ProjectV2SingleSelectField implements Node & ProjectV2FieldCommon @docsCate
     dataType: ProjectV2FieldType!
     databaseId: Int
     id: ID!
+    isIssueField: Boolean!
+    issueField: IssueFields
     name: String!
     options(
         names: [String!]
@@ -12317,8 +12419,19 @@ type PublishSponsorsTierPayload {
     clientMutationId: String
     sponsorsTier: SponsorsTier
 }
-type PullRequest implements Assignable & Closable & Comment & Labelable & Lockable & Node & ProjectV2Owner & Reactable & RepositoryNode & Subscribable & UniformResourceLocatable & Updatable & UpdatableComment
-  @docsCategory(name: "pulls") {
+type PullRequest implements Assignable &
+  Closable &
+  Comment &
+  Labelable &
+  Lockable &
+  Node &
+  ProjectV2Owner &
+  Reactable &
+  RepositoryNode &
+  Subscribable &
+  UniformResourceLocatable &
+  Updatable &
+  UpdatableComment @docsCategory(name: "pulls") {
     activeLockReason: LockReason
     additions: Int!
     assignedActors(
@@ -12700,8 +12813,14 @@ input PullRequestParametersInput @docsCategory(name: "pulls") {
     requiredReviewThreadResolution: Boolean!
     requiredReviewers: [RequiredReviewerConfigurationInput!]
 }
-type PullRequestReview implements Comment & Deletable & Minimizable & Node & Reactable & RepositoryNode & Updatable & UpdatableComment
-  @docsCategory(name: "pulls") {
+type PullRequestReview implements Comment &
+  Deletable &
+  Minimizable &
+  Node &
+  Reactable &
+  RepositoryNode &
+  Updatable &
+  UpdatableComment @docsCategory(name: "pulls") {
     author: Actor
     authorAssociation: CommentAuthorAssociation!
     authorCanPushToRepository: Boolean!
@@ -12765,8 +12884,14 @@ type PullRequestReview implements Comment & Deletable & Minimizable & Node & Rea
     viewerCannotUpdateReasons: [CommentCannotUpdateReason!]!
     viewerDidAuthor: Boolean!
 }
-type PullRequestReviewComment implements Comment & Deletable & Minimizable & Node & Reactable & RepositoryNode & Updatable & UpdatableComment
-  @docsCategory(name: "pulls") {
+type PullRequestReviewComment implements Comment &
+  Deletable &
+  Minimizable &
+  Node &
+  Reactable &
+  RepositoryNode &
+  Updatable &
+  UpdatableComment @docsCategory(name: "pulls") {
     author: Actor
     authorAssociation: CommentAuthorAssociation!
     body: String!
@@ -14123,8 +14248,11 @@ enum RepoAddMemberAuditEntryVisibility @docsCategory(name: "repos") {
     PRIVATE
     PUBLIC
 }
-type RepoAddTopicAuditEntry implements AuditEntry & Node & OrganizationAuditEntryData & RepositoryAuditEntryData & TopicAuditEntryData
-  @docsCategory(name: "repos") {
+type RepoAddTopicAuditEntry implements AuditEntry &
+  Node &
+  OrganizationAuditEntryData &
+  RepositoryAuditEntryData &
+  TopicAuditEntryData @docsCategory(name: "repos") {
     action: String!
     @deprecated(
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
@@ -14286,8 +14414,10 @@ enum RepoArchivedAuditEntryVisibility @docsCategory(name: "repos") {
     PRIVATE
     PUBLIC
 }
-type RepoChangeMergeSettingAuditEntry implements AuditEntry & Node & OrganizationAuditEntryData & RepositoryAuditEntryData
-  @docsCategory(name: "repos") {
+type RepoChangeMergeSettingAuditEntry implements AuditEntry &
+  Node &
+  OrganizationAuditEntryData &
+  RepositoryAuditEntryData @docsCategory(name: "repos") {
     action: String!
     @deprecated(
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
@@ -14375,8 +14505,10 @@ enum RepoChangeMergeSettingAuditEntryMergeType @docsCategory(name: "repos") {
     REBASE
     SQUASH
 }
-type RepoConfigDisableAnonymousGitAccessAuditEntry implements AuditEntry & Node & OrganizationAuditEntryData & RepositoryAuditEntryData
-  @docsCategory(name: "enterprise-admin") {
+type RepoConfigDisableAnonymousGitAccessAuditEntry implements AuditEntry &
+  Node &
+  OrganizationAuditEntryData &
+  RepositoryAuditEntryData @docsCategory(name: "enterprise-admin") {
     action: String!
     @deprecated(
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
@@ -14451,8 +14583,10 @@ type RepoConfigDisableAnonymousGitAccessAuditEntry implements AuditEntry & Node 
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
     )
 }
-type RepoConfigDisableCollaboratorsOnlyAuditEntry implements AuditEntry & Node & OrganizationAuditEntryData & RepositoryAuditEntryData
-  @docsCategory(name: "enterprise-admin") {
+type RepoConfigDisableCollaboratorsOnlyAuditEntry implements AuditEntry &
+  Node &
+  OrganizationAuditEntryData &
+  RepositoryAuditEntryData @docsCategory(name: "enterprise-admin") {
     action: String!
     @deprecated(
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
@@ -14527,8 +14661,10 @@ type RepoConfigDisableCollaboratorsOnlyAuditEntry implements AuditEntry & Node &
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
     )
 }
-type RepoConfigDisableContributorsOnlyAuditEntry implements AuditEntry & Node & OrganizationAuditEntryData & RepositoryAuditEntryData
-  @docsCategory(name: "enterprise-admin") {
+type RepoConfigDisableContributorsOnlyAuditEntry implements AuditEntry &
+  Node &
+  OrganizationAuditEntryData &
+  RepositoryAuditEntryData @docsCategory(name: "enterprise-admin") {
     action: String!
     @deprecated(
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
@@ -14603,8 +14739,10 @@ type RepoConfigDisableContributorsOnlyAuditEntry implements AuditEntry & Node & 
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
     )
 }
-type RepoConfigDisableSockpuppetDisallowedAuditEntry implements AuditEntry & Node & OrganizationAuditEntryData & RepositoryAuditEntryData
-  @docsCategory(name: "enterprise-admin") {
+type RepoConfigDisableSockpuppetDisallowedAuditEntry implements AuditEntry &
+  Node &
+  OrganizationAuditEntryData &
+  RepositoryAuditEntryData @docsCategory(name: "enterprise-admin") {
     action: String!
     @deprecated(
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
@@ -14679,8 +14817,10 @@ type RepoConfigDisableSockpuppetDisallowedAuditEntry implements AuditEntry & Nod
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
     )
 }
-type RepoConfigEnableAnonymousGitAccessAuditEntry implements AuditEntry & Node & OrganizationAuditEntryData & RepositoryAuditEntryData
-  @docsCategory(name: "enterprise-admin") {
+type RepoConfigEnableAnonymousGitAccessAuditEntry implements AuditEntry &
+  Node &
+  OrganizationAuditEntryData &
+  RepositoryAuditEntryData @docsCategory(name: "enterprise-admin") {
     action: String!
     @deprecated(
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
@@ -14755,8 +14895,10 @@ type RepoConfigEnableAnonymousGitAccessAuditEntry implements AuditEntry & Node &
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
     )
 }
-type RepoConfigEnableCollaboratorsOnlyAuditEntry implements AuditEntry & Node & OrganizationAuditEntryData & RepositoryAuditEntryData
-  @docsCategory(name: "enterprise-admin") {
+type RepoConfigEnableCollaboratorsOnlyAuditEntry implements AuditEntry &
+  Node &
+  OrganizationAuditEntryData &
+  RepositoryAuditEntryData @docsCategory(name: "enterprise-admin") {
     action: String!
     @deprecated(
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
@@ -14831,8 +14973,10 @@ type RepoConfigEnableCollaboratorsOnlyAuditEntry implements AuditEntry & Node & 
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
     )
 }
-type RepoConfigEnableContributorsOnlyAuditEntry implements AuditEntry & Node & OrganizationAuditEntryData & RepositoryAuditEntryData
-  @docsCategory(name: "enterprise-admin") {
+type RepoConfigEnableContributorsOnlyAuditEntry implements AuditEntry &
+  Node &
+  OrganizationAuditEntryData &
+  RepositoryAuditEntryData @docsCategory(name: "enterprise-admin") {
     action: String!
     @deprecated(
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
@@ -14907,8 +15051,10 @@ type RepoConfigEnableContributorsOnlyAuditEntry implements AuditEntry & Node & O
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
     )
 }
-type RepoConfigEnableSockpuppetDisallowedAuditEntry implements AuditEntry & Node & OrganizationAuditEntryData & RepositoryAuditEntryData
-  @docsCategory(name: "enterprise-admin") {
+type RepoConfigEnableSockpuppetDisallowedAuditEntry implements AuditEntry &
+  Node &
+  OrganizationAuditEntryData &
+  RepositoryAuditEntryData @docsCategory(name: "enterprise-admin") {
     action: String!
     @deprecated(
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
@@ -14983,8 +15129,10 @@ type RepoConfigEnableSockpuppetDisallowedAuditEntry implements AuditEntry & Node
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
     )
 }
-type RepoConfigLockAnonymousGitAccessAuditEntry implements AuditEntry & Node & OrganizationAuditEntryData & RepositoryAuditEntryData
-  @docsCategory(name: "enterprise-admin") {
+type RepoConfigLockAnonymousGitAccessAuditEntry implements AuditEntry &
+  Node &
+  OrganizationAuditEntryData &
+  RepositoryAuditEntryData @docsCategory(name: "enterprise-admin") {
     action: String!
     @deprecated(
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
@@ -15059,8 +15207,10 @@ type RepoConfigLockAnonymousGitAccessAuditEntry implements AuditEntry & Node & O
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
     )
 }
-type RepoConfigUnlockAnonymousGitAccessAuditEntry implements AuditEntry & Node & OrganizationAuditEntryData & RepositoryAuditEntryData
-  @docsCategory(name: "enterprise-admin") {
+type RepoConfigUnlockAnonymousGitAccessAuditEntry implements AuditEntry &
+  Node &
+  OrganizationAuditEntryData &
+  RepositoryAuditEntryData @docsCategory(name: "enterprise-admin") {
     action: String!
     @deprecated(
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
@@ -15398,8 +15548,11 @@ enum RepoRemoveMemberAuditEntryVisibility @docsCategory(name: "repos") {
     PRIVATE
     PUBLIC
 }
-type RepoRemoveTopicAuditEntry implements AuditEntry & Node & OrganizationAuditEntryData & RepositoryAuditEntryData & TopicAuditEntryData
-  @docsCategory(name: "repos") {
+type RepoRemoveTopicAuditEntry implements AuditEntry &
+  Node &
+  OrganizationAuditEntryData &
+  RepositoryAuditEntryData &
+  TopicAuditEntryData @docsCategory(name: "repos") {
     action: String!
     @deprecated(
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
@@ -15485,8 +15638,14 @@ enum ReportedContentClassifiers @docsCategory(name: "meta") {
     RESOLVED
     SPAM
 }
-type Repository implements Node & PackageOwner & ProjectOwner & ProjectV2Recent & RepositoryInfo & Starrable & Subscribable & UniformResourceLocatable
-  @docsCategory(name: "repos") {
+type Repository implements Node &
+  PackageOwner &
+  ProjectOwner &
+  ProjectV2Recent &
+  RepositoryInfo &
+  Starrable &
+  Subscribable &
+  UniformResourceLocatable @docsCategory(name: "repos") {
     allowUpdateBranch: Boolean!
     archivedAt: DateTime
     assignableUsers(
@@ -16448,8 +16607,10 @@ enum RepositoryVisibility @docsCategory(name: "repos") {
     PRIVATE
     PUBLIC
 }
-type RepositoryVisibilityChangeDisableAuditEntry implements AuditEntry & EnterpriseAuditEntryData & Node & OrganizationAuditEntryData
-  @docsCategory(name: "enterprise-admin") {
+type RepositoryVisibilityChangeDisableAuditEntry implements AuditEntry &
+  EnterpriseAuditEntryData &
+  Node &
+  OrganizationAuditEntryData @docsCategory(name: "enterprise-admin") {
     action: String!
     @deprecated(
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
@@ -16523,8 +16684,10 @@ type RepositoryVisibilityChangeDisableAuditEntry implements AuditEntry & Enterpr
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
     )
 }
-type RepositoryVisibilityChangeEnableAuditEntry implements AuditEntry & EnterpriseAuditEntryData & Node & OrganizationAuditEntryData
-  @docsCategory(name: "enterprise-admin") {
+type RepositoryVisibilityChangeEnableAuditEntry implements AuditEntry &
+  EnterpriseAuditEntryData &
+  Node &
+  OrganizationAuditEntryData @docsCategory(name: "enterprise-admin") {
     action: String!
     @deprecated(
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
@@ -18318,8 +18481,11 @@ type TeamAddMemberAuditEntry implements AuditEntry & Node & OrganizationAuditEnt
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
     )
 }
-type TeamAddRepositoryAuditEntry implements AuditEntry & Node & OrganizationAuditEntryData & RepositoryAuditEntryData & TeamAuditEntryData
-  @docsCategory(name: "teams") {
+type TeamAddRepositoryAuditEntry implements AuditEntry &
+  Node &
+  OrganizationAuditEntryData &
+  RepositoryAuditEntryData &
+  TeamAuditEntryData @docsCategory(name: "teams") {
     action: String!
     @deprecated(
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
@@ -18655,8 +18821,11 @@ type TeamRemoveMemberAuditEntry implements AuditEntry & Node & OrganizationAudit
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
     )
 }
-type TeamRemoveRepositoryAuditEntry implements AuditEntry & Node & OrganizationAuditEntryData & RepositoryAuditEntryData & TeamAuditEntryData
-  @docsCategory(name: "teams") {
+type TeamRemoveRepositoryAuditEntry implements AuditEntry &
+  Node &
+  OrganizationAuditEntryData &
+  RepositoryAuditEntryData &
+  TeamAuditEntryData @docsCategory(name: "teams") {
     action: String!
     @deprecated(
       reason: "The GraphQL audit-log is deprecated. Please use the REST API instead. Removal on 2026-04-01 UTC."
@@ -19954,8 +20123,19 @@ type UpdateUserListsForItemPayload {
     lists: [UserList!]
     user: User
 }
-type User implements Actor & Agentic & Node & PackageOwner & ProfileOwner & ProjectOwner & ProjectV2Owner & ProjectV2Recent & RepositoryDiscussionAuthor & RepositoryDiscussionCommentAuthor & RepositoryOwner & Sponsorable & UniformResourceLocatable
-  @docsCategory(name: "users") {
+type User implements Actor &
+  Agentic &
+  Node &
+  PackageOwner &
+  ProfileOwner &
+  ProjectOwner &
+  ProjectV2Owner &
+  ProjectV2Recent &
+  RepositoryDiscussionAuthor &
+  RepositoryDiscussionCommentAuthor &
+  RepositoryOwner &
+  Sponsorable &
+  UniformResourceLocatable @docsCategory(name: "users") {
     anyPinnableItems(
         type: PinnableItemType
   ): Boolean!
