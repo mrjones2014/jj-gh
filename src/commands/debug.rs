@@ -65,7 +65,7 @@ async fn print_rev(globals: &GlobalOpts, _config: &Config, rev: &str) -> Result<
         bookmarks,
     } = jj.resolve_rev(rev).await?;
     let ancestor = jj.stacked_ancestor_bookmark(rev).await?;
-    let title_revset = jj::title_base_revset(rev, ancestor.as_deref());
+    let title_revset = jj::title_base_revset(rev, ancestor.as_deref().unwrap_or("trunk()"));
     let default_title = jj.first_commit_description(&title_revset).await?;
 
     let origin_url = jj.remote_url(&remote).await?;

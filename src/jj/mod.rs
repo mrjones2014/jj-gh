@@ -252,16 +252,10 @@ pub fn remote_resolution_error(remote_names: &[String]) -> anyhow::Error {
     )
 }
 
-/// Compose the revset used to compute the default PR title.
-///
-/// With a stacked ancestor: commits introduced from the ancestor to `rev`. Without:
-/// commits introduced from trunk to `rev`.
+/// Make the revset from the selected PR base revision to `rev`.
 #[must_use]
-pub fn title_base_revset(rev: &str, ancestor: Option<&str>) -> String {
-    match ancestor {
-        Some(ancestor) => format!("({ancestor})..({rev})"),
-        None => format!("trunk()..({rev})"),
-    }
+pub fn title_base_revset(rev: &str, base_rev: &str) -> String {
+    format!("({base_rev})..({rev})")
 }
 
 /// Build a `jj` command line, prepending the program and the
@@ -278,15 +272,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn revset_with_ancestor() {
+    fn revset_with_stacked_base() {
         assert_eq!(
-            title_base_revset("@-", Some("mrj/push-foo")),
+            title_base_revset("@-", "mrj/push-foo"),
             "(mrj/push-foo)..(@-)"
         );
     }
 
     #[test]
-    fn revset_without_ancestor() {
-        assert_eq!(title_base_revset("@-", None), "trunk()..(@-)");
+    fn revset_with_trunk_base() {
+        assert_eq!(title_base_revset("@-", "trunk()"), "(trunk())..(@-)");
+    }
+
+    #[test]
+    fn revset_with_resolved_remote_base() {
+        assert_eq!(
+            title_base_revset("@-", "0123456789abcdef"),
+            "(0123456789abcdef)..(@-)"
+        );
     }
 }

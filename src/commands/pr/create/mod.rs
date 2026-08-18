@@ -202,24 +202,30 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
         }
     }
 
-    let ancestor = jj.stacked_ancestor_bookmark(rev).await?;
-    let base_branch = base
-        .resolve_or(
-            || async {
-                if let Some(a) = &ancestor {
-                    return Some(a.clone());
-                }
-                jj.trunk_branch()
-                    .await
-                    .inspect_err(|e| log::debug!("could not detect trunk bookmark: {e:#}"))
-                    .ok()
-                    .flatten()
-            },
+    // Jujutsu gives us the revision for an automatic base. For an explicit or
+    // configured base, find the revision on the target remote. A local bookmark
+    // with the same name can point to a different revision.
+    let (base_branch, local_base_rev) = if let Some(branch) = base.cli() {
+        (branch.clone(), None)
+    } else if let Some(ancestor) = jj.stacked_ancestor_bookmark(rev).await? {
+        (ancestor.clone(), Some(ancestor))
+    } else if let Some(trunk) = jj
+        .trunk_branch()
+        .await
+        .inspect_err(|e| log::debug!("could not detect trunk bookmark: {e:#}"))
+        .ok()
+        .flatten()
+    {
+        (trunk, Some("trunk()".to_string()))
+    } else if let Some(branch) = base.fallback() {
+        (branch.clone(), None)
+    } else {
+        bail!(
             "could not detect base branch: `--base` not passed, no ancestor \
              bookmark on the stack, jj `trunk()` resolves to nothing, and \
-             `default_base_branch` is not set in config",
-        )
-        .await?;
+             `default_base_branch` is not set in config"
+        );
+    };
 
     let base_lookup = gh
         .lookup_base(&target.owner, &target.repo, &base_branch)
@@ -233,7 +239,24 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
     }
     let base_display = target.base_spec(&base_branch);
 
-    let title_revset = jj::title_base_revset(rev, ancestor.as_deref());
+    let base_rev = if let Some(base_rev) = local_base_rev {
+        base_rev
+    } else {
+        let target_remote = if jj.remote_url(upstream_remote).await?.is_some() {
+            upstream_remote
+        } else {
+            &remote
+        };
+        jj.remote_bookmark_sha(&base_branch, target_remote)
+            .await?
+            .with_context(|| {
+                format!(
+                    "base branch `{base_branch}` exists on GitHub, but the local repository does \
+                     not have `{base_branch}@{target_remote}`; fetch that remote and try again"
+                )
+            })?
+    };
+    let title_revset = jj::title_base_revset(rev, &base_rev);
     let candidates = resolve_title_candidates(jj, &title_revset, title_template).await?;
     let default_title = if *pick_title {
         crate::ui::tui::require_tty("--pick-title")?;

@@ -1,6 +1,6 @@
 //! Small reusable helpers.
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::future::Future;
 
@@ -58,7 +58,7 @@ pub fn subprocess_error(stderr: &[u8]) -> String {
 ///
 /// Resolution order:
 /// 1. CLI override (if `Some`, the closure is never called);
-/// 2. result of the async closure passed to [`Self::resolve`] / [`Self::resolve_or`];
+/// 2. result of the async closure passed to [`Self::resolve`];
 /// 3. config fallback.
 #[derive(Debug, Clone)]
 pub struct EvalWithCfgFallback<T> {
@@ -109,18 +109,6 @@ impl<T: Clone> EvalWithCfgFallback<T> {
         }
         self.fallback.clone()
     }
-
-    /// Like [`Self::resolve`] but errors with `err` if every source is `None`.
-    pub async fn resolve_or<F, Fut, E>(&self, f: F, err: E) -> Result<T>
-    where
-        F: FnOnce() -> Fut,
-        Fut: Future<Output = Option<T>>,
-        E: Into<String>,
-    {
-        self.resolve(f)
-            .await
-            .ok_or_else(|| anyhow!("{}", err.into()))
-    }
 }
 
 #[cfg(test)]
@@ -157,41 +145,29 @@ mod tests {
     async fn cli_wins_and_closure_never_runs() {
         let calls = Cell::new(0);
         let r = pair(Some("from-cli"), Some("from-fallback"))
-            .resolve_or(
-                || async {
-                    calls.set(calls.get() + 1);
-                    Some("from-closure".into())
-                },
-                "should not error",
-            )
+            .resolve(|| async {
+                calls.set(calls.get() + 1);
+                Some("from-closure".into())
+            })
             .await;
-        assert_eq!(r.unwrap(), "from-cli");
+        assert_eq!(r.as_deref(), Some("from-cli"));
         assert_eq!(calls.get(), 0, "closure must not run when CLI is Some");
     }
 
     #[tokio::test]
     async fn closure_result_wins_over_fallback() {
         let r = pair(None, Some("from-fallback"))
-            .resolve_or(|| async { Some("from-closure".into()) }, "should not error")
+            .resolve(|| async { Some("from-closure".into()) })
             .await;
-        assert_eq!(r.unwrap(), "from-closure");
+        assert_eq!(r.as_deref(), Some("from-closure"));
     }
 
     #[tokio::test]
     async fn fallback_used_when_cli_and_closure_both_empty() {
         let r = pair(None, Some("from-fallback"))
-            .resolve_or(|| async { Option::<String>::None }, "should not error")
+            .resolve(|| async { Option::<String>::None })
             .await;
-        assert_eq!(r.unwrap(), "from-fallback");
-    }
-
-    #[tokio::test]
-    async fn error_when_every_source_is_none() {
-        let r = pair(None, None)
-            .resolve_or(|| async { Option::<String>::None }, "all sources empty")
-            .await;
-        let err = r.unwrap_err();
-        assert!(err.to_string().contains("all sources empty"));
+        assert_eq!(r.as_deref(), Some("from-fallback"));
     }
 
     #[tokio::test]

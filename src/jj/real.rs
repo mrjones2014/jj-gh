@@ -92,7 +92,9 @@ impl Jj for JjCli {
     }
 
     async fn stacked_ancestor_bookmark(&self, rev: &str) -> Result<Option<String>> {
-        let revset = format!("ancestors(({rev})-) & bookmarks()");
+        // Ignore bookmarks that are already in trunk. They cannot be the base
+        // of an active PR stack.
+        let revset = format!("heads(ancestors(({rev})-) & bookmarks() & ~::trunk())");
         let stdout = run_jj(&[
             "log",
             "--no-graph",
