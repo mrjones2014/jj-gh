@@ -3470,6 +3470,16 @@ type Enterprise implements Node @docsCategory(name: "enterprise-admin") {
         query: String
   ): EnterpriseTeamConnection!
     id: ID!
+    innersourceVulnerabilities(
+        after: String
+        before: String
+        ecosystem: SecurityAdvisoryEcosystem
+        first: Int
+        last: Int
+        orderBy: SecurityVulnerabilityOrder = {field: UPDATED_AT, direction: DESC}
+        package: String
+        severities: [SecurityAdvisorySeverity!]
+  ): SecurityVulnerabilityConnection!
     location: String
     members(
         after: String
@@ -4847,6 +4857,7 @@ type Issue implements Assignable &
     closedByPullRequestsReferences(
         after: String
         before: String
+        excludeUserLinked: Boolean = false
         first: Int
         includeClosedPrs: Boolean = false
         last: Int
@@ -10056,6 +10067,16 @@ type Organization implements Actor &
     estimatedNextSponsorsPayoutInCents: Int!
     hasSponsorsListing: Boolean!
     id: ID!
+    innersourceVulnerabilities(
+        after: String
+        before: String
+        ecosystem: SecurityAdvisoryEcosystem
+        first: Int
+        last: Int
+        orderBy: SecurityVulnerabilityOrder = {field: UPDATED_AT, direction: DESC}
+        package: String
+        severities: [SecurityAdvisorySeverity!]
+  ): SecurityVulnerabilityConnection!
     interactionAbility: RepositoryInteractionAbility
     ipAllowListEnabledSetting: IpAllowListEnabledSettingValue!
     ipAllowListEntries(
@@ -12380,7 +12401,6 @@ enum ProofOfPresenceRequirement @docsCategory(name: "enterprise-admin") {
     MFA
     NO_POLICY
     REAUTH
-    SECURITY_KEY
 }
 type PropertyTargetDefinition @docsCategory(name: "repos") {
     name: String!
@@ -12465,6 +12485,7 @@ type PullRequest implements Assignable &
     closingIssuesReferences(
         after: String
         before: String
+        excludeUserLinked: Boolean = false
         first: Int
         last: Int
         orderBy: IssueOrder
