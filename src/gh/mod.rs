@@ -12,6 +12,7 @@ mod reviewer;
 pub mod pr_lookup;
 pub mod real;
 pub mod remote;
+pub mod stack_detect;
 pub use queries::{CiStatus, PrWithCiStatus};
 pub use reviewer::Reviewer;
 
