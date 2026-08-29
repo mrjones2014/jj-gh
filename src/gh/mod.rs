@@ -51,6 +51,8 @@ pub struct PrDetails {
     pub labels: Vec<Label>,
     pub reviewers: Vec<Reviewer>,
     pub body: String,
+    /// Stack number if this PR is part of a stack, `None` otherwise.
+    pub stack_number: Option<u64>,
 }
 
 /// Result of [`Gh::lookup_base`]: the base repo's GraphQL node ID plus whether

@@ -347,6 +347,7 @@ mod tests {
             labels: Vec::<Label>::new(),
             reviewers: vec![],
             body: String::new(),
+            stack_number: None,
         }
     }
 

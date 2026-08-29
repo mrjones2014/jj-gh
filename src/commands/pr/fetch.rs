@@ -527,6 +527,7 @@ mod tests {
             labels: vec![],
             reviewers: vec![],
             body: String::new(),
+            stack_number: None,
         }
     }
 

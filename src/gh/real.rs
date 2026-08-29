@@ -316,6 +316,8 @@ impl Gh for OctocrabGh {
             auto_merge_request,
             review_requests,
             body,
+            stack,
+            stack_entry: _,
         } = data
             .repository
             .and_then(|r| r.pull_request)
@@ -324,6 +326,10 @@ impl Gh for OctocrabGh {
             Some(hr) => (Some(hr.owner.login), Some(hr.name)),
             None => (None, None),
         };
+        let stack_number = stack
+            .map(|s| u64::try_from(s.number))
+            .transpose()
+            .context("stack number out of range")?;
         Ok(PrDetails {
             number: u64::try_from(number).context("PR number out of range")?,
             title,
@@ -337,6 +343,7 @@ impl Gh for OctocrabGh {
             head_repo_name,
             graphql_node_id: id,
             in_merge_queue: merge_queue.is_some(),
+            stack_number,
             body,
             labels: labels
                 .and_then(|labels| labels.nodes)
