@@ -20,9 +20,9 @@ mod title_picker;
 
 subcommand_args! {
     pub struct CreateArgs {
-        /// Revision to create the PR from.
+        /// Revision(s) to create PR(s) from. Pass multiple revisions to create a stack.
         #[arg(value_name = "REV")]
-        pub rev: String,
+        pub revs: Vec<String>,
 
         /// Override the base bookmark. Default: closest ancestor bookmark on
         /// the stack, falling back to jj `trunk()`, then to the configured
@@ -141,7 +141,6 @@ subcommand_args! {
 /// # Errors
 ///
 /// Returns an error from any step (rev resolution, GH API, push, editor, etc.).
-#[expect(clippy::too_many_lines)]
 pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
     let jj = model.jj();
     let gh = model.gh().await?;
@@ -158,7 +157,7 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
                 gh_askpass: _,
                 askpass_timeout_secs: _,
             },
-        rev,
+        revs,
         base,
         draft,
         auto_merge,
@@ -179,6 +178,70 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
 
     let upstream_remote = crate::gh::remote::resolved_upstream_remote(upstream_remote);
     let (remote, target) = model.resolve_target(remote, Some(upstream_remote)).await?;
+
+    let mut created_prs = Vec::with_capacity(revs.len());
+
+    for rev in revs {
+        let pr_number = create_single_pr(
+            jj,
+            gh,
+            env,
+            editor,
+            args,
+            rev,
+            base,
+            draft,
+            auto_merge,
+            editor_argv.as_ref(),
+            no_edit,
+            auto_merge_method,
+            show_diffs,
+            pick_title,
+            title_template,
+            &remote,
+            &target,
+        )
+        .await?;
+        created_prs.push(pr_number);
+    }
+
+    if created_prs.len() > 1 {
+        println!("\nCreated {} PRs:", created_prs.len());
+        for pr_number in &created_prs {
+            println!("  #{pr_number}");
+        }
+    }
+
+    Ok(())
+}
+
+/// Create a single PR for one revision. Returns the created PR number.
+#[expect(clippy::too_many_lines)]
+#[expect(clippy::too_many_arguments)]
+async fn create_single_pr(
+    jj: &impl Jj,
+    gh: &impl Gh,
+    env: &impl crate::auth::EnvReader,
+    editor: &impl crate::editor::Editor,
+    args: &CreateArgs,
+    rev: &str,
+    base: &crate::util::EvalWithCfgFallback<String>,
+    draft: &bool,
+    auto_merge: &bool,
+    editor_argv: Option<&crate::util::ShellCommand>,
+    no_edit: &bool,
+    auto_merge_method: &AutoMergeMethod,
+    show_diffs: &bool,
+    pick_title: &bool,
+    title_template: &str,
+    remote: &str,
+    target: &crate::gh::remote::Target,
+) -> Result<u64> {
+    if *pick_title {
+        crate::ui::tui::require_tty("--pick-title")?;
+    }
+
+    let spinner = crate::ui::Spinner::start("Resolving revision");
     let info = jj.resolve_rev(rev).await?;
     let existing_branch = info.bookmarks.first().cloned();
 
@@ -198,7 +261,7 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
                 existing.title,
             );
             println!("{}", existing.html_url);
-            return Ok(());
+            return Ok(existing.number);
         }
     }
 
@@ -242,19 +305,16 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
     let base_rev = if let Some(base_rev) = local_base_rev {
         base_rev
     } else {
-        let target_remote = if jj.remote_url(upstream_remote).await?.is_some() {
-            upstream_remote
-        } else {
-            &remote
-        };
-        jj.remote_bookmark_sha(&base_branch, target_remote)
+        spinner.set_message("Resolving base revision".into());
+        let result = jj
+            .remote_bookmark_sha(&base_branch, remote)
             .await?
             .with_context(|| {
                 format!(
                     "base branch `{base_branch}` exists on GitHub, but the local repository does \
-                     not have `{base_branch}@{target_remote}`; fetch that remote and try again"
+                     not have `{base_branch}@{remote}`; fetch that remote and try again"
                 )
-            })?
+            })?;
     };
     let title_revset = jj::title_base_revset(rev, &base_rev);
     let candidates = resolve_title_candidates(jj, &title_revset, title_template).await?;
@@ -291,7 +351,7 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
     let (final_fm, body) = if *no_edit {
         (initial_fm, raw_template.unwrap_or_default())
     } else {
-        let editor_argv = editor::resolve_editor(editor_argv.as_ref(), env)?;
+        let editor_argv = editor::resolve_editor(editor_argv, env)?;
         let diff_preview = if *show_diffs {
             jj.diff(&title_revset)
                 .await
@@ -331,7 +391,8 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
         lookup
     };
 
-    jj.push(rev, existing_branch.as_deref(), remote).await?;
+    jj.push(rev, existing_branch.as_deref(), remote.to_string())
+        .await?;
 
     let branch = if let Some(b) = existing_branch {
         b
@@ -386,7 +447,7 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
         })?;
 
     println!("{}", created.html_url);
-    Ok(())
+    Ok(created.number)
 }
 
 const TITLE_RECORD_OPEN: char = '\u{E010}';

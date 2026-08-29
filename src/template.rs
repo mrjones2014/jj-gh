@@ -132,7 +132,7 @@ mod tests {
 
     fn args() -> CreateArgs {
         CreateArgs {
-            rev: "@-".into(),
+            revs: vec!["@-".into()],
             base: crate::util::EvalWithCfgFallback::new(None, None),
             draft: false,
             no_draft: false,
