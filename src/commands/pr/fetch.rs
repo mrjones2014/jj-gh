@@ -464,6 +464,20 @@ mod tests {
         async fn rerun_failed_jobs(&self, _: &str, _: &str, _: u64) -> Result<()> {
             unimplemented!("fetch does not call rerun_failed_jobs")
         }
+        async fn create_stack(
+            &self,
+            _: &str,
+            _: &str,
+            _: &[u64],
+        ) -> Result<crate::gh::PullRequestStack> {
+            unimplemented!("fetch does not call create_stack")
+        }
+        async fn unstack_prs(&self, _: &str, _: &str, _: u64, _: &[u64]) -> Result<()> {
+            unimplemented!("fetch does not call unstack_prs")
+        }
+        async fn list_stacks(&self, _: &str, _: &str) -> Result<Vec<crate::gh::PullRequestStack>> {
+            unimplemented!("fetch does not call list_stacks")
+        }
     }
 
     #[derive(Debug, Clone)]

@@ -560,6 +560,20 @@ mod tests {
             self.calls.lock().unwrap().rerun_failed.push(id);
             Ok(())
         }
+        async fn create_stack(
+            &self,
+            _: &str,
+            _: &str,
+            _: &[u64],
+        ) -> Result<crate::gh::PullRequestStack> {
+            unimplemented!()
+        }
+        async fn unstack_prs(&self, _: &str, _: &str, _: u64, _: &[u64]) -> Result<()> {
+            unimplemented!()
+        }
+        async fn list_stacks(&self, _: &str, _: &str) -> Result<Vec<crate::gh::PullRequestStack>> {
+            unimplemented!()
+        }
     }
 
     fn args(number: &str, cancel: bool, timeout: u64) -> RetryFailedArgs {

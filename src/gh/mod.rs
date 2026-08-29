@@ -94,6 +94,20 @@ impl UpdatePr {
     }
 }
 
+/// A pull request stack on GitHub. Stacks link related PRs together so
+/// GitHub's UI can show stack navigation and "merge the whole stack" features.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct PullRequestStack {
+    pub number: u64,
+    pub pull_requests: Vec<StackPullRequest>,
+}
+
+/// A PR entry within a stack.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct StackPullRequest {
+    pub number: u64,
+}
+
 /// One label on a PR, with both the human-readable name and the GraphQL
 /// node ID required to mutate it via `removeLabelsFromLabelable`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -355,4 +369,42 @@ pub trait Gh {
     ///
     /// Propagates API errors.
     async fn rerun_failed_jobs(&self, owner: &str, repo: &str, run_id: u64) -> Result<()>;
+
+    /// Create a pull request stack from an ordered list of PR numbers.
+    /// PRs should be ordered from bottom to top of the stack. Each PR's
+    /// base ref must match the previous PR's head ref.
+    ///
+    /// # Errors
+    ///
+    /// Propagates API errors. Returns 422 if PRs don't exist or can't form
+    /// a valid stack.
+    async fn create_stack(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr_numbers: &[u64],
+    ) -> Result<PullRequestStack>;
+
+    /// Remove unmerged PRs from a stack. PRs that cannot be unstacked
+    /// (e.g., queued for merge) are left in place. If all PRs are removed,
+    /// the stack is dissolved.
+    ///
+    /// # Errors
+    ///
+    /// Propagates API errors. Returns 409 if the stack is being modified
+    /// concurrently. Returns 422 if no PRs can be removed.
+    async fn unstack_prs(
+        &self,
+        owner: &str,
+        repo: &str,
+        stack_number: u64,
+        pr_numbers: &[u64],
+    ) -> Result<()>;
+
+    /// List all pull request stacks in a repository.
+    ///
+    /// # Errors
+    ///
+    /// Propagates API errors.
+    async fn list_stacks(&self, owner: &str, repo: &str) -> Result<Vec<PullRequestStack>>;
 }

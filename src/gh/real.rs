@@ -1,8 +1,8 @@
 //! `octocrab`-backed [`Gh`] implementation.
 
 use super::{
-    BaseLookup, CreatePrRequest, Gh, Label, PrCreated, PrDetails, PrSummary, Reviewer, UpdatePr,
-    WorkflowRun, WorkflowRunConclusion, WorkflowRunStatus,
+    BaseLookup, CreatePrRequest, Gh, Label, PrCreated, PrDetails, PrSummary, PullRequestStack,
+    Reviewer, UpdatePr, WorkflowRun, WorkflowRunConclusion, WorkflowRunStatus,
 };
 use crate::{
     config::AutoMergeMethod,
@@ -473,6 +473,46 @@ impl Gh for OctocrabGh {
         }
         Ok(out)
     }
+
+    async fn create_stack(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr_numbers: &[u64],
+    ) -> Result<PullRequestStack> {
+        let route = format!("/repos/{owner}/{repo}/stacks");
+        let body = serde_json::json!({ "pull_requests": pr_numbers });
+        self.octo
+            .post::<_, PullRequestStack>(&route, Some(&body))
+            .await
+            .map_err(humanize)
+            .with_context(|| format!("creating stack in {owner}/{repo}"))
+    }
+
+    async fn unstack_prs(
+        &self,
+        owner: &str,
+        repo: &str,
+        stack_number: u64,
+        pr_numbers: &[u64],
+    ) -> Result<()> {
+        let route = format!("/repos/{owner}/{repo}/stacks/{stack_number}/unstack");
+        let body = serde_json::json!({ "pull_requests": pr_numbers });
+        self.octo
+            .post::<_, ()>(&route, Some(&body))
+            .await
+            .map_err(humanize)
+            .with_context(|| format!("unstacking PRs from stack {stack_number} in {owner}/{repo}"))
+    }
+
+    async fn list_stacks(&self, owner: &str, repo: &str) -> Result<Vec<PullRequestStack>> {
+        let route = format!("/repos/{owner}/{repo}/stacks");
+        self.octo
+            .get::<Vec<PullRequestStack>, _, _>(&route, None::<&()>)
+            .await
+            .map_err(humanize)
+            .with_context(|| format!("listing stacks in {owner}/{repo}"))
+    }
 }
 
 fn is_local_pull(pr: &PrWithCiStatus, head_owner: &str) -> bool {
@@ -650,5 +690,44 @@ mod tests {
             assert!(q.len() <= MAX_SEARCH_QUERY_LEN, "batch too long: {q}");
             assert!(q.starts_with("repo:o/r is:pr is:open"));
         }
+    }
+
+    #[test]
+    fn parse_stack_response_parses_full_response() {
+        let json = serde_json::json!({
+            "number": 7,
+            "pull_requests": [
+                {
+                    "number": 101
+                },
+                {
+                    "number": 102
+                }
+            ]
+        });
+        let stack = serde_json::from_value::<PullRequestStack>(json).unwrap();
+        assert_eq!(stack.number, 7);
+        assert_eq!(stack.pull_requests.len(), 2);
+        assert_eq!(stack.pull_requests[0].number, 101);
+        assert_eq!(stack.pull_requests[1].number, 102);
+    }
+
+    #[test]
+    fn parse_stack_response_handles_empty_pull_requests() {
+        let json = serde_json::json!({
+            "number": 1,
+            "pull_requests": []
+        });
+        let stack = serde_json::from_value::<PullRequestStack>(json).unwrap();
+        assert!(stack.pull_requests.is_empty());
+    }
+
+    #[test]
+    fn parse_stack_response_errors_on_missing_fields() {
+        let json = serde_json::json!({
+            "pull_requests": []
+        });
+        let result = serde_json::from_value::<PullRequestStack>(json);
+        assert!(result.is_err());
     }
 }
