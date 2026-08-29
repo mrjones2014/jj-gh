@@ -63,6 +63,21 @@ subcommand_args! {
         /// Overrides config.
         #[arg(long, conflicts_with = "nerdfonts")]
         pub no_nerdfonts: bool,
+
+        /// Automatically link PRs into a GitHub stack after restacking.
+        /// Default: true. Use `--no-stack` to disable.
+        #[arg(
+            long = "stack",
+            num_args = 0,
+            default_missing_value = "true",
+            default_value_if("no_stack", "true", Some("false"))
+        )]
+        #[config]
+        pub auto_stack: bool,
+
+        /// Disable automatic stack linking after restack.
+        #[arg(long = "no-stack", conflicts_with = "auto_stack")]
+        pub no_stack: bool,
     }
 }
 
@@ -124,6 +139,8 @@ pub async fn run(model: &impl Model, args: &RestackArgs) -> Result<()> {
         askpass_timeout_secs: _,
     } = &args.globals;
 
+    let auto_stack = args.auto_stack;
+
     let upstream_remote = crate::gh::remote::resolved_upstream_remote(upstream_remote);
     let ctx = gather_context(model, remote, upstream_remote).await?;
 
@@ -152,7 +169,8 @@ pub async fn run(model: &impl Model, args: &RestackArgs) -> Result<()> {
     }
 
     let decisions = interactive::run(model.jj(), &ctx, args).await?;
-    submit(model.gh().await?, &ctx, &decisions).await
+    let target = model.resolve_target(remote, Some(upstream_remote)).await?.1;
+    submit(model, &ctx, &decisions, auto_stack, &target).await
 }
 
 /// Bundle of everything restack needs after the initial fetch: PR metadata,
@@ -280,10 +298,15 @@ fn print_dry_run_text(plans: &[PrPlan]) {
 }
 
 async fn submit(
-    gh: &impl Gh,
+    model: &impl Model,
     ctx: &RestackContext,
     decisions: &HashMap<u64, Decision>,
+    auto_stack: bool,
+    target: &crate::gh::remote::Target,
 ) -> Result<()> {
+    let gh = model.gh().await?;
+    let jj = model.jj();
+
     let updates = ctx
         .plans
         .iter()
@@ -339,10 +362,46 @@ async fn submit(
     }
 
     if had_failure {
-        Err(anyhow!("one or more PR updates failed"))
-    } else {
-        Ok(())
+        return Err(anyhow!("one or more PR updates failed"));
     }
+
+    if !auto_stack {
+        return Ok(());
+    }
+
+    // Fetch full PR details for stack detection
+    let mut pr_details = Vec::with_capacity(ctx.plans.len());
+    for plan in &ctx.plans {
+        let result = gh.get_pr(&target.owner, &target.repo, plan.pr_number).await;
+        if let Err(e) = &result {
+            log::warn!(
+                "Failed to fetch PR #{} for stack detection: {e:#}",
+                plan.pr_number
+            );
+        }
+        if let Ok(d) = result {
+            pr_details.push(d);
+        }
+    }
+
+    // Detect and link stacks
+    let chains = crate::gh::stack_detect::detect_stack_chains(&pr_details, jj).await?;
+    for chain in chains {
+        let result = gh.create_stack(&target.owner, &target.repo, &chain).await;
+        if let Err(e) = &result {
+            log::warn!("Failed to create stack for chain {chain:?}: {e:#}");
+        }
+        if let Ok(stack) = result {
+            let pr_list = chain
+                .iter()
+                .map(|n| format!("#{n}"))
+                .collect::<Vec<_>>()
+                .join(" → ");
+            println!("Stack created: {pr_list} (Stack #{})", stack.number);
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

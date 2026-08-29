@@ -215,6 +215,13 @@ mod tests {
         args: RetryFailedArgsInput,
     }
 
+    #[derive(clap::Parser, Debug)]
+    #[command(no_binary_name = true)]
+    struct RestackArgsParser {
+        #[command(flatten)]
+        args: RestackArgsInput,
+    }
+
     fn parse_create(argv: &[&str]) -> CreateArgsInput {
         CreateArgsParser::try_parse_from(argv.iter().copied())
             .expect("CreateArgsInput failed to parse")
@@ -283,6 +290,16 @@ mod tests {
 
     fn merged_pr_log(argv: &[&str], toml_config: &str) -> Config {
         let argv = parse_pr_log(argv);
+        let fig = config::defaults_figment()
+            .merge(config::JjConfProvider::from_memory("test", toml_config))
+            .merge(Serialized::defaults(&argv));
+        config::extract(&fig).unwrap()
+    }
+
+    fn merged_restack(argv: &[&str], toml_config: &str) -> Config {
+        let argv = RestackArgsParser::try_parse_from(argv.iter().copied())
+            .expect("RestackArgsInput failed to parse")
+            .args;
         let fig = config::defaults_figment()
             .merge(config::JjConfProvider::from_memory("test", toml_config))
             .merge(Serialized::defaults(&argv));
@@ -406,6 +423,45 @@ mod tests {
 
         let c = merged_create(
             &["@-", "--no-stack"],
+            "\
+            [jj-gh]\n\
+            auto_stack = true\n\
+            ",
+        );
+        assert!(!c.auto_stack);
+    }
+
+    #[test]
+    fn restack_auto_stack_defaults_on() {
+        let c = merged_restack(&[], "");
+        assert!(c.auto_stack);
+    }
+
+    #[test]
+    fn restack_auto_stack_config_wins_over_bare_argv() {
+        let c = merged_restack(
+            &[],
+            "\
+            [jj-gh]\n\
+            auto_stack = false\n\
+            ",
+        );
+        assert!(!c.auto_stack);
+    }
+
+    #[test]
+    fn restack_stack_flags_override_config() {
+        let c = merged_restack(
+            &["--stack"],
+            "\
+            [jj-gh]\n\
+            auto_stack = false\n\
+            ",
+        );
+        assert!(c.auto_stack);
+
+        let c = merged_restack(
+            &["--no-stack"],
             "\
             [jj-gh]\n\
             auto_stack = true\n\

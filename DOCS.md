@@ -243,6 +243,8 @@ Restack does not rewrite the jj graph; the user shapes the graph first (e.g. via
 - `-T`, `--template <TEMPLATE>` — Template to use in interactive mode; conflicts with `--json` and `--dry-run`. The same template aliases as `pr log` are injected here. See `jj-gh pr log --help`
 - `--nerdfonts <NERDFONTS>` — Force enable nerdfont icons in the default restack/log template. Overrides config. Use `--no-nerdfonts` to disable
 - `--no-nerdfonts` — Force the default restack/log template not to use nerdfont icons. Overrides config
+- `--stack <AUTO_STACK>` — Automatically link PRs into a GitHub stack after restacking. Default: true. Use `--no-stack` to disable
+- `--no-stack` — Disable automatic stack linking after restack
 
 ## `jj-gh pr retry-failed`
 
