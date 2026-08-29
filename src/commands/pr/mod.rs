@@ -10,6 +10,7 @@ pub mod fetch;
 mod log;
 mod restack;
 mod retry_failed;
+mod stack;
 mod url;
 
 use crate::{
@@ -31,6 +32,7 @@ use edit::{EditArgs, EditArgsInput};
 use fetch::{FetchArgs, FetchArgsInput};
 use restack::{RestackArgs, RestackArgsInput};
 use retry_failed::{RetryFailedArgs, RetryFailedArgsInput};
+use stack::{StackArgs, StackArgsInput};
 
 pub use create::{CreateArgs, CreateArgsInput};
 
@@ -118,6 +120,16 @@ pub enum PrAction {
     )]
     RetryFailed(RetryFailedArgsInput),
 
+    /// Manually link PRs into a GitHub stack.
+    ///
+    /// Accepts multiple revisions or PR numbers and creates a stack on GitHub.
+    /// This is a manual escape hatch when auto-stacking doesn't work as expected.
+    /// Each argument can be a revision ID (like `jj-gh pr create`) or a PR number.
+    ///
+    /// Use `--force` to unstack PRs that are already in different stacks before
+    /// creating the new stack.
+    Stack(StackArgsInput),
+
     /// Lookup the PR by the given number or revision ID and print its
     /// full URL. This is useful in pipes such as `jj-gh pr url <rev> | pbcopy`
     /// or `jj-gh pr url <rev> | wl-copy`.
@@ -169,6 +181,10 @@ pub async fn dispatch(global: GlobalOptsInput, action: PrAction) -> Result<()> {
         PrAction::RetryFailed(input) => {
             let args = RetryFailedArgs::resolve(input, &config, &globals);
             retry_failed::run(&model, &args).await?;
+        }
+        PrAction::Stack(input) => {
+            let args = StackArgs::resolve(input, &config, &globals);
+            stack::run(&model, &args).await?;
         }
         PrAction::Url(input) => {
             let args = PrUrlArgs::resolve(input, &config, &globals);

@@ -15,6 +15,7 @@ This document contains the help content for the `jj-gh` command-line program.
 - [`jj-gh pr log`↴](#jj-gh-pr-log)
 - [`jj-gh pr restack`↴](#jj-gh-pr-restack)
 - [`jj-gh pr retry-failed`↴](#jj-gh-pr-retry-failed)
+- [`jj-gh pr stack`↴](#jj-gh-pr-stack)
 - [`jj-gh pr url`↴](#jj-gh-pr-url)
 - [`jj-gh debug`↴](#jj-gh-debug)
 - [`jj-gh debug config`↴](#jj-gh-debug-config)
@@ -60,6 +61,7 @@ Commands to work with PRs
 - `log` — Like `jj log`, but injects PR metadata (e.g. number, CI status, URL)
 - `restack` — Push the current `jj` stack shape up to GitHub by updating each PR's base branch to match its closest stacked ancestor bookmark
 - `retry-failed` — Re-run failed CI jobs on a PR, or on all local PRs with failed CI
+- `stack` — Manually link PRs into a GitHub stack
 - `url` — Lookup the PR by the given number or revision ID and print its full URL. This is useful in pipes such as `jj-gh pr url <rev> | pbcopy` or `jj-gh pr url <rev> | wl-copy`
 
 ## `jj-gh pr auto-merge`
@@ -269,6 +271,24 @@ With `--cancel`, in-progress runs are cancelled first; once they finalize, every
 - `--cancel-timeout <SECS>` — Seconds to wait for cancelled runs to finalize before re-running. Only meaningful with --cancel
 
   Default value: `30`
+
+## `jj-gh pr stack`
+
+Manually link PRs into a GitHub stack.
+
+Accepts multiple revisions or PR numbers and creates a stack on GitHub. This is a manual escape hatch when auto-stacking doesn't work as expected. Each argument can be a revision ID (like `jj-gh pr create`) or a PR number.
+
+Use `--force` to unstack PRs that are already in different stacks before creating the new stack.
+
+**Usage:** `jj-gh pr stack [OPTIONS] <REV_OR_PR_NUM> <REV_OR_PR_NUM>...`
+
+###### **Arguments:**
+
+- `<REV_OR_PR_NUM>` — Revisions or PR numbers to stack, in order from bottom to top. Each argument can be a revision ID (like `jj-gh pr create`) or a PR number
+
+###### **Options:**
+
+- `--force` — Force stack creation even if PRs are already in different stacks. This will unstack them first, then create the new stack
 
 ## `jj-gh pr url`
 
