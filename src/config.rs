@@ -87,6 +87,9 @@ config_schema! {
     /// Merge method used when auto-merge is enabled.
     auto_merge_method: AutoMergeMethod = AutoMergeMethod::Merge,
 
+    /// Link stacked PRs into a GitHub stack automatically.
+    auto_stack: bool = true,
+
     /// Editor command for the PR editor flow.
     editor: Option<crate::util::ShellCommand> = None,
 

@@ -376,6 +376,45 @@ mod tests {
     }
 
     #[test]
+    fn create_auto_stack_defaults_on() {
+        let c = merged_create(&["@-"], "");
+        assert!(c.auto_stack);
+    }
+
+    #[test]
+    fn create_auto_stack_config_wins_over_bare_argv() {
+        let c = merged_create(
+            &["@-"],
+            "\
+            [jj-gh]\n\
+            auto_stack = false\n\
+            ",
+        );
+        assert!(!c.auto_stack);
+    }
+
+    #[test]
+    fn create_stack_flags_override_config() {
+        let c = merged_create(
+            &["@-", "--stack"],
+            "\
+            [jj-gh]\n\
+            auto_stack = false\n\
+            ",
+        );
+        assert!(c.auto_stack);
+
+        let c = merged_create(
+            &["@-", "--no-stack"],
+            "\
+            [jj-gh]\n\
+            auto_stack = true\n\
+            ",
+        );
+        assert!(!c.auto_stack);
+    }
+
+    #[test]
     fn edit_bare_argv_lets_diff_config_win() {
         let c = merged_edit(
             &["42"],

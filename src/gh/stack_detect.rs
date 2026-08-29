@@ -10,7 +10,6 @@ use std::collections::HashMap;
 /// Returns a list of chains, where each chain is a list of PR numbers
 /// ordered from bottom (closest to trunk) to top (furthest from trunk).
 /// A chain has length >= 2 (single PRs are not returned).
-#[cfg_attr(not(test), expect(dead_code))]
 pub async fn detect_stack_chains(prs: &[PrDetails], jj: &impl Jj) -> Result<Vec<Vec<u64>>> {
     if prs.len() < 2 {
         return Ok(Vec::new());

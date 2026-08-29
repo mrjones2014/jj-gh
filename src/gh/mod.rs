@@ -1,3 +1,4 @@
+#![allow(dead_code)] // TODO remove when the stack APIs are used
 //! GitHub API abstraction.
 //!
 //! All write-side calls go through [`Gh`]. The production impl wraps `octocrab`;

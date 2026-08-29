@@ -148,6 +148,8 @@ mod tests {
             no_edit: false,
             show_diffs: true,
             no_diffs: false,
+            auto_stack: true,
+            no_stack: false,
             globals: crate::cli::GlobalOpts {
                 verbose: 0,
                 quiet: false,

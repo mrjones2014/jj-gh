@@ -212,6 +212,12 @@ in
         description = "Default GitHub merge method to use when auto-merge is enabled.";
       };
 
+      auto_stack = mkOption {
+        type = types.nullOr types.bool;
+        default = null;
+        description = "Link stacked PRs into a GitHub stack automatically.";
+      };
+
       editor = mkOption {
         type = types.nullOr (types.listOf types.str);
         default = null;

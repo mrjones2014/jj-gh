@@ -88,13 +88,13 @@ Open your preferred editor to create a PR from a revision.
 
 Opens your editor to a markdown file where you can write the PR description, and set PR metadata like title, labels, auto-merge, etc. via the markdown frontmatter. This supports stacked PRs; by default the base branch is set to the closest ancestor bookmark if one exists, otherwise `trunk()`.
 
-**Usage:** `jj-gh pr create [OPTIONS] <REV>`
+**Usage:** `jj-gh pr create [OPTIONS] [REV]...`
 
 **Command Alias:** `c`
 
 ###### **Arguments:**
 
-- `<REV>` — Revision to create the PR from
+- `<REV>` — Revision(s) to create PR(s) from. Pass multiple revisions to create a stack
 
 ###### **Options:**
 
@@ -128,6 +128,8 @@ Opens your editor to a markdown file where you can write the PR description, and
 - `--no-edit` — Create the PR without opening an editor. Useful when combined with `--draft`
 - `--diffs <SHOW_DIFFS>` — Show a preview of the PR diffs while creating the PR body. Overrides `pr_create_show_diffs` configuration. Use `--no-diffs` to disable
 - `--no-diffs` — Hide the PR diff preview while creating the PR body. Overrides config
+- `--stack <AUTO_STACK>` — Automatically link created PRs into a GitHub stack when stacked. Default: true. Use `--no-stack` to disable
+- `--no-stack` — Disable automatic stack linking. Overrides config
 
 ## `jj-gh pr edit`
 

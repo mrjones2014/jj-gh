@@ -292,6 +292,10 @@ editor = [
   "+10",  # +10 jumps your cursor past the frontmatter
 ]
 
+# automatically link stacked PRs into a GitHub stack, in `jj pr create` and
+# `jj pr restack`. The --stack/--no-stack flags override this per-invocation.
+auto_stack = true
+
 # enable or disable the use of nerdfont icons
 # (e.g. in the `pr log` default template)
 # NOTE: if you have issues with nerdfont icons, its most likely your `$PAGER`,
