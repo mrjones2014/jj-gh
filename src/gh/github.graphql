@@ -5371,6 +5371,17 @@ type IssueFieldTimelineOption @docsCategory(name: "issues") {
     color: String
     name: String!
 }
+input IssueFieldUpdateInput @docsCategory(name: "issues") {
+    fieldName: String!
+    operation: IssueFieldUpdateOperation!
+    value: String
+}
+enum IssueFieldUpdateOperation @docsCategory(name: "issues") {
+    ADD
+    CLEAR
+    REMOVE
+    SET
+}
 union IssueFieldValue @docsCategory(name: "issues") =
   | IssueFieldDateValue
   | IssueFieldMultiSelectValue
@@ -19695,6 +19706,7 @@ input UpdateIssueInput {
     body: String
     clientMutationId: String
     id: ID! @possibleTypes(concreteTypes: ["Issue"])
+    issueFieldUpdates: [IssueFieldUpdateInput!]
     issueType: IssueTypeUpdateInput
     issueTypeId: ID
     labelIds: [ID!] @possibleTypes(concreteTypes: ["Label"])
