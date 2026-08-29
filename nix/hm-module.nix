@@ -118,6 +118,18 @@ in
         description = "Default git remote used for pushes and PR head lookup.";
       };
 
+      default_title_source = mkOption {
+        type = types.nullOr (
+          types.enum [
+            "base"
+            "head"
+          ]
+        );
+        default = null;
+        example = "head";
+        description = "Configure whether to generate the default title from the base commit (e.g. closest to target branch) or head commit of the PR.";
+      };
+
       upstream_remote = mkOption {
         type = types.nullOr types.str;
         default = null;

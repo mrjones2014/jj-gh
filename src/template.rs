@@ -150,6 +150,7 @@ mod tests {
             no_diffs: false,
             auto_stack: true,
             no_stack: false,
+            default_title_source: crate::config::DefaultTitleSource::Base,
             globals: crate::cli::GlobalOpts {
                 verbose: 0,
                 quiet: false,

@@ -1,6 +1,6 @@
 use crate::{
     cli::GlobalOpts,
-    config::{self, AutoMergeMethod},
+    config::{self, AutoMergeMethod, DefaultTitleSource},
     editor::{self, ApplyChangesCtx},
     frontmatter::Frontmatter,
     fs::RealFs,
@@ -78,7 +78,7 @@ subcommand_args! {
         /// `commit_id`, `author`, etc.). The following template aliases are also
         /// injected:
         ///
-        /// - `pr_title`: default title (first-line description of the oldest commit on the stack).
+        /// - `pr_title`: default title (first-line description of the oldest or newest commit, depending on `default_title_source`).
         ///
         /// - `pr_base`: resolved base branch; owner-qualified (`owner:branch`) for cross-fork PRs.
         ///
@@ -107,6 +107,13 @@ subcommand_args! {
         #[arg(long, value_name = "TEMPLATE")]
         #[config(maps_to = "pr_create_title_template")]
         pub title_template: String,
+
+        /// Which commit's description to use as the default PR title.
+        /// `base` uses the oldest commit (default), `head` uses the newest.
+        /// Overrides config `default_title_source`.
+        #[arg(long = "title-source", value_name = "SOURCE", value_enum)]
+        #[config]
+        pub default_title_source: crate::config::DefaultTitleSource,
 
         /// Editor command, e.g. `--editor "nvim +7"`. Precedence: this flag,
         /// then `editor` in config, then `$VISUAL`, then `$EDITOR`.
@@ -193,6 +200,8 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
         // stack linking control
         no_stack: _,
         auto_stack,
+        // title source
+        default_title_source,
     } = args;
 
     let upstream_remote = crate::gh::remote::resolved_upstream_remote(upstream_remote);
@@ -217,6 +226,7 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
             show_diffs,
             pick_title,
             title_template,
+            default_title_source,
             &remote,
             &target,
         )
@@ -385,6 +395,7 @@ async fn create_single_pr(
     show_diffs: &bool,
     pick_title: &bool,
     title_template: &str,
+    default_title_source: &crate::config::DefaultTitleSource,
     remote: &str,
     target: &crate::gh::remote::Target,
 ) -> Result<u64> {
@@ -477,11 +488,18 @@ async fn create_single_pr(
     let default_title = if *pick_title {
         title_picker::pick(&candidates)?
     } else {
-        candidates
-            .first()
-            .context("no commits found in the PR revset")?
+        let candidate = match default_title_source {
+            DefaultTitleSource::Base => candidates.first(),
+            DefaultTitleSource::Head => candidates.last(),
+        }
+        .context("no commits found in the PR revset")?;
+        let source_label = match default_title_source {
+            DefaultTitleSource::Base => "oldest",
+            DefaultTitleSource::Head => "newest",
+        };
+        candidate
             .valid_title()
-            .context("oldest commit produced an invalid PR title")?
+            .with_context(|| format!("{source_label} commit produced an invalid PR title"))?
             .to_string()
     };
 
@@ -751,5 +769,59 @@ mod tests {
     #[test]
     fn rejects_empty_candidate_set() {
         assert!(parse_title_candidates("").is_err());
+    }
+
+    #[test]
+    fn title_source_base_selects_first_candidate() {
+        let candidates = [
+            TitleCandidate {
+                change_id: "first".into(),
+                title: "First commit".into(),
+            },
+            TitleCandidate {
+                change_id: "second".into(),
+                title: "Second commit".into(),
+            },
+            TitleCandidate {
+                change_id: "third".into(),
+                title: "Third commit".into(),
+            },
+        ];
+
+        let candidate = match crate::config::DefaultTitleSource::Base {
+            crate::config::DefaultTitleSource::Base => candidates.first(),
+            crate::config::DefaultTitleSource::Head => candidates.last(),
+        }
+        .unwrap();
+
+        assert_eq!(candidate.change_id, "first");
+        assert_eq!(candidate.title, "First commit");
+    }
+
+    #[test]
+    fn title_source_head_selects_last_candidate() {
+        let candidates = [
+            TitleCandidate {
+                change_id: "first".into(),
+                title: "First commit".into(),
+            },
+            TitleCandidate {
+                change_id: "second".into(),
+                title: "Second commit".into(),
+            },
+            TitleCandidate {
+                change_id: "third".into(),
+                title: "Third commit".into(),
+            },
+        ];
+
+        let candidate = match crate::config::DefaultTitleSource::Head {
+            crate::config::DefaultTitleSource::Base => candidates.first(),
+            crate::config::DefaultTitleSource::Head => candidates.last(),
+        }
+        .unwrap();
+
+        assert_eq!(candidate.change_id, "third");
+        assert_eq!(candidate.title, "Third commit");
     }
 }

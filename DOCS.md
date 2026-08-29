@@ -114,7 +114,7 @@ Opens your editor to a markdown file where you can write the PR description, and
   Mutually exclusive with `--template-file` and `--no-template`.
 
   All standard jj template builtins are available (`description`, `commit_id`, `author`, etc.). The following template aliases are also injected:
-  - `pr_title`: default title (first-line description of the oldest commit on the stack).
+  - `pr_title`: default title (first-line description of the oldest or newest commit, depending on `default_title_source`).
 
   - `pr_base`: resolved base branch; owner-qualified (`owner:branch`) for cross-fork PRs.
 
@@ -126,6 +126,14 @@ Opens your editor to a markdown file where you can write the PR description, and
 - `--no-template` — Skip body templating entirely
 - `--pick-title` — Interactively choose which commit supplies the PR title
 - `--title-template <TEMPLATE>` — jj template string used to render candidate PR titles. Evaluated once per commit in the PR revset
+- `--title-source <SOURCE>` — Which commit's description to use as the default PR title. `base` uses the oldest commit (default), `head` uses the newest. Overrides config `default_title_source`
+
+  Possible values:
+  - `base`:
+    Use the oldest commit in the PR (closest to the base branch)
+  - `head`:
+    Use the newest commit in the PR (the head/top of the stack)
+
 - `-e`, `--editor <CMD>` — Editor command, e.g. `--editor "nvim +7"`. Precedence: this flag, then `editor` in config, then `$VISUAL`, then `$EDITOR`
 - `--no-edit` — Create the PR without opening an editor. Useful when combined with `--draft`
 - `--diffs <SHOW_DIFFS>` — Show a preview of the PR diffs while creating the PR body. Overrides `pr_create_show_diffs` configuration. Use `--no-diffs` to disable
