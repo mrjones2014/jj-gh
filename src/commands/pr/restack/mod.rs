@@ -179,6 +179,7 @@ pub(crate) struct RestackContext {
     pub plans: Vec<PrPlan>,
     pub prs: Vec<PrWithCiStatus>,
     pub bookmarks: Vec<PushedBookmark>,
+    pub branch_to_local: HashMap<String, String>,
 }
 
 async fn gather_context(
@@ -202,6 +203,7 @@ async fn gather_context(
         plans,
         prs,
         bookmarks,
+        branch_to_local,
     })
 }
 
@@ -385,7 +387,8 @@ async fn submit(
     }
 
     // Detect and link stacks
-    let chains = crate::gh::stack_detect::detect_stack_chains(&pr_details, jj).await?;
+    let chains =
+        crate::gh::stack_detect::detect_stack_chains(&pr_details, jj, &ctx.branch_to_local).await?;
     for chain in chains {
         let result = gh.create_stack(&target.owner, &target.repo, &chain).await;
         if let Err(e) = &result {

@@ -10,7 +10,16 @@ use std::collections::HashMap;
 /// Returns a list of chains, where each chain is a list of PR numbers
 /// ordered from bottom (closest to trunk) to top (furthest from trunk).
 /// A chain has length >= 2 (single PRs are not returned).
-pub async fn detect_stack_chains(prs: &[PrDetails], jj: &impl Jj) -> Result<Vec<Vec<u64>>> {
+///
+/// # Arguments
+/// * `prs` - The PRs to analyze
+/// * `jj` - The jj interface for querying local commit information
+/// * `head_to_local_commit` - Mapping from PR head branch names to local jj commit IDs
+pub async fn detect_stack_chains(
+    prs: &[PrDetails],
+    jj: &impl Jj,
+    head_to_local_commit: &HashMap<String, String>,
+) -> Result<Vec<Vec<u64>>> {
     if prs.len() < 2 {
         return Ok(Vec::new());
     }
@@ -21,10 +30,15 @@ pub async fn detect_stack_chains(prs: &[PrDetails], jj: &impl Jj) -> Result<Vec<
         .map(|pr| (pr.head_ref.clone(), pr.number))
         .collect::<HashMap<String, u64>>();
 
-    // For each PR, find its stacked ancestor bookmark
+    // For each PR, find its stacked ancestor bookmark using local commit ID
     let mut pr_to_ancestor = HashMap::<u64, Option<String>>::new();
     for pr in prs {
-        let ancestor = jj.stacked_ancestor_bookmark(&pr.head_sha).await?;
+        let local_commit = head_to_local_commit.get(&pr.head_ref);
+        let ancestor = if let Some(commit) = local_commit {
+            jj.stacked_ancestor_bookmark(commit).await?
+        } else {
+            None
+        };
         pr_to_ancestor.insert(pr.number, ancestor);
     }
 
@@ -176,7 +190,8 @@ mod tests {
     #[tokio::test]
     async fn no_prs_returns_empty() {
         let jj = MockJj::new();
-        let chains = detect_stack_chains(&[], &jj).await.unwrap();
+        let head_to_local = HashMap::<String, String>::new();
+        let chains = detect_stack_chains(&[], &jj, &head_to_local).await.unwrap();
         assert!(chains.is_empty());
     }
 
@@ -184,7 +199,11 @@ mod tests {
     async fn single_pr_returns_empty() {
         let jj = MockJj::new();
         let prs = vec![pr(1, "branch-a", "sha1")];
-        let chains = detect_stack_chains(&prs, &jj).await.unwrap();
+        let mut head_to_local = HashMap::new();
+        head_to_local.insert("branch-a".to_string(), "sha1".to_string());
+        let chains = detect_stack_chains(&prs, &jj, &head_to_local)
+            .await
+            .unwrap();
         assert!(chains.is_empty());
     }
 
@@ -194,7 +213,12 @@ mod tests {
             .with_ancestor("sha1", None)
             .with_ancestor("sha2", None);
         let prs = vec![pr(1, "branch-a", "sha1"), pr(2, "branch-b", "sha2")];
-        let chains = detect_stack_chains(&prs, &jj).await.unwrap();
+        let mut head_to_local = HashMap::new();
+        head_to_local.insert("branch-a".to_string(), "sha1".to_string());
+        head_to_local.insert("branch-b".to_string(), "sha2".to_string());
+        let chains = detect_stack_chains(&prs, &jj, &head_to_local)
+            .await
+            .unwrap();
         assert!(chains.is_empty());
     }
 
@@ -204,7 +228,12 @@ mod tests {
             .with_ancestor("sha1", None)
             .with_ancestor("sha2", Some("branch-a"));
         let prs = vec![pr(1, "branch-a", "sha1"), pr(2, "branch-b", "sha2")];
-        let chains = detect_stack_chains(&prs, &jj).await.unwrap();
+        let mut head_to_local = HashMap::new();
+        head_to_local.insert("branch-a".to_string(), "sha1".to_string());
+        head_to_local.insert("branch-b".to_string(), "sha2".to_string());
+        let chains = detect_stack_chains(&prs, &jj, &head_to_local)
+            .await
+            .unwrap();
         assert_eq!(chains.len(), 1);
         assert_eq!(chains[0], vec![1, 2]);
     }
@@ -220,7 +249,13 @@ mod tests {
             pr(2, "branch-b", "sha2"),
             pr(3, "branch-c", "sha3"),
         ];
-        let chains = detect_stack_chains(&prs, &jj).await.unwrap();
+        let mut head_to_local = HashMap::new();
+        head_to_local.insert("branch-a".to_string(), "sha1".to_string());
+        head_to_local.insert("branch-b".to_string(), "sha2".to_string());
+        head_to_local.insert("branch-c".to_string(), "sha3".to_string());
+        let chains = detect_stack_chains(&prs, &jj, &head_to_local)
+            .await
+            .unwrap();
         assert_eq!(chains.len(), 1);
         assert_eq!(chains[0], vec![1, 2, 3]);
     }
@@ -238,7 +273,14 @@ mod tests {
             pr(3, "branch-c", "sha3"),
             pr(4, "branch-d", "sha4"),
         ];
-        let chains = detect_stack_chains(&prs, &jj).await.unwrap();
+        let mut head_to_local = HashMap::new();
+        head_to_local.insert("branch-a".to_string(), "sha1".to_string());
+        head_to_local.insert("branch-b".to_string(), "sha2".to_string());
+        head_to_local.insert("branch-c".to_string(), "sha3".to_string());
+        head_to_local.insert("branch-d".to_string(), "sha4".to_string());
+        let chains = detect_stack_chains(&prs, &jj, &head_to_local)
+            .await
+            .unwrap();
         assert_eq!(chains.len(), 2);
         assert!(chains.contains(&vec![1, 2]));
         assert!(chains.contains(&vec![3, 4]));
@@ -250,7 +292,12 @@ mod tests {
             .with_ancestor("sha1", None)
             .with_ancestor("sha2", Some("branch-not-in-set"));
         let prs = vec![pr(1, "branch-a", "sha1"), pr(2, "branch-b", "sha2")];
-        let chains = detect_stack_chains(&prs, &jj).await.unwrap();
+        let mut head_to_local = HashMap::new();
+        head_to_local.insert("branch-a".to_string(), "sha1".to_string());
+        head_to_local.insert("branch-b".to_string(), "sha2".to_string());
+        let chains = detect_stack_chains(&prs, &jj, &head_to_local)
+            .await
+            .unwrap();
         assert!(chains.is_empty());
     }
 }

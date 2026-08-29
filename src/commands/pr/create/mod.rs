@@ -240,8 +240,26 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
         let spinner = crate::ui::Spinner::start("Fetching PR details for stack detection");
         let pr_details = fetch_pr_details(gh, &target, &created_prs).await;
         spinner.stop();
+
+        // Build head_ref -> local_commit_id mapping from the revisions we created
+        let commit_infos = revs
+            .iter()
+            .map(|rev| jj.resolve_rev(rev))
+            .collect::<futures::future::JoinAll<_>>()
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>>>()?;
+        let head_to_local = commit_infos
+            .iter()
+            .filter_map(|info| {
+                info.bookmarks
+                    .first()
+                    .map(|bookmark| (bookmark.clone(), info.commit_id.clone()))
+            })
+            .collect::<HashMap<String, String>>();
+
         let spinner = crate::ui::Spinner::start("Detecting stack chains");
-        link_stacks(gh, jj, &target, &pr_details).await?;
+        link_stacks(gh, jj, &target, &pr_details, &head_to_local).await?;
         spinner.stop();
     } else if created_prs.len() == 1 {
         // For single-revision: detect chains among all pushed PRs + the new one
@@ -260,6 +278,12 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
             )
             .await?;
         spinner.stop();
+
+        // Build head_to_local_commit mapping from bookmarks
+        let head_to_local = bookmarks
+            .iter()
+            .map(|b| (b.name.clone(), b.local_commit_id.clone()))
+            .collect::<HashMap<String, String>>();
 
         // Fetch full details for stack detection
         let spinner = crate::ui::Spinner::start("Fetching PR details for stack detection");
@@ -283,7 +307,7 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
         spinner.stop();
 
         let spinner = crate::ui::Spinner::start("Detecting stack chains");
-        link_stacks(gh, jj, &target, &pr_details).await?;
+        link_stacks(gh, jj, &target, &pr_details, &head_to_local).await?;
         spinner.stop();
     }
 
@@ -317,8 +341,10 @@ async fn link_stacks(
     jj: &impl Jj,
     target: &crate::gh::remote::Target,
     pr_details: &[crate::gh::PrDetails],
+    head_to_local_commit: &HashMap<String, String>,
 ) -> Result<()> {
-    let chains = crate::gh::stack_detect::detect_stack_chains(pr_details, jj).await?;
+    let chains =
+        crate::gh::stack_detect::detect_stack_chains(pr_details, jj, head_to_local_commit).await?;
     for chain in chains {
         let result = gh.create_stack(&target.owner, &target.repo, &chain).await;
         if let Err(e) = &result {
