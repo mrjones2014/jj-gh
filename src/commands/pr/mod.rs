@@ -126,8 +126,13 @@ pub enum PrAction {
     /// This is a manual escape hatch when auto-stacking doesn't work as expected.
     /// Each argument can be a revision ID (like `jj-gh pr create`) or a PR number.
     ///
+    /// Without arguments, attempts to create stacks based on local PRs automatically.
+    ///
     /// Use `--force` to unstack PRs that are already in different stacks before
     /// creating the new stack.
+    ///
+    /// In non-TTY environments, it does a dry-run by default. Pass `--confirm`
+    /// to perform the changes.
     Stack(StackArgsInput),
 
     /// Lookup the PR by the given number or revision ID and print its

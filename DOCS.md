@@ -278,17 +278,22 @@ Manually link PRs into a GitHub stack.
 
 Accepts multiple revisions or PR numbers and creates a stack on GitHub. This is a manual escape hatch when auto-stacking doesn't work as expected. Each argument can be a revision ID (like `jj-gh pr create`) or a PR number.
 
+Without arguments, attempts to create stacks based on local PRs automatically.
+
 Use `--force` to unstack PRs that are already in different stacks before creating the new stack.
 
-**Usage:** `jj-gh pr stack [OPTIONS] <REV_OR_PR_NUM> <REV_OR_PR_NUM>...`
+In non-TTY environments, it does a dry-run by default. Pass `--confirm` to perform the changes.
+
+**Usage:** `jj-gh pr stack [OPTIONS] [REV_OR_PR_NUM]...`
 
 ###### **Arguments:**
 
-- `<REV_OR_PR_NUM>` — Revisions or PR numbers to stack, in order from bottom to top. Each argument can be a revision ID (like `jj-gh pr create`) or a PR number
+- `<REV_OR_PR_NUM>` — Revisions or PR numbers to stack, in order from bottom to top. Each argument can be a revision ID (like `jj-gh pr create`) or a PR number. If omitted, automatically detects stacks from all local PRs
 
 ###### **Options:**
 
 - `--force` — Force stack creation even if PRs are already in different stacks. This will unstack them first, then create the new stack
+- `--confirm` — Apply changes without prompting. In interactive terminals, skips the confirmation prompt. In non-interactive environments, performs the operation instead of a dry run. Implies `--force`
 
 ## `jj-gh pr url`
 
