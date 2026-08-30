@@ -2,7 +2,7 @@
 name = "jj-gh"
 version = "0.2.10"
 edition = "2024"
-description = "`jj` tools for working with GitHub PRs from your terminal"
+description = "Manage GitHub PR Stacks natively with `jj`"
 repository = "https://github.com/mrjones2014/jj-gh"
 license = "MIT"
 include = [

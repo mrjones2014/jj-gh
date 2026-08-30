@@ -153,6 +153,7 @@ mod tests {
             _template: &str,
             _config_file: Option<&Path>,
             _reversed: bool,
+            _color: bool,
         ) -> Result<String> {
             unimplemented!()
         }

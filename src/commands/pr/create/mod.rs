@@ -7,7 +7,7 @@ use crate::{
     gh::{CreatePrRequest, Gh, remote},
     jj::{
         self, Jj,
-        inject::{TemplateAliases, escape_jj_string},
+        inject::{TemplateAliases, quote_jj},
     },
     model::Model,
     template::{self, TemplateSource},
@@ -336,6 +336,9 @@ async fn fetch_pr_details(
 }
 
 /// Detect stack chains among the given PRs and create stacks on GitHub.
+///
+/// Linking is best-effort: the PRs themselves are already created by the time
+/// this runs, so a stack failure is reported but does not fail the command.
 async fn link_stacks(
     gh: &impl Gh,
     jj: &impl Jj,
@@ -345,19 +348,20 @@ async fn link_stacks(
 ) -> Result<()> {
     let chains =
         crate::gh::stack_detect::detect_stack_chains(pr_details, jj, head_to_local_commit).await?;
-    for chain in chains {
-        let result = gh.create_stack(&target.owner, &target.repo, &chain).await;
-        if let Err(e) = &result {
-            log::warn!("Failed to create stack for chain {chain:?}: {e:#}");
-        }
-        if let Ok(stack) = result {
-            let pr_list = chain
-                .iter()
-                .map(|n| format!("#{n}"))
-                .collect::<Vec<_>>()
-                .join(" → ");
-            println!("Stack created: {pr_list} (Stack #{})", stack.number);
-        }
+    if chains.is_empty() {
+        return Ok(());
+    }
+    if let Ok(results) = crate::gh::stack_create::create_stacks(
+        gh,
+        target,
+        &chains,
+        pr_details,
+        crate::gh::stack_create::AlreadyStacked::Skip,
+    )
+    .await
+    .inspect_err(|e| log::warn!("Failed to link PR stacks: {e:#}"))
+    {
+        crate::commands::pr::stack::print_stack_results(&results);
     }
     Ok(())
 }
@@ -634,7 +638,7 @@ async fn resolve_title_candidates(
         r#""{TITLE_RECORD_OPEN}" ++ change_id.shortest(8) ++ "{TITLE_RECORD_SEPARATOR}" ++ ({title_template}) ++ "{TITLE_RECORD_CLOSE}""#
     );
     let rendered = jj
-        .eval_template(title_revset, &template, None, true)
+        .eval_template(title_revset, &template, None, true, false)
         .await
         .context("evaluating PR title template")?;
     parse_title_candidates(&rendered)
@@ -683,7 +687,13 @@ async fn load_template_for(
         TemplateSource::File(p) => template::load_template_file(&p, &fs),
         TemplateSource::JjTemplate(t) => {
             let oldest_rev_id = jj
-                .eval_template(title_revset, r#"commit_id.short(40) ++ "\n""#, None, true)
+                .eval_template(
+                    title_revset,
+                    r#"commit_id.short(40) ++ "\n""#,
+                    None,
+                    true,
+                    false,
+                )
                 .await
                 .context("resolving oldest commit id for `pr_oldest_rev_id` alias")?
                 .lines()
@@ -697,17 +707,12 @@ async fn load_template_for(
                 .alias("pr_oldest_rev_id", quote_jj(&oldest_rev_id));
             let tmp = aliases.write_temp_config()?;
             let body = jj
-                .eval_template(title_revset, &t, Some(tmp.path()), true)
+                .eval_template(title_revset, &t, Some(tmp.path()), true, false)
                 .await
                 .context("evaluating PR body template")?;
             Ok(Some(body.trim_end_matches('\n').to_string()))
         }
     }
-}
-
-/// Wrap `s` as a jj template double-quoted string literal, escaping `\` and `"`.
-fn quote_jj(s: &str) -> String {
-    format!(r#""{}""#, escape_jj_string(s))
 }
 
 #[cfg(test)]

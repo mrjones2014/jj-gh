@@ -18,7 +18,7 @@
 //! Private-Use markers (`U+E000` open, `U+E001` close) bracketing the
 //! commit id; the wrapper sits *outside* the user's body so the user can
 //! template anything inside it. After capture we strip the markers from
-//! each line and record the line index → commit id mapping, which drives
+//! each line and record the line index -> commit id mapping, which drives
 //! reverse-video on the focused PR's commit row.
 //! Nothing is sent to the GitHub API until the user accepts the summary
 //! screen.
@@ -849,7 +849,7 @@ async fn order_prs_topologically(jj: &impl Jj, plans: &[PrPlan]) -> Result<Vec<u
         .join("|");
     let template = r#"commit_id.short(40) ++ "\n""#;
     let stdout = jj
-        .eval_template(&revset, template, None, false)
+        .eval_template(&revset, template, None, false, false)
         .await
         .context("ordering PRs by topology")?;
     let commit_to_pr = plans

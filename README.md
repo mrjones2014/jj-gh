@@ -4,6 +4,7 @@
 
 - Create PRs locally from your preferred editor, for any arbitrary revision ID
   - Intelligently supports stacked PRs by choosing the correct base if the revision has an ancestor bookmark for which an open PR exists
+  - Integrates with [GitHub Stacked PRs](https://github.com/orgs/community/discussions/201439)
 - Enable auto-merge for a PR by its revision ID, without having to know/find its PR number (e.g. `jj pr auto-merge zqxy`)
 - Create local bookmarks for PRs, including across forks (e.g. `jj pr fetch 1234 && jj new pr-1234/...`, useful for testing PRs to OSS repos)
 - Show PR metadata like number and CI status in commit graph (e.g. `jj pr log`)
@@ -190,7 +191,7 @@ editor = [
   "env",
   "JJ_GH=1",
   "nvim",
-  "+10",     # skip cursor past frontmatter
+  "+10",  # skip cursor past frontmatter
 ]
 ```
 
@@ -236,20 +237,20 @@ Options related to PR metadata may also be overridden via the [markdown frontmat
 ```toml
 [jj-gh]
 # Auth (one source required; see "Token source precedence" below for env vars and CLI flag)
-gh_askpass = ["op", "read", "op://Personal/github/token"] # preferred
-gh_token = "ghp_..."                                      # plain token, less safe
-askpass_timeout_secs = 20                                 # default 20
+gh_askpass = ["op", "read", "op://Personal/github/token"]  # preferred
+gh_token = "ghp_..."  # plain token, less safe
+askpass_timeout_secs = 20  # default 20
 
 # Behavior
-default_base_branch = "main" # default "master"
-draft = false                # default false
-auto_merge = false           # default false; enable auto-merge on PR after creation
+default_base_branch = "main"  # default "master"
+draft = false  # default false
+auto_merge = false  # default false; enable auto-merge on PR after creation
 auto_merge_method = "merge"  # default "merge"; one of "merge", "squash", "rebase"
 
 # DEPRECATED: this is now auto-detected from the repo, will be removed in a future version
-default_remote = "origin" # default remote to use
+default_remote = "origin"  # default remote to use
 
-upstream_remote = "upstream" # default remote to use for cross-fork PR fetching
+upstream_remote = "upstream"  # default remote to use for cross-fork PR fetching
 
 # PR body template. `pr_create_template` is a jj template string, evaluated
 # against the revset being PR'd in chronological order. `pr_create_template_file`
@@ -297,7 +298,7 @@ editor = [
 auto_stack = true
 
 # enable or disable the use of nerdfont icons
-# (e.g. in the `pr log` default template)
+# (e.g. in the default `pr log`, `pr restack`, and `pr stack` templates)
 # NOTE: if you have issues with nerdfont icons, its most likely your `$PAGER`,
 # you can fix it by either using something like `bat` (https://github.com/sharkdp/bat)
 # as your pager, or setting
@@ -409,6 +410,16 @@ a matching open PR:
 ### `pr restack`
 
 Same aliases available as `pr log`. By default, `pr restack` uses the same template as `pr log`.
+
+### `pr stack`
+
+`pr_number`: PR number as a decimal string.
+`pr_title`: PR title.
+`pr_branch`: head ref name (the source branch on the PR's fork).
+`pr_url`: PR's `html_url`.
+`pr_head_sha`: 40-char hex commit SHA of the PR's head.
+`pr_head_user`: PR's head fork owner login, or empty if the fork was
+deleted.
 
 ## PR body template resolution
 

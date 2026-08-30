@@ -210,8 +210,9 @@ impl Jj for JjCli {
         template: &str,
         config_file: Option<&Path>,
         reversed: bool,
+        color: bool,
     ) -> Result<String> {
-        let args = eval_template_argv(revset, template, config_file, reversed);
+        let args = eval_template_argv(revset, template, config_file, reversed, color);
         String::from_utf8(run_jj_strs(&args).await?).context("jj log output is not UTF-8")
     }
 
@@ -314,6 +315,7 @@ fn eval_template_argv(
     template: &str,
     config_file: Option<&Path>,
     reversed: bool,
+    color: bool,
 ) -> Vec<String> {
     let mut argv = Vec::<String>::with_capacity(10);
     if let Some(path) = config_file {
@@ -324,7 +326,10 @@ fn eval_template_argv(
     argv.push("-r".into());
     argv.push(revset.into());
     argv.push("--no-graph".into());
-    argv.push("--color=never".into());
+    argv.push(format!(
+        "--color={}",
+        if color { "always" } else { "never" }
+    ));
     if reversed {
         argv.push("--reversed".into());
     }
@@ -352,7 +357,7 @@ mod tests {
 
     #[test]
     fn eval_template_argv_minimal() {
-        let argv = eval_template_argv("@", "description", None, false);
+        let argv = eval_template_argv("@", "description", None, false, false);
         assert_eq!(
             argv,
             vec![
@@ -374,6 +379,7 @@ mod tests {
             "description.first_line()",
             Some(Path::new("/tmp/x.toml")),
             true,
+            false,
         );
         assert_eq!(
             argv,
@@ -394,7 +400,7 @@ mod tests {
 
     #[test]
     fn eval_template_argv_config_file_precedes_subcommand() {
-        let argv = eval_template_argv("@", "x", Some(Path::new("/c.toml")), false);
+        let argv = eval_template_argv("@", "x", Some(Path::new("/c.toml")), false, false);
         let log_idx = argv.iter().position(|s| s == "log").unwrap();
         let cfg_idx = argv.iter().position(|s| s == "--config-file").unwrap();
         assert!(cfg_idx < log_idx, "--config-file must precede `log`");

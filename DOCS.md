@@ -26,7 +26,7 @@ This document contains the help content for the `jj-gh` command-line program.
 
 ## `jj-gh`
 
-`jj` tools for working with GitHub PRs from your terminal
+Manage GitHub PR Stacks natively with `jj`
 
 **Usage:** `jj-gh [OPTIONS] <COMMAND>`
 
@@ -294,6 +294,9 @@ In non-TTY environments, it does a dry-run by default. Pass `--confirm` to perfo
 
 - `--force` — Force stack creation even if PRs are already in different stacks. This will unstack them first, then create the new stack
 - `--confirm` — Apply changes without prompting. In interactive terminals, skips the confirmation prompt. In non-interactive environments, performs the operation instead of a dry run. Implies `--force`
+- `-T`, `--template <TEMPLATE>` — jj template used to render each PR line. Available aliases: `pr_number`, `pr_branch`, `pr_title`, `pr_sha`. Example: `"#" ++ pr_number ++ " " ++ pr_branch ++ "  " ++ pr_title`
+- `--nerdfonts <NERDFONTS>` — Force enable nerdfont icons in the default `pr stack` template. Overrides config. Use `--no-nerdfonts` to disable
+- `--no-nerdfonts` — Force the default `pr stack` template not to use nerdfont icons. Overrides config
 
 ## `jj-gh pr url`
 

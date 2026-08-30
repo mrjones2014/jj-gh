@@ -386,22 +386,22 @@ async fn submit(
         }
     }
 
-    // Detect and link stacks
+    // Detect and link stacks. Best-effort: the base refs are already updated,
+    // so a stack failure is reported but does not fail the restack.
     let chains =
         crate::gh::stack_detect::detect_stack_chains(&pr_details, jj, &ctx.branch_to_local).await?;
-    for chain in chains {
-        let result = gh.create_stack(&target.owner, &target.repo, &chain).await;
-        if let Err(e) = &result {
-            log::warn!("Failed to create stack for chain {chain:?}: {e:#}");
-        }
-        if let Ok(stack) = result {
-            let pr_list = chain
-                .iter()
-                .map(|n| format!("#{n}"))
-                .collect::<Vec<_>>()
-                .join(" → ");
-            println!("Stack created: {pr_list} (Stack #{})", stack.number);
-        }
+    if !chains.is_empty()
+        && let Ok(results) = crate::gh::stack_create::create_stacks(
+            gh,
+            target,
+            &chains,
+            &pr_details,
+            crate::gh::stack_create::AlreadyStacked::Skip,
+        )
+        .await
+        .inspect_err(|e| log::warn!("Failed to link PR stacks: {e:#}"))
+    {
+        crate::commands::pr::stack::print_stack_results(&results);
     }
 
     Ok(())

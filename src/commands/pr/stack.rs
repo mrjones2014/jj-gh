@@ -8,15 +8,29 @@
 
 use crate::{
     cli::GlobalOpts,
-    gh::{Gh, PrDetails, remote},
-    jj::Jj,
+    gh::{
+        Gh, PrDetails, remote,
+        stack_create::{AlreadyStacked, ChainOutcome, ChainResult, create_stacks},
+    },
+    jj::{
+        Jj,
+        inject::{TemplateAliases, escape_jj_string, quote_jj},
+    },
     model::Model,
     ui::Spinner,
 };
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Result, anyhow};
 use jj_gh_config_derive::subcommand_args;
 use std::collections::HashMap;
 use std::io::{self, IsTerminal, Write};
+
+/// Default template for rendering each PR line in stack output.
+/// Uses jj template syntax with aliases: `pr_number`, `pr_branch`, `pr_title`, `pr_sha`.
+const DEFAULT_STACK_TEMPLATE: &str = r#"pr_number ++ " " ++ pr_branch ++ "  " ++ pr_title"#;
+
+/// [`DEFAULT_STACK_TEMPLATE`] with the nerdfont glyph replaced by plain
+/// spacing, used when nerdfont rendering is disabled.
+const DEFAULT_STACK_TEMPLATE_PLAIN: &str = r#"pr_number ++ " " ++ pr_branch ++ "  " ++ pr_title"#;
 
 subcommand_args! {
     pub struct StackArgs {
@@ -37,6 +51,38 @@ subcommand_args! {
         /// Implies `--force`.
         #[arg(long)]
         pub confirm: bool,
+
+        /// jj template used to render each PR line.
+        /// Available aliases: `pr_number`, `pr_branch`, `pr_title`, `pr_sha`.
+        /// Example: `"#" ++ pr_number ++ " " ++ pr_branch ++ "  " ++ pr_title`
+        #[arg(long, short = 'T', value_name = "TEMPLATE")]
+        #[config(maps_to = "pr_stack_template")]
+        pub template: Option<String>,
+
+        /// Force enable nerdfont icons in the default `pr stack` template.
+        /// Overrides config. Use `--no-nerdfonts` to disable.
+        #[arg(
+            long,
+            num_args = 0,
+            default_missing_value = "true",
+            default_value_if("no_nerdfonts", "true", Some("false"))
+        )]
+        #[config]
+        pub nerdfonts: bool,
+
+        /// Force the default `pr stack` template not to use nerdfont icons.
+        /// Overrides config.
+        #[arg(long, conflicts_with = "nerdfonts")]
+        pub no_nerdfonts: bool,
+    }
+}
+
+/// The default per-PR line template for the current nerdfont setting.
+fn default_stack_template(nerdfonts: bool) -> &'static str {
+    if nerdfonts {
+        DEFAULT_STACK_TEMPLATE
+    } else {
+        DEFAULT_STACK_TEMPLATE_PLAIN
     }
 }
 
@@ -124,6 +170,10 @@ async fn auto_detect_and_stack(model: &impl Model, args: &StackArgs) -> Result<(
 
     // --confirm implies --force
     let force = args.force || args.confirm;
+    let template = args
+        .template
+        .as_deref()
+        .unwrap_or_else(|| default_stack_template(args.nerdfonts));
 
     // Determine whether to proceed with creation
     let should_create = if args.confirm {
@@ -131,12 +181,12 @@ async fn auto_detect_and_stack(model: &impl Model, args: &StackArgs) -> Result<(
         true
     } else if !is_tty {
         // Non-TTY without --confirm: dry run
-        show_stacks(&chains, &pr_details);
+        show_stacks(jj, &chains, &pr_details, template).await?;
         println!("\nDry run: Use --confirm to apply changes");
         return Ok(());
     } else {
         // TTY without --confirm: show confirmation prompt
-        show_confirmation(&chains, &pr_details)?
+        show_confirmation(jj, &chains, &pr_details, template).await?
     };
 
     if !should_create {
@@ -145,7 +195,15 @@ async fn auto_detect_and_stack(model: &impl Model, args: &StackArgs) -> Result<(
     }
 
     // Create stacks (confirmation implies force)
-    create_stacks(gh, &target, &chains, &pr_details, force).await?;
+    let mode = if force {
+        AlreadyStacked::Unstack
+    } else {
+        AlreadyStacked::Bail
+    };
+    let spinner = Spinner::start("Creating stacks");
+    let results = create_stacks(gh, &target, &chains, &pr_details, mode).await?;
+    spinner.stop();
+    print_stack_results(&results);
 
     Ok(())
 }
@@ -239,10 +297,14 @@ async fn explicit_stack(model: &impl Model, args: &StackArgs) -> Result<()> {
 }
 
 /// Display detected stacks with formatting
-fn show_stacks(chains: &[Vec<u64>], pr_details: &[PrDetails]) {
+async fn show_stacks(
+    jj: &impl Jj,
+    chains: &[Vec<u64>],
+    pr_details: &[PrDetails],
+    template: &str,
+) -> Result<()> {
     const RESET: &str = "\x1b[0m";
-    const CYAN: &str = "\x1b[36m";
-    const MAGENTA: &str = "\x1b[35m";
+    const DIM: &str = "\x1b[2m";
 
     let tty = std::io::stdout().is_terminal();
     let on = |code: &'static str| -> &'static str { if tty { code } else { "" } };
@@ -252,30 +314,61 @@ fn show_stacks(chains: &[Vec<u64>], pr_details: &[PrDetails]) {
     let mut has_already_stacked = false;
 
     for (i, chain) in chains.iter().enumerate() {
-        println!("Stack {}:", i + 1);
-        let pr_list = chain
-            .iter()
-            .map(|&num| {
-                let pr = pr_details.iter().find(|p| p.number == num).unwrap();
-                let already_stacked = pr.stack_number.is_some();
-                if already_stacked {
-                    has_already_stacked = true;
-                }
-                let marker = if already_stacked { "*" } else { "" };
-                format!(
-                    "{}#{}{}{} {}{}{}",
-                    on(CYAN),
-                    num,
-                    marker,
-                    on(RESET),
-                    on(MAGENTA),
-                    pr.head_ref,
-                    on(RESET)
+        println!(
+            "{}Stack {} ({} PRs):{}",
+            on(DIM),
+            i + 1,
+            chain.len(),
+            on(RESET)
+        );
+        for &num in chain {
+            let pr = pr_details.iter().find(|p| p.number == num).unwrap();
+            let already_stacked = pr.stack_number.is_some();
+            if already_stacked {
+                has_already_stacked = true;
+            }
+            let marker = if already_stacked { "*" } else { "" };
+
+            // Build template aliases for this PR with colors
+            let pr_number_str = format!("{num}{marker}");
+            let aliases = TemplateAliases::builder()
+                .alias(
+                    "pr_number",
+                    format!(
+                        "label(\"gh-stack-pr-number\", \"#{}\")",
+                        escape_jj_string(&pr_number_str)
+                    ),
                 )
-            })
-            .collect::<Vec<_>>()
-            .join(" → ");
-        println!("  {pr_list}\n");
+                .alias(
+                    "pr_branch",
+                    format!(
+                        "label(\"gh-stack-pr-branch\", \"{}\")",
+                        escape_jj_string(&pr.head_ref)
+                    ),
+                )
+                .alias("pr_title", quote_jj(&pr.title))
+                .alias("pr_head_sha", quote_jj(&pr.head_sha))
+                .alias(
+                    "pr_head_user",
+                    pr.head_user_login
+                        .as_ref()
+                        .map(|s| quote_jj(s))
+                        .unwrap_or_default(),
+                )
+                .alias("pr_url", quote_jj(&pr.html_url))
+                .color("gh-stack-pr-number", "cyan")
+                .color("gh-stack-pr-branch", "magenta");
+
+            // Evaluate the template using jj
+            let tmp = aliases.write_temp_config()?;
+            let rendered = jj
+                .eval_template(&pr.head_sha, template, Some(tmp.path()), true, true)
+                .await
+                .unwrap_or_else(|_| format!("#{} {}  {}", num, pr.head_ref, pr.title));
+
+            println!("  {}│{} {}", on(DIM), on(RESET), rendered.trim());
+        }
+        println!();
     }
 
     if has_already_stacked {
@@ -284,11 +377,17 @@ fn show_stacks(chains: &[Vec<u64>], pr_details: &[PrDetails]) {
 
     let total_prs = chains.iter().map(Vec::len).sum::<usize>();
     println!("Total: {} PRs in {} stacks", total_prs, chains.len());
+    Ok(())
 }
 
 /// Show confirmation prompt and get user input
-fn show_confirmation(chains: &[Vec<u64>], pr_details: &[PrDetails]) -> Result<bool> {
-    show_stacks(chains, pr_details);
+async fn show_confirmation(
+    jj: &impl Jj,
+    chains: &[Vec<u64>],
+    pr_details: &[PrDetails],
+    template: &str,
+) -> Result<bool> {
+    show_stacks(jj, chains, pr_details, template).await?;
 
     print!("\nCreate these stacks? [y/N] ");
     io::stdout().flush()?;
@@ -300,94 +399,55 @@ fn show_confirmation(chains: &[Vec<u64>], pr_details: &[PrDetails]) -> Result<bo
     Ok(response == "y" || response == "yes")
 }
 
-/// Create stacks from detected chains
-async fn create_stacks(
-    gh: &impl Gh,
-    target: &remote::Target,
-    chains: &[Vec<u64>],
-    pr_details: &[PrDetails],
-    force: bool,
-) -> Result<()> {
-    // Collect all PRs that are already in stacks
-    let already_stacked = pr_details
+/// `#1 -> #2 -> #3` for a chain of PR numbers.
+pub(crate) fn format_chain(chain: &[u64]) -> String {
+    chain
         .iter()
-        .filter(|pr| pr.stack_number.is_some())
-        .map(|pr| pr.number)
-        .collect::<Vec<u64>>();
+        .map(|n| format!("#{n}"))
+        .collect::<Vec<_>>()
+        .join(" → ")
+}
 
-    // If force is set and there are already-stacked PRs, unstack them first
-    if force && !already_stacked.is_empty() {
-        let spinner = Spinner::start("Unstacking existing PRs");
-        let unique_stacks = pr_details
-            .iter()
-            .filter_map(|pr| pr.stack_number)
-            .collect::<std::collections::HashSet<u64>>();
-
-        for stack_num in unique_stacks {
-            let pr_numbers = pr_details
-                .iter()
-                .filter(|pr| pr.stack_number == Some(stack_num))
-                .map(|pr| pr.number)
-                .collect::<Vec<u64>>();
-            if !pr_numbers.is_empty() {
-                let result = gh
-                    .unstack_prs(&target.owner, &target.repo, stack_num, &pr_numbers)
-                    .await;
-                if let Err(e) = &result {
-                    log::warn!("Failed to unstack PRs from stack #{stack_num}: {e:#}");
-                }
+/// Report what [`crate::gh::stack_create::create_stacks`] did.
+pub(crate) fn print_stack_results(results: &[ChainResult]) {
+    let mut created = 0;
+    let mut existing = 0;
+    for result in results {
+        let chain = format_chain(&result.chain);
+        match result.outcome {
+            ChainOutcome::Created(number) => {
+                println!("✓ Stack #{number} created: {chain}");
+                created += 1;
+            }
+            ChainOutcome::AlreadyExists => {
+                println!("⊘ Stack already exists: {chain}");
+                existing += 1;
+            }
+            ChainOutcome::LeftAlone => {
+                log::debug!("chain {chain} is already stacked; leaving it alone");
             }
         }
-        spinner.stop();
-    } else if !already_stacked.is_empty() && !force {
-        bail!("Some PRs are already in stacks. Use --force to unstack and restack them.");
     }
 
-    // Fetch existing stacks to check for duplicates
-    let spinner = Spinner::start("Checking existing stacks");
-    let existing_stacks = gh.list_stacks(&target.owner, &target.repo).await?;
-
-    // Create each stack
-    let mut created_count = 0;
-    let mut skipped_count = 0;
-    for (i, chain) in chains.iter().enumerate() {
-        // Check if this exact stack already exists
-        let stack_exists = existing_stacks.iter().any(|stack| {
-            let existing_prs = stack
-                .pull_requests
-                .iter()
-                .map(|pr| pr.number)
-                .collect::<Vec<u64>>();
-            existing_prs == *chain
-        });
-
-        if stack_exists {
-            skipped_count += 1;
-            let pr_list = chain
-                .iter()
-                .map(|n| format!("#{n}"))
-                .collect::<Vec<_>>()
-                .join(" → ");
-            println!("⊘ Stack already exists: {pr_list}");
-            continue;
-        }
-
-        spinner.set_message(format!("Creating stack {}/{}", i + 1, chains.len()));
-        let stack = gh.create_stack(&target.owner, &target.repo, chain).await?;
-
-        let pr_list = chain
-            .iter()
-            .map(|n| format!("#{n}"))
-            .collect::<Vec<_>>()
-            .join(" → ");
-        println!("✓ Stack #{} created: {}", stack.number, pr_list);
-        created_count += 1;
-    }
-    spinner.stop();
-
-    if created_count == 0 && skipped_count > 0 {
+    if created == 0 && existing > 0 {
         println!("\nAll stacks already exist");
     }
+}
 
-    Ok(())
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_template_keeps_nerdfont_glyph_when_enabled() {
+        assert_eq!(default_stack_template(true), DEFAULT_STACK_TEMPLATE);
+        assert!(default_stack_template(true).contains('\u{f407}'));
+    }
+
+    #[test]
+    fn default_template_drops_nerdfont_glyph_when_disabled() {
+        let template = default_stack_template(false);
+        assert_eq!(template, DEFAULT_STACK_TEMPLATE_PLAIN);
+        assert!(!template.contains('\u{f407}'));
+    }
 }

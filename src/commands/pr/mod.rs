@@ -227,6 +227,13 @@ mod tests {
     }
 
     #[derive(clap::Parser, Debug)]
+    #[command(no_binary_name = true)]
+    struct StackArgsParser {
+        #[command(flatten)]
+        args: StackArgsInput,
+    }
+
+    #[derive(clap::Parser, Debug)]
     #[command(
         no_binary_name = true,
         group = clap::ArgGroup::new("retry_target").required(true).multiple(false)
@@ -303,6 +310,16 @@ mod tests {
 
     fn merged_edit(argv: &[&str], toml_config: &str) -> Config {
         let argv = parse_edit(argv);
+        let fig = config::defaults_figment()
+            .merge(config::JjConfProvider::from_memory("test", toml_config))
+            .merge(Serialized::defaults(&argv));
+        config::extract(&fig).unwrap()
+    }
+
+    fn merged_stack(argv: &[&str], toml_config: &str) -> Config {
+        let argv = StackArgsParser::try_parse_from(argv.iter().copied())
+            .expect("StackArgsInput failed to parse")
+            .args;
         let fig = config::defaults_figment()
             .merge(config::JjConfProvider::from_memory("test", toml_config))
             .merge(Serialized::defaults(&argv));
@@ -567,6 +584,48 @@ mod tests {
         assert!(c.nerdfonts);
 
         let c = merged_pr_log(
+            &["--no-nerdfonts"],
+            "\n\
+            [jj-gh]\n\
+            nerdfonts = true\n\
+            ",
+        );
+        assert!(!c.nerdfonts);
+    }
+
+    #[test]
+    fn pr_stack_bare_argv_lets_config_nerdfonts_win() {
+        let c = merged_stack(
+            &[],
+            "\n\
+            [jj-gh]\n\
+            nerdfonts = true\n\
+            ",
+        );
+        assert!(c.nerdfonts);
+
+        let c = merged_stack(
+            &[],
+            "\n\
+            [jj-gh]\n\
+            nerdfonts = false\n\
+            ",
+        );
+        assert!(!c.nerdfonts);
+    }
+
+    #[test]
+    fn pr_stack_nerdfonts_flags_override_config() {
+        let c = merged_stack(
+            &["--nerdfonts"],
+            "\n\
+            [jj-gh]\n\
+            nerdfonts = false\n\
+            ",
+        );
+        assert!(c.nerdfonts);
+
+        let c = merged_stack(
             &["--no-nerdfonts"],
             "\n\
             [jj-gh]\n\

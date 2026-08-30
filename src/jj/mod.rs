@@ -152,6 +152,7 @@ pub trait Jj {
         template: &str,
         config_file: Option<&Path>,
         reversed: bool,
+        color: bool,
     ) -> Result<String>;
 
     /// Git-format diff of the commits selected by `revset`. Used to render a

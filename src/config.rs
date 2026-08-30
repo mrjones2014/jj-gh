@@ -108,6 +108,10 @@ config_schema! {
     /// jj template used by `pr restack`. Falls back to `pr_log_template`.
     pr_restack_template: Option<String> = None,
 
+    /// jj template used to render each PR line in `pr stack` output.
+    /// Available aliases: `pr_number`, `pr_branch`, `pr_title`, `pr_sha`.
+    pr_stack_template: Option<String> = None,
+
     /// Render Nerd-Fonts glyphs in TUI output.
     nerdfonts: bool = true,
 }

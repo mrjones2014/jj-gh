@@ -12,6 +12,7 @@ mod reviewer;
 pub mod pr_lookup;
 pub mod real;
 pub mod remote;
+pub mod stack_create;
 pub mod stack_detect;
 pub use queries::{CiStatus, PrWithCiStatus};
 pub use reviewer::Reviewer;
@@ -316,7 +317,7 @@ pub trait Gh {
 
     /// Fetch open PRs with head commit SHA and CI status, scoped to the given
     /// `branches` (head ref names) and `head_owner`. Used by `pr log` to build
-    /// a `commit_id` → PR mapping for jj template aliases. Owner filtering is
+    /// a `commit_id` -> PR mapping for jj template aliases. Owner filtering is
     /// required because unrelated forks commonly use the same branch names.
     ///
     /// The search is `is:pr is:open head:<b1> head:<b2> ...`. Implementations

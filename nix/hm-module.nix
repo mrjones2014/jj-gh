@@ -187,6 +187,17 @@ in
         '';
       };
 
+      pr_stack_template = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        example = ''pr_number ++ " " ++ pr_branch ++ "  " ++ pr_title'';
+        description = ''
+          jj template string used to render each PR row in the confirmation UI
+          for `jj-gh pr stack` when run without arguments.
+          Template aliases for PR metadata are injected. See https://github.com/mrjones2014/jj-gh#template-aliases
+        '';
+      };
+
       draft = mkOption {
         type = types.nullOr types.bool;
         default = null;
@@ -242,7 +253,7 @@ in
       nerdfonts = mkOption {
         type = types.nullOr types.bool;
         default = null;
-        description = "Use nerdfont icons in `jj pr log` output.";
+        description = "Use nerdfont icons in `jj pr log`, `jj pr restack`, and `jj pr stack` output.";
       };
     };
   };
