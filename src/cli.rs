@@ -31,32 +31,34 @@ pub struct Cli {
     pub command: Command,
 }
 
+const GLOBAL_OPTIONS_HEADING: &str = "Global Options";
+
 subcommand_args! {
     #[no_globals]
     pub struct GlobalOpts {
         /// Increase log verbosity (repeat for more, e.g. `-vv`).
-        #[arg(short = 'v', long, action = clap::ArgAction::Count, global = true)]
+        #[arg(short = 'v', long, action = clap::ArgAction::Count, global = true, help_heading = GLOBAL_OPTIONS_HEADING)]
         pub verbose: u8,
 
         /// Drop log level to `ERROR`.
-        #[arg(short = 'q', long, global = true, conflicts_with = "verbose")]
+        #[arg(short = 'q', long, global = true, conflicts_with = "verbose", help_heading = GLOBAL_OPTIONS_HEADING)]
         pub quiet: bool,
 
         /// Set log level explicitly, overrides `-v` and `-q`.
-        #[arg(long, value_name = "LEVEL", global = true)]
+        #[arg(long, value_name = "LEVEL", global = true, help_heading = GLOBAL_OPTIONS_HEADING)]
         pub log_level: Option<LevelFilter>,
 
         /// Git remote used for the user's own pushes and PR head lookups.
         /// Precedence: this flag, then git's auto-detected default push remote,
         /// then `default_remote` in config.
-        #[arg(long, value_name = "NAME", global = true)]
+        #[arg(long, value_name = "NAME", global = true, help_heading = GLOBAL_OPTIONS_HEADING)]
         #[config(fallback = "default_remote")]
         pub remote: Option<String>,
 
         /// Git remote used as the PR target in fork workflows. Precedence: this
         /// flag, then `upstream_remote` in config, else
         /// [`crate::gh::remote::DEFAULT_UPSTREAM_REMOTE`].
-        #[arg(long, value_name = "NAME", global = true)]
+        #[arg(long, value_name = "NAME", global = true, help_heading = GLOBAL_OPTIONS_HEADING)]
         #[config(fallback = "upstream_remote")]
         pub upstream_remote: Option<String>,
 
@@ -64,11 +66,11 @@ subcommand_args! {
         /// e.g. `--gh-askpass "op read op://Vault/gh/token"`.
         /// Highest-priority token source; outranks `$GH_ASKPASS`, the token env
         /// vars, and `gh_askpass` in config.
-        #[arg(long, value_name = "CMD", value_parser = crate::util::parse_shell_command, global = true)]
+        #[arg(long, value_name = "CMD", value_parser = crate::util::parse_shell_command, global = true, help_heading = GLOBAL_OPTIONS_HEADING)]
         pub gh_askpass: Option<crate::util::ShellCommand>,
 
         /// Timeout in seconds for the askpass helper. Default: 20.
-        #[arg(long = "askpass-timeout", value_name = "SECS", global = true)]
+        #[arg(long = "askpass-timeout", value_name = "SECS", global = true, help_heading = GLOBAL_OPTIONS_HEADING)]
         #[config]
         pub askpass_timeout_secs: u64,
     }
