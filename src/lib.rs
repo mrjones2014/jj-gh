@@ -28,7 +28,7 @@ pub async fn dispatch(bin_name: &str) -> anyhow::Result<()> {
     use clap::Parser;
 
     let args = Cli::parse();
-    let _logger = logging::init(args.global.resolve_log_level())?;
+    let _logger = logging::init(args.global.resolve_log_levels())?;
     let global = args.global;
     match args.command {
         Command::Pr { action } => commands::pr::dispatch(global, action).await?,

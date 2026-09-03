@@ -1,8 +1,11 @@
 //! CLI arg parser
 
-use crate::commands::{
-    completions::{CompletionShell, SubcommandStr},
-    pr::PrAction,
+use crate::{
+    commands::{
+        completions::{CompletionShell, SubcommandStr},
+        pr::PrAction,
+    },
+    logging::LogLevels,
 };
 use clap::{
     Parser, Subcommand,
@@ -36,7 +39,7 @@ const GLOBAL_OPTIONS_HEADING: &str = "Global Options";
 subcommand_args! {
     #[no_globals]
     pub struct GlobalOpts {
-        /// Increase log verbosity (repeat for more, e.g. `-vv`).
+        /// Increase log verbosity: `-v` is `DEBUG`, `-vv` is `TRACE` (equivalent to `--log-level debug` and `--log-level trace`, respectively).
         #[arg(short = 'v', long, action = clap::ArgAction::Count, global = true, help_heading = GLOBAL_OPTIONS_HEADING)]
         pub verbose: u8,
 
@@ -77,7 +80,14 @@ subcommand_args! {
 }
 
 impl GlobalOptsInput {
-    pub fn resolve_log_level(&self) -> LevelFilter {
+    pub fn resolve_log_levels(&self) -> LogLevels {
+        LogLevels {
+            own: self.resolve_log_level(),
+            dependencies: self.resolve_dependency_log_level(),
+        }
+    }
+
+    fn resolve_log_level(&self) -> LevelFilter {
         if let Some(level) = self.log_level {
             return level;
         }
@@ -96,6 +106,16 @@ impl GlobalOptsInput {
             0 => base,
             1 => LevelFilter::Debug,
             _ => LevelFilter::Trace,
+        }
+    }
+
+    /// Dependencies are silent below `TRACE`, where `octocrab`, `rustls`, and
+    /// `hyper` emit thousands of lines per command that bury ours.
+    fn resolve_dependency_log_level(&self) -> LevelFilter {
+        if self.resolve_log_level() == LevelFilter::Trace {
+            LevelFilter::Trace
+        } else {
+            LevelFilter::Off
         }
     }
 }
@@ -151,4 +171,60 @@ pub enum DebugAction {
         #[arg(value_name = "REV")]
         rev: String,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Parser, Debug)]
+    #[command(no_binary_name = true)]
+    struct GlobalOptsParser {
+        #[command(flatten)]
+        global: GlobalOptsInput,
+    }
+
+    fn parse(argv: &[&str]) -> GlobalOptsInput {
+        GlobalOptsParser::try_parse_from(argv.iter().copied())
+            .expect("GlobalOptsInput failed to parse")
+            .global
+    }
+
+    #[test]
+    fn dependencies_stay_off_below_trace() {
+        for argv in [
+            vec!["-v"],
+            vec!["-q"],
+            vec!["--log-level", "debug"],
+            vec!["--log-level", "off"],
+        ] {
+            assert_eq!(
+                parse(&argv).resolve_dependency_log_level(),
+                LevelFilter::Off,
+                "argv {argv:?} should not enable dependency logs"
+            );
+        }
+    }
+
+    #[test]
+    fn every_spelling_of_trace_enables_dependencies() {
+        for argv in [vec!["-vv"], vec!["-vvv"], vec!["--log-level", "trace"]] {
+            assert_eq!(
+                parse(&argv).resolve_log_levels(),
+                LogLevels {
+                    own: LevelFilter::Trace,
+                    dependencies: LevelFilter::Trace,
+                },
+                "argv {argv:?} should enable dependency logs"
+            );
+        }
+    }
+
+    #[test]
+    fn own_level_climbs_with_verbosity() {
+        assert_eq!(parse(&["-v"]).resolve_log_level(), LevelFilter::Debug);
+        assert_eq!(parse(&["-vv"]).resolve_log_level(), LevelFilter::Trace);
+        assert_eq!(parse(&["-vvv"]).resolve_log_level(), LevelFilter::Trace);
+        assert_eq!(parse(&["-q"]).resolve_log_level(), LevelFilter::Error);
+    }
 }
