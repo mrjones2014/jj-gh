@@ -4,7 +4,7 @@
 //! discovered at the workspace root. The repository is discovered once at
 //! [`JjCli::new`] and reused for every subsequent gix operation.
 
-use super::{CommitInfo, Jj, PushedBookmark, jj_argv};
+use crate::jj::{CommitInfo, Jj, PushedBookmark, jj_argv};
 use anyhow::{Context, Result, anyhow};
 use gix::bstr::ByteSlice;
 use std::path::{Path, PathBuf};

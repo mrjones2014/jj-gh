@@ -1,0 +1,54 @@
+id: no-super-paths
+snapshots:
+  ? |
+    #[cfg(test)]
+    mod fake {
+        use super::{FileSystem, Path, Result};
+    }
+  : labels:
+      - source: super
+        style: primary
+        start: 32
+        end: 37
+  ? |
+    fn caller() {
+        super::stack::print_stack_results(&results);
+    }
+  : labels:
+      - source: super
+        style: primary
+        start: 18
+        end: 23
+  ? |
+    mod not_gated {
+        use super::Thing;
+
+        #[test]
+        fn works() {}
+    }
+  : labels:
+      - source: super
+        style: primary
+        start: 24
+        end: 29
+  ? |
+    use super::*;
+  : labels:
+      - source: super
+        style: primary
+        start: 4
+        end: 9
+  ? |
+    use super::PrDetails;
+  : labels:
+      - source: super
+        style: primary
+        start: 4
+        end: 9
+  ? |
+    use super::{ArgInfo, SubInfo, collect_subs};
+  : labels:
+      - source: super
+        style: primary
+        start: 4
+        end: 9

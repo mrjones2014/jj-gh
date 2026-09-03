@@ -1,7 +1,6 @@
 //! Stack detection logic for identifying which PRs should be linked together.
 
-use super::PrDetails;
-use crate::jj::Jj;
+use crate::{gh::PrDetails, jj::Jj};
 use anyhow::Result;
 use std::collections::HashMap;
 

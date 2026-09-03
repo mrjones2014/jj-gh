@@ -2,8 +2,10 @@
 //! GitHub PR (and its remote target). Used by the `pr` handlers (`auto-merge`,
 //! `edit`, `retry-failed`) and by `jj-gh debug pr-lookup`.
 
-use super::{Gh, PrDetails, PrSummary, remote};
-use crate::jj::Jj;
+use crate::{
+    gh::{Gh, PrDetails, PrSummary, remote},
+    jj::Jj,
+};
 use anyhow::{Result, anyhow};
 
 /// Resolved lookup state for a revision: the bookmark, the remote target, the

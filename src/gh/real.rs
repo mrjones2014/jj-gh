@@ -1,24 +1,25 @@
 //! `octocrab`-backed [`Gh`] implementation.
 
-use super::{
-    BaseLookup, CreatePrRequest, Gh, Label, PrCreated, PrDetails, PrSummary, PullRequestStack,
-    Reviewer, UpdatePr, WorkflowRun, WorkflowRunConclusion, WorkflowRunStatus,
-};
 use crate::{
     config::AutoMergeMethod,
-    gh::queries::{
-        ConvertToDraftInternal, ConvertToDraftResponseData, ConvertToDraftVariables,
-        CreatePrInternal, CreatePrResponseData, CreatePrVariables, DisableAutoMergeInternal,
-        DisableAutoMergeResponseData, DisableAutoMergeVariables, EnableAutoMergeInternal,
-        EnableAutoMergeResponseData, EnableAutoMergeVariables, FindOpenPrInternal,
-        FindOpenPrResponseData, FindOpenPrVariables, GetPrInternal,
-        GetPrInternalRepositoryPullRequest, GetPrResponseData, GetPrVariables, LookupBaseInternal,
-        LookupBaseResponseData, LookupBaseVariables, MarkReadyForReviewInternal,
-        MarkReadyForReviewResponseData, MarkReadyForReviewVariables, PrWithCiStatus,
-        PrsWithCiStatusInternal, PrsWithCiStatusResponseData, PrsWithCiStatusVariables,
-        PullRequestMergeMethod, PullRequestState, RemoveLabelsInternal, RemoveLabelsResponseData,
-        RemoveLabelsVariables, RequestedReviewer, UpdatePrInternal, UpdatePrResponseData,
-        UpdatePrVariables,
+    gh::{
+        BaseLookup, CreatePrRequest, Gh, Label, PrCreated, PrDetails, PrSummary, PullRequestStack,
+        Reviewer, UpdatePr, WorkflowRun, WorkflowRunConclusion, WorkflowRunStatus,
+        queries::{
+            ConvertToDraftInternal, ConvertToDraftResponseData, ConvertToDraftVariables,
+            CreatePrInternal, CreatePrResponseData, CreatePrVariables, DisableAutoMergeInternal,
+            DisableAutoMergeResponseData, DisableAutoMergeVariables, EnableAutoMergeInternal,
+            EnableAutoMergeResponseData, EnableAutoMergeVariables, FindOpenPrInternal,
+            FindOpenPrResponseData, FindOpenPrVariables, GetPrInternal,
+            GetPrInternalRepositoryPullRequest, GetPrResponseData, GetPrVariables,
+            LookupBaseInternal, LookupBaseResponseData, LookupBaseVariables,
+            MarkReadyForReviewInternal, MarkReadyForReviewResponseData,
+            MarkReadyForReviewVariables, PrWithCiStatus, PrsWithCiStatusInternal,
+            PrsWithCiStatusResponseData, PrsWithCiStatusVariables, PullRequestMergeMethod,
+            PullRequestState, RemoveLabelsInternal, RemoveLabelsResponseData,
+            RemoveLabelsVariables, RequestedReviewer, UpdatePrInternal, UpdatePrResponseData,
+            UpdatePrVariables,
+        },
     },
 };
 use anyhow::{Context, Result, anyhow};
