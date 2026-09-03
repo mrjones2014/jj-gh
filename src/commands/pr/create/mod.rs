@@ -269,8 +269,9 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
             .collect::<HashMap<String, String>>();
 
         let spinner = crate::ui::Spinner::start("Detecting stack chains");
-        link_stacks(gh, jj, &target, &pr_details, &head_to_local).await?;
+        let results = link_stacks(gh, jj, &target, &pr_details, &head_to_local).await?;
         spinner.stop();
+        crate::commands::pr::stack::print_stack_results(&results);
     } else if created_prs.len() == 1 {
         // For single-revision: detect chains among all pushed PRs + the new one
         let spinner = crate::ui::Spinner::start("Fetching local PRs");
@@ -317,8 +318,9 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
         spinner.stop();
 
         let spinner = crate::ui::Spinner::start("Detecting stack chains");
-        link_stacks(gh, jj, &target, &pr_details, &head_to_local).await?;
+        let results = link_stacks(gh, jj, &target, &pr_details, &head_to_local).await?;
         spinner.stop();
+        crate::commands::pr::stack::print_stack_results(&results);
     }
 
     Ok(())
@@ -349,31 +351,37 @@ async fn fetch_pr_details(
 ///
 /// Linking is best-effort: the PRs themselves are already created by the time
 /// this runs, so a stack failure is reported but does not fail the command.
+///
+/// Base refs are only realigned *within* a chain, by
+/// [`crate::gh::stack_create::create_stacks`]. The bottom PR keeps whatever
+/// base the user chose in the editor; reconciling every base against the graph
+/// is `jj-gh pr stack`'s job, not something `pr create` should do behind the
+/// user's back.
+///
+/// Returns what happened so the caller can stop its spinner before printing;
+/// writing to stdout under a live spinner leaves the glyph on the line.
 async fn link_stacks(
     gh: &impl Gh,
     jj: &impl Jj,
     target: &crate::gh::remote::Target,
     pr_details: &[crate::gh::PrDetails],
     head_to_local_commit: &HashMap<String, String>,
-) -> Result<()> {
-    let chains =
-        crate::gh::stack_detect::detect_stack_chains(pr_details, jj, head_to_local_commit).await?;
-    if chains.is_empty() {
-        return Ok(());
+) -> Result<Vec<crate::gh::stack_create::ChainResult>> {
+    let shape = crate::gh::stack_detect::detect(pr_details, jj, head_to_local_commit, None).await?;
+    if shape.chains.is_empty() {
+        return Ok(Vec::new());
     }
-    if let Ok(results) = crate::gh::stack_create::create_stacks(
+    let existing_stacks = gh.list_stacks(&target.owner, &target.repo).await?;
+    Ok(crate::gh::stack_create::create_stacks(
         gh,
         target,
-        &chains,
+        &shape.chains,
         pr_details,
-        crate::gh::stack_create::AlreadyStacked::Skip,
+        &existing_stacks,
     )
     .await
     .inspect_err(|e| log::warn!("Failed to link PR stacks: {e:#}"))
-    {
-        crate::commands::pr::stack::print_stack_results(&results);
-    }
-    Ok(())
+    .unwrap_or_default())
 }
 
 /// Create a single PR for one revision. Returns the created PR number.

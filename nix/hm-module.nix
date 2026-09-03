@@ -188,25 +188,15 @@ in
         '';
       };
 
-      pr_restack_template = mkOption {
-        type = types.nullOr types.str;
+      auto_push = mkOption {
+        type = types.nullOr types.bool;
         default = null;
-        example = ''description ++ " #" ++ pr_number ++ "\n"'';
+        example = false;
         description = ''
-          jj template string used to render the `pr restack` subcommand.
-          By default, uses `pr_log_template`. Template aliases
-          for PR metadata are injected. See https://github.com/mrjones2014/jj-gh#template-aliases
-        '';
-      };
-
-      pr_stack_template = mkOption {
-        type = types.nullOr types.str;
-        default = null;
-        example = ''pr_number ++ " " ++ pr_branch ++ "  " ++ pr_title'';
-        description = ''
-          jj template string used to render each PR row in the confirmation UI
-          for `jj-gh pr stack` when run without arguments.
-          Template aliases for PR metadata are injected. See https://github.com/mrjones2014/jj-gh#template-aliases
+          Whether `jj-gh pr stack` pushes bookmarks whose remote target has
+          fallen behind the local one before linking them into a GitHub stack.
+          Defaults to `true`; GitHub rejects a stack whose head branches have
+          not been pushed.
         '';
       };
 
@@ -265,7 +255,7 @@ in
       nerdfonts = mkOption {
         type = types.nullOr types.bool;
         default = null;
-        description = "Use nerdfont icons in `jj pr log`, `jj pr restack`, and `jj pr stack` output.";
+        description = "Use nerdfont icons in `jj pr log` and `jj pr stack` output.";
       };
     };
   };

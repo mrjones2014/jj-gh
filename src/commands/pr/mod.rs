@@ -8,7 +8,6 @@ mod create;
 mod edit;
 pub mod fetch;
 mod log;
-mod restack;
 mod retry_failed;
 mod stack;
 mod url;
@@ -30,7 +29,6 @@ use self::log::{PrLogArgs, PrLogArgsInput};
 use auto_merge::{AutoMergeArgs, AutoMergeArgsInput};
 use edit::{EditArgs, EditArgsInput};
 use fetch::{FetchArgs, FetchArgsInput};
-use restack::{RestackArgs, RestackArgsInput};
 use retry_failed::{RetryFailedArgs, RetryFailedArgsInput};
 use stack::{StackArgs, StackArgsInput};
 
@@ -93,17 +91,6 @@ pub enum PrAction {
     #[command(visible_alias = "l")]
     Log(PrLogArgsInput),
 
-    /// Push the current `jj` stack shape up to GitHub by updating each PR's
-    /// base branch to match its closest stacked ancestor bookmark.
-    ///
-    /// Restack does not rewrite the jj graph; the user shapes the graph first
-    /// (e.g. via `jj rebase`) and then runs `jj-gh pr restack` to set each
-    /// PR's `baseRefName` on the remote. Launches an interactive TUI by
-    /// default. Pass `--dry-run` or `--json` to print the proposed plan
-    /// without making any API calls.
-    #[command(visible_alias = "rs")]
-    Restack(RestackArgsInput),
-
     /// Re-run failed CI jobs on a PR, or on all local PRs with failed CI.
     ///
     /// Resolves the PR from a revision (via its local bookmark) or PR number,
@@ -120,19 +107,26 @@ pub enum PrAction {
     )]
     RetryFailed(RetryFailedArgsInput),
 
-    /// Manually link PRs into a GitHub stack.
+    /// Make GitHub match the shape of the local `jj` graph.
     ///
-    /// Accepts multiple revisions or PR numbers and creates a stack on GitHub.
-    /// This is a manual escape hatch when auto-stacking doesn't work as expected.
-    /// Each argument can be a revision ID (like `jj-gh pr create`) or a PR number.
+    /// Pushes bookmarks whose remote target has fallen behind, moves each PR's
+    /// base branch onto its closest stacked ancestor bookmark, then creates,
+    /// reshapes, or dissolves GitHub stacks to match the local chains. The jj
+    /// graph is never rewritten: shape it yourself (e.g. via `jj rebase`),
+    /// then run this.
     ///
-    /// Without arguments, attempts to create stacks based on local PRs automatically.
+    /// Without arguments it reconciles every local PR, printing the `jj log`
+    /// it is working from and the proposed plan before touching anything.
+    /// Given revisions or PR numbers it asserts exactly that stack, bottom to
+    /// top, which is the escape hatch for when detection gets it wrong.
     ///
-    /// Use `--force` to unstack PRs that are already in different stacks before
-    /// creating the new stack.
+    /// Without arguments, applying needs a confirmation: answer the prompt, or
+    /// pass `--force`. Outside a terminal there is nobody to prompt, so the
+    /// plan is printed and `--force` is required to apply it. Naming the PRs
+    /// explicitly is itself the confirmation, so that form does not prompt.
     ///
-    /// In non-TTY environments, it does a dry-run by default. Pass `--confirm`
-    /// to perform the changes.
+    /// Use `--dry-run` or `--json` to print the plan and stop either way.
+    #[command(visible_alias = "s")]
     Stack(StackArgsInput),
 
     /// Lookup the PR by the given number or revision ID and print its
@@ -178,10 +172,6 @@ pub async fn dispatch(global: GlobalOptsInput, action: PrAction) -> Result<()> {
         PrAction::Log(input) => {
             let args = PrLogArgs::resolve(input, &config, &globals);
             self::log::run(&model, &args).await?;
-        }
-        PrAction::Restack(input) => {
-            let args = RestackArgs::resolve(input, &config, &globals);
-            restack::run(&model, &args).await?;
         }
         PrAction::RetryFailed(input) => {
             let args = RetryFailedArgs::resolve(input, &config, &globals);
@@ -241,13 +231,6 @@ mod tests {
     struct RetryFailedArgsParser {
         #[command(flatten)]
         args: RetryFailedArgsInput,
-    }
-
-    #[derive(clap::Parser, Debug)]
-    #[command(no_binary_name = true)]
-    struct RestackArgsParser {
-        #[command(flatten)]
-        args: RestackArgsInput,
     }
 
     fn parse_create(argv: &[&str]) -> CreateArgsInput {
@@ -328,16 +311,6 @@ mod tests {
 
     fn merged_pr_log(argv: &[&str], toml_config: &str) -> Config {
         let argv = parse_pr_log(argv);
-        let fig = config::defaults_figment()
-            .merge(config::JjConfProvider::from_memory("test", toml_config))
-            .merge(Serialized::defaults(&argv));
-        config::extract(&fig).unwrap()
-    }
-
-    fn merged_restack(argv: &[&str], toml_config: &str) -> Config {
-        let argv = RestackArgsParser::try_parse_from(argv.iter().copied())
-            .expect("RestackArgsInput failed to parse")
-            .args;
         let fig = config::defaults_figment()
             .merge(config::JjConfProvider::from_memory("test", toml_config))
             .merge(Serialized::defaults(&argv));
@@ -470,42 +443,42 @@ mod tests {
     }
 
     #[test]
-    fn restack_auto_stack_defaults_on() {
-        let c = merged_restack(&[], "");
-        assert!(c.auto_stack);
+    fn pr_stack_auto_push_defaults_on() {
+        let c = merged_stack(&[], "");
+        assert!(c.auto_push);
     }
 
     #[test]
-    fn restack_auto_stack_config_wins_over_bare_argv() {
-        let c = merged_restack(
+    fn pr_stack_auto_push_config_wins_over_bare_argv() {
+        let c = merged_stack(
             &[],
             "\
             [jj-gh]\n\
-            auto_stack = false\n\
+            auto_push = false\n\
             ",
         );
-        assert!(!c.auto_stack);
+        assert!(!c.auto_push);
     }
 
     #[test]
-    fn restack_stack_flags_override_config() {
-        let c = merged_restack(
-            &["--stack"],
+    fn pr_stack_push_flags_override_config() {
+        let c = merged_stack(
+            &["--push"],
             "\
             [jj-gh]\n\
-            auto_stack = false\n\
+            auto_push = false\n\
             ",
         );
-        assert!(c.auto_stack);
+        assert!(c.auto_push);
 
-        let c = merged_restack(
-            &["--no-stack"],
+        let c = merged_stack(
+            &["--no-push"],
             "\
             [jj-gh]\n\
-            auto_stack = true\n\
+            auto_push = true\n\
             ",
         );
-        assert!(!c.auto_stack);
+        assert!(!c.auto_push);
     }
 
     #[test]

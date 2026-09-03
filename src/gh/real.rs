@@ -506,10 +506,8 @@ impl Gh for OctocrabGh {
     ) -> Result<()> {
         let route = format!("/repos/{owner}/{repo}/stacks/{stack_number}/unstack");
         let body = serde_json::json!({ "pull_requests": pr_numbers });
-        self.octo
-            .post::<_, ()>(&route, Some(&body))
+        post_no_content(&self.octo, &route, Some(&body))
             .await
-            .map_err(humanize)
             .with_context(|| format!("unstacking PRs from stack {stack_number} in {owner}/{repo}"))
     }
 
@@ -575,20 +573,20 @@ fn build_search_queries(owner: &str, repo: &str, branches: &[String]) -> Vec<Str
     queries
 }
 
-/// POST to a workflow-run action endpoint (`rerun` or `rerun-failed-jobs`).
-/// Octocrab has no typed wrapper for these, so we route through `_post` and
-/// reuse `map_github_error` for consistent error handling.
-async fn post_action_run(
+/// POST to an endpoint that answers `204 No Content`.
+///
+/// Octocrab's typed `post` always deserializes the response body, so an empty
+/// one fails with `JSON Error in .: EOF while parsing a value` even though the
+/// call succeeded. Routing through `_post` lets us check the status and ignore
+/// the body, while still reusing `map_github_error` for consistent errors.
+async fn post_no_content<B: serde::Serialize + ?Sized>(
     octo: &Octocrab,
-    owner: &str,
-    repo: &str,
-    run_id: u64,
-    action: &str,
+    route: &str,
+    body: Option<&B>,
 ) -> Result<()> {
-    let route = format!("/repos/{owner}/{repo}/actions/runs/{run_id}/{action}");
-    let uri = http::Uri::try_from(&route).with_context(|| format!("building URI for {route}"))?;
+    let uri = http::Uri::try_from(route).with_context(|| format!("building URI for {route}"))?;
     let response = octo
-        ._post(uri, None::<&()>)
+        ._post(uri, body)
         .await
         .map_err(humanize)
         .with_context(|| format!("POST {route}"))?;
@@ -597,6 +595,19 @@ async fn post_action_run(
         .map_err(humanize)
         .with_context(|| format!("POST {route}"))?;
     Ok(())
+}
+
+/// POST to a workflow-run action endpoint (`rerun` or `rerun-failed-jobs`).
+/// Octocrab has no typed wrapper for these.
+async fn post_action_run(
+    octo: &Octocrab,
+    owner: &str,
+    repo: &str,
+    run_id: u64,
+    action: &str,
+) -> Result<()> {
+    let route = format!("/repos/{owner}/{repo}/actions/runs/{run_id}/{action}");
+    post_no_content(octo, &route, None::<&()>).await
 }
 
 fn map_workflow_run(r: &octocrab::models::workflows::Run) -> WorkflowRun {

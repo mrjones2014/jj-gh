@@ -13,7 +13,6 @@ This document contains the help content for the `jj-gh` command-line program.
 - [`jj-gh pr edit`↴](#jj-gh-pr-edit)
 - [`jj-gh pr fetch`↴](#jj-gh-pr-fetch)
 - [`jj-gh pr log`↴](#jj-gh-pr-log)
-- [`jj-gh pr restack`↴](#jj-gh-pr-restack)
 - [`jj-gh pr retry-failed`↴](#jj-gh-pr-retry-failed)
 - [`jj-gh pr stack`↴](#jj-gh-pr-stack)
 - [`jj-gh pr url`↴](#jj-gh-pr-url)
@@ -59,9 +58,8 @@ Commands to work with PRs
 - `edit` — Edit an existing PR's title, body, base, labels, reviewers, draft state, and auto-merge settings via the markdown frontmatter editor flow
 - `fetch` — Fetch a pull request into a local bookmark
 - `log` — Like `jj log`, but injects PR metadata (e.g. number, CI status, URL)
-- `restack` — Push the current `jj` stack shape up to GitHub by updating each PR's base branch to match its closest stacked ancestor bookmark
 - `retry-failed` — Re-run failed CI jobs on a PR, or on all local PRs with failed CI
-- `stack` — Manually link PRs into a GitHub stack
+- `stack` — Make GitHub match the shape of the local `jj` graph
 - `url` — Lookup the PR by the given number or revision ID and print its full URL. This is useful in pipes such as `jj-gh pr url <rev> | pbcopy` or `jj-gh pr url <rev> | wl-copy`
 
 ## `jj-gh pr auto-merge`
@@ -232,30 +230,6 @@ This works by injecting template aliases keyed by `commit_id` and renders inline
 - `--no-nerdfonts` — Force the default `pr log` template not to use nerdfont icons. Overrides config
 - `-T <TEMPLATE>` — Override `pr_log_template` from config for this invocation. Sets the body of the default `pr_log` template alias jj-gh injects. Has no effect if you pass your own `-T` / `--template` in forwarded `jj log` args (after `--`)
 
-## `jj-gh pr restack`
-
-Push the current `jj` stack shape up to GitHub by updating each PR's base branch to match its closest stacked ancestor bookmark.
-
-Restack does not rewrite the jj graph; the user shapes the graph first (e.g. via `jj rebase`) and then runs `jj-gh pr restack` to set each PR's `baseRefName` on the remote. Launches an interactive TUI by default. Pass `--dry-run` or `--json` to print the proposed plan without making any API calls.
-
-**Usage:** `jj-gh pr restack [OPTIONS] [PR_NUM|REV]`
-
-**Command Alias:** `rs`
-
-###### **Arguments:**
-
-- `<PR_NUM|REV>` — PR number or revision ID to position the cursor on when the TUI opens; if omitted the cursor starts on the first PR in the stack
-
-###### **Options:**
-
-- `--dry-run` — Print the proposed plan and exit without launching the TUI. No PR is updated. Auto-enabled when stdout is not a terminal
-- `--json` — Emit the proposed plan as JSON. Implies `--dry-run`
-- `-T`, `--template <TEMPLATE>` — Template to use in interactive mode; conflicts with `--json` and `--dry-run`. The same template aliases as `pr log` are injected here. See `jj-gh pr log --help`
-- `--nerdfonts <NERDFONTS>` — Force enable nerdfont icons in the default restack/log template. Overrides config. Use `--no-nerdfonts` to disable
-- `--no-nerdfonts` — Force the default restack/log template not to use nerdfont icons. Overrides config
-- `--stack <AUTO_STACK>` — Automatically link PRs into a GitHub stack after restacking. Default: true. Use `--no-stack` to disable
-- `--no-stack` — Disable automatic stack linking after restack
-
 ## `jj-gh pr retry-failed`
 
 Re-run failed CI jobs on a PR, or on all local PRs with failed CI.
@@ -282,29 +256,33 @@ With `--cancel`, in-progress runs are cancelled first; once they finalize, every
 
 ## `jj-gh pr stack`
 
-Manually link PRs into a GitHub stack.
+Make GitHub match the shape of the local `jj` graph.
 
-Accepts multiple revisions or PR numbers and creates a stack on GitHub. This is a manual escape hatch when auto-stacking doesn't work as expected. Each argument can be a revision ID (like `jj-gh pr create`) or a PR number.
+Pushes bookmarks whose remote target has fallen behind, moves each PR's base branch onto its closest stacked ancestor bookmark, then creates, reshapes, or dissolves GitHub stacks to match the local chains. The jj graph is never rewritten: shape it yourself (e.g. via `jj rebase`), then run this.
 
-Without arguments, attempts to create stacks based on local PRs automatically.
+Without arguments it reconciles every local PR, printing the `jj log` it is working from and the proposed plan before touching anything. Given revisions or PR numbers it asserts exactly that stack, bottom to top, which is the escape hatch for when detection gets it wrong.
 
-Use `--force` to unstack PRs that are already in different stacks before creating the new stack.
+Without arguments, applying needs a confirmation: answer the prompt, or pass `--force`. Outside a terminal there is nobody to prompt, so the plan is printed and `--force` is required to apply it. Naming the PRs explicitly is itself the confirmation, so that form does not prompt.
 
-In non-TTY environments, it does a dry-run by default. Pass `--confirm` to perform the changes.
+Use `--dry-run` or `--json` to print the plan and stop either way.
 
 **Usage:** `jj-gh pr stack [OPTIONS] [REV_OR_PR_NUM]...`
 
+**Command Alias:** `s`
+
 ###### **Arguments:**
 
-- `<REV_OR_PR_NUM>` — Revisions or PR numbers to stack, in order from bottom to top. Each argument can be a revision ID (like `jj-gh pr create`) or a PR number. If omitted, automatically detects stacks from all local PRs
+- `<REV_OR_PR_NUM>` — Revisions or PR numbers to stack, in order from bottom to top. Each argument can be a revision ID (like `jj-gh pr create`) or a PR number. If omitted, every local PR is reconciled against the local `jj` graph
 
 ###### **Options:**
 
-- `--force` — Force stack creation even if PRs are already in different stacks. This will unstack them first, then create the new stack
-- `--confirm` — Apply changes without prompting. In interactive terminals, skips the confirmation prompt. In non-interactive environments, performs the operation instead of a dry run. Implies `--force`
-- `-T`, `--template <TEMPLATE>` — jj template used to render each PR line. Available aliases: `pr_number`, `pr_branch`, `pr_title`, `pr_sha`. Example: `"#" ++ pr_number ++ " " ++ pr_branch ++ "  " ++ pr_title`
-- `--nerdfonts <NERDFONTS>` — Force enable nerdfont icons in the default `pr stack` template. Overrides config. Use `--no-nerdfonts` to disable
-- `--no-nerdfonts` — Force the default `pr stack` template not to use nerdfont icons. Overrides config
+- `--force` — Apply the plan without prompting. Required to apply anything when stdin or stdout is not a terminal, where the default is a dry run. Also unstacks PRs that are already in a different stack; answering the interactive prompt does the same
+- `--dry-run` — Print the proposed plan and exit without touching GitHub
+- `--json` — Emit the proposed plan as JSON. Implies `--dry-run`
+- `--push <AUTO_PUSH>` — Push bookmarks whose remote target has fallen behind before stacking. Default: true. Use `--no-push` to disable
+- `--no-push` — Do not push bookmarks, even if their remote target is stale
+- `--nerdfonts <NERDFONTS>` — Force enable nerdfont icons in the `jj log` view shown above the plan. Overrides config. Use `--no-nerdfonts` to disable
+- `--no-nerdfonts` — Force the `jj log` view not to use nerdfont icons. Overrides config
 
 ## `jj-gh pr url`
 
