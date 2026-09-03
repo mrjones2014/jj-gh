@@ -37,7 +37,7 @@ This document contains the help content for the `jj-gh` command-line program.
 
 ###### **Options:**
 
-- `-v`, `--verbose` — Increase log verbosity (repeat for more, e.g. `-vv`)
+- `-v`, `--verbose` — Increase log verbosity: `-v` is `DEBUG`, `-vv` is `TRACE` (equivalent to `--log-level debug` and `--log-level trace`, respectively)
 - `-q`, `--quiet` — Drop log level to `ERROR`
 - `--log-level <LEVEL>` — Set log level explicitly, overrides `-v` and `-q`
 - `--remote <NAME>` — Git remote used for the user's own pushes and PR head lookups. Precedence: this flag, then git's auto-detected default push remote, then `default_remote` in config
