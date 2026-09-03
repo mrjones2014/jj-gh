@@ -42,7 +42,7 @@ flexi_logger = { version = "0.31", default-features = false, features = [
   "colors",
 ] }
 futures = "0.3"
-gix = { version = "0.86", default-features = false, features = [
+gix = { version = "0.87", default-features = false, features = [
   "basic",
   "blocking-http-transport-reqwest-native-tls",
   "blocking-network-client",
