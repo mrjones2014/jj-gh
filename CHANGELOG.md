@@ -5,6 +5,59 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0](https://github.com/mrjones2014/jj-gh/compare/jj-gh-v0.2.10...jj-gh-v0.3.0) - 2026-09-04
+
+### Added
+
+- *(pr-create)* Allow configuring which commit title is generated from
+- *(pr-stack)* Allow customizable template and rework UI
+- *(pr-stack)* Add automatic/no-args mode to auto-stack local PRs
+- *(pr)* Add `jj-gh pr stack` subcommand
+- *(pr-restack)* Ensure GitHub PR Stacks are up to date
+- *(pr-create)* Automatically create GitHub PR Stacks
+- *(pr-create)* Accept multiple revisions to create multiple PRs from
+- *(model)* Add APIs for GitHub PR Stacks
+- *(completions)* add `nushell` completions
+- *(nix)* use `home-manager`'s standard idiom for shell integration
+
+### Fixed
+
+- *(pr-stack)* Make UI more untuitive and easier to understand
+- *(ui)* Add terminal hyperlinks, ensure output goes to correct channel
+- *(deps)* Update `gix`
+- *(pr-create)* use local commit IDs for stack detection
+- *(log)* Tweak log spec to avoid unhelpful log noise
+- *(help)* Improve help clarity by putting global opts in subheading
+- *(pr)* use the correct base revision
+- *(ci)* Fix version range to allow dependabot to update it
+- *(deps)* update cargo minor and patch
+- *(deps)* update rust crate syn to v3
+- *(nix)* use `zsh.initContent` instead of `zsh.initExtra`
+- *(deps)* update cargo minor and patch
+- *(deps)* update cargo minor and patch
+
+### Other
+
+- [**breaking**] Remove `jj-gh pr restack` in favor of `jj-gh pr stack`
+- *(lint)* Add ast-grep rule against `use super::*`
+- *(api)* Implement logic for detecting stacks
+- *(api)* Add Stack info to PR query
+- *(deps)* update GitHub GraphQL schema
+- *(deps)* bump noyalib from 0.0.18 to 0.0.22 ([#270](https://github.com/mrjones2014/jj-gh/pull/270))
+- *(deps)* bump the cargo-minor-patch group with 4 updates ([#269](https://github.com/mrjones2014/jj-gh/pull/269))
+- *(deps)* update GitHub GraphQL schema ([#266](https://github.com/mrjones2014/jj-gh/pull/266))
+- review
+- *(deps)* bump noyalib from 0.0.17 to 0.0.18 ([#261](https://github.com/mrjones2014/jj-gh/pull/261))
+- *(dpes)* update GitHub GraphQL schema ([#260](https://github.com/mrjones2014/jj-gh/pull/260))
+- *(fmt)* Reformat TOML files with Tombi
+- *(deps)* bump noyalib from 0.0.16 to 0.0.17 ([#256](https://github.com/mrjones2014/jj-gh/pull/256))
+- *(deps)* lock file maintenance
+- *(dpes)* update GitHub GraphQL schema ([#252](https://github.com/mrjones2014/jj-gh/pull/252))
+- *(dpes)* update GitHub GraphQL schema ([#241](https://github.com/mrjones2014/jj-gh/pull/241))
+- *(dpes)* update GitHub GraphQL schema ([#239](https://github.com/mrjones2014/jj-gh/pull/239))
+- *(dpes)* update GitHub GraphQL schema ([#237](https://github.com/mrjones2014/jj-gh/pull/237))
+- *(dpes)* update GitHub GraphQL schema
+
 ## [0.2.10](https://github.com/mrjones2014/jj-gh/compare/jj-gh-v0.2.9...jj-gh-v0.2.10) - 2026-07-09
 
 ### Fixed

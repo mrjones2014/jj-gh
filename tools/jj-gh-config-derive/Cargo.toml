@@ -1,6 +1,6 @@
 [package]
 name = "jj-gh-config-derive"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2024"
 description = "You are probably looking for the `jj-gh` crate instead."
 repository = "https://github.com/mrjones2014/jj-gh"
