@@ -48,7 +48,7 @@ config_schema! {
     /// it back to figment), so the serde skip is per-field rather than via
     /// the macro's default `skip_serializing_if = "Option::is_none"`.
     #[serde(skip_serializing)]
-    #[cfg_attr(feature = "schema-validation", schemars(with = "Option<String>"))]
+    #[schemars(with = "Option<String>")]
     gh_token: Option<SecretString> = None,
 
     /// Fallback base branch when neither `--base` nor an ancestor bookmark
@@ -117,8 +117,18 @@ config_schema! {
 }
 
 /// GitHub merge method used when enabling auto-merge on a PR.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
-#[cfg_attr(feature = "schema-validation", derive(schemars::JsonSchema))]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    clap::ValueEnum,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "lowercase")]
 #[clap(rename_all = "lowercase")]
 pub enum AutoMergeMethod {
@@ -129,8 +139,18 @@ pub enum AutoMergeMethod {
 }
 
 /// Which commit to use for the default PR title.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
-#[cfg_attr(feature = "schema-validation", derive(schemars::JsonSchema))]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    clap::ValueEnum,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "lowercase")]
 #[clap(rename_all = "lowercase")]
 pub enum DefaultTitleSource {

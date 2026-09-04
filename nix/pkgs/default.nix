@@ -27,15 +27,13 @@ let
 
   gen-docs = callPackage ./gen-docs.nix { };
   gen-manpage = callPackage ./gen-manpage.nix { };
-  jj-gh = callPackage ./jj-gh.nix { inherit gen-manpage; };
-  print-config-schema = callPackage ./print-config-schema.nix { };
+  jj-gh = callPackage ./jj-gh.nix { };
   release-plz-patched = callPackage ./release-plz-patched.nix { };
   update-docs = callPackage ./update-docs.nix { inherit gen-docs; };
 in
 {
   inherit
     jj-gh
-    print-config-schema
     release-plz-patched
     update-docs
     ;

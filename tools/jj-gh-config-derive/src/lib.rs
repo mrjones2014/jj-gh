@@ -288,8 +288,12 @@ pub fn config_schema(input: TokenStream) -> TokenStream {
     let deprecated_keys = deprecated_key_entries(&schema.fields);
 
     let expanded = quote! {
-        #[derive(::std::fmt::Debug, ::serde::Deserialize, ::serde::Serialize)]
-        #[cfg_attr(feature = "schema-validation", derive(::schemars::JsonSchema))]
+        #[derive(
+            ::std::fmt::Debug,
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            ::schemars::JsonSchema,
+        )]
         #[serde(default)]
         pub struct Config {
             #(#struct_fields)*

@@ -1,7 +1,7 @@
 {
   self,
   pkgs,
-  print-config-schema,
+  jj-gh,
 }:
 let
   hmModuleSettingsOptsJson =
@@ -25,7 +25,7 @@ pkgs.runCommand "hm-module-schema"
     ];
   }
   ''
-    ${print-config-schema}/bin/print-config-schema > schema.json
+    ${jj-gh}/bin/jj-gh config schema > schema.json
     jq -r '.properties | keys[]' schema.json | sort > rust-fields.txt
     jq -r '.[]' ${hmModuleSettingsOptsJson} | sort > nix-fields.txt
     if ! diff -u rust-fields.txt nix-fields.txt >&2; then
