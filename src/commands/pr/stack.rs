@@ -28,13 +28,17 @@ use crate::{
     },
     jj::{Jj, PushedBookmark},
     model::Model,
-    ui::Spinner,
+    ui::{PrLinks, Spinner, Stream},
 };
 use anyhow::{Context, Result, anyhow, bail};
 use jj_gh_config_derive::subcommand_args;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::io::{self, IsTerminal, Write};
+
+/// Everything this command prints is UI: the plan, the prompt, the progress
+/// lines. Only `--json` is a result, and it goes to stdout.
+const UI: Stream = Stream::Stderr;
 
 const RESET: &str = "\x1b[0m";
 const DIM: &str = "\x1b[2m";
@@ -51,7 +55,7 @@ subcommand_args! {
         pub targets: Vec<String>,
 
         /// Apply the plan without prompting. Required to apply anything when
-        /// stdin or stdout is not a terminal, where the default is a dry run.
+        /// stdin or stderr is not a terminal, where the default is a dry run.
         /// Also unstacks PRs that are already in a different stack; answering
         /// the interactive prompt does the same.
         #[arg(long)]
@@ -170,23 +174,25 @@ async fn reconcile(model: &impl Model, args: &StackArgs) -> Result<()> {
     }
 
     if plan.is_empty() {
-        println!("Everything already matches the local graph");
+        eprintln!("Everything already matches the local graph");
         return Ok(());
     }
 
+    let links = PrLinks::from_details(&ctx.pr_details);
     show_graph(args, &ctx).await;
-    print_plan(&plan, &ctx.pr_details);
+    print_plan(&plan, &ctx.pr_details, &links);
 
     if args.dry_run {
-        println!("\n{}Dry run: nothing was changed{}", on(DIM), on(RESET));
+        eprintln!("\n{}Dry run: nothing was changed{}", on(DIM), on(RESET));
         return Ok(());
     }
     // Outside a terminal there is nobody to answer the prompt, so the safe
-    // default is to show the plan and stop.
-    let interactive = io::stdin().is_terminal() && io::stdout().is_terminal();
+    // default is to show the plan and stop. The prompt is written to stderr,
+    // so that is the stream that has to be a terminal.
+    let interactive = io::stdin().is_terminal() && io::stderr().is_terminal();
     if !args.force && !interactive {
-        println!(
-            "\n{}Not a terminal, so nothing was changed. Pass --force to apply.{}",
+        eprintln!(
+            "\n{}Not a TTY, so nothing was changed. Pass --force to apply.{}",
             on(DIM),
             on(RESET),
         );
@@ -195,7 +201,7 @@ async fn reconcile(model: &impl Model, args: &StackArgs) -> Result<()> {
     // Reaching the apply step means either `--force` or an interactive `y`;
     // both mean "yes, including unstacking whatever is in the way".
     if !args.force && !confirm()? {
-        println!("Aborted");
+        eprintln!("Aborted");
         return Ok(());
     }
 
@@ -227,7 +233,7 @@ async fn gather(model: &impl Model, args: &StackArgs) -> Result<Option<Gathered>
         .collect::<Vec<String>>();
     if branch_names.is_empty() {
         spinner.stop();
-        println!("No bookmarks are tracked on `{remote_name}`");
+        eprintln!("No bookmarks are tracked on `{remote_name}`");
         return Ok(None);
     }
 
@@ -241,7 +247,7 @@ async fn gather(model: &impl Model, args: &StackArgs) -> Result<Option<Gathered>
         .await?;
     if prs.is_empty() {
         spinner.stop();
-        println!("No local PRs found");
+        eprintln!("No local PRs found");
         return Ok(None);
     }
 
@@ -458,25 +464,25 @@ async fn show_graph(args: &StackArgs, ctx: &Gathered) {
         "-T",
         "pr_log",
     ];
-    if let Err(e) = crate::proc::stream(&cmd).await {
+    if let Err(e) = crate::proc::stream_to_stderr(&cmd).await {
         log::debug!("could not render the jj log view: {e:#}");
     }
 }
 
-fn print_plan(plan: &Plan, pr_details: &[PrDetails]) {
+fn print_plan(plan: &Plan, pr_details: &[PrDetails], links: &PrLinks) {
     let title_of = pr_details
         .iter()
         .map(|pr| (pr.number, pr.title.as_str()))
         .collect::<HashMap<u64, &str>>();
 
     if !plan.pushes.is_empty() {
-        println!("\n{}Push{} ({}):", on(DIM), on(RESET), plan.pushes.len());
+        eprintln!("\n{}Push{} ({}):", on(DIM), on(RESET), plan.pushes.len());
         for push in &plan.pushes {
             let from = push
                 .remote_commit_id
                 .as_deref()
                 .map_or("(not on remote)".to_string(), short_sha);
-            println!(
+            eprintln!(
                 "  {}{}{}  {} {}->{} {}",
                 on(MAGENTA),
                 push.bookmark,
@@ -490,17 +496,20 @@ fn print_plan(plan: &Plan, pr_details: &[PrDetails]) {
     }
 
     if !plan.bases.is_empty() {
-        println!(
+        eprintln!(
             "\n{}Retarget base{} ({}):",
             on(DIM),
             on(RESET),
             plan.bases.len()
         );
         for base in &plan.bases {
-            println!(
-                "  {}#{}{}  {}  base {}{}{} {}<-{} {}{}{}",
+            // The whole line is the link target, so anywhere on the row is
+            // clickable; only the number is underlined, or the row would be
+            // one long rule.
+            let line = format!(
+                "{}{}{}  {}  base {}{}{} {}<-{} {}{}{}",
                 on(CYAN),
-                base.pr_number,
+                links.underlined_number(UI, base.pr_number),
                 on(RESET),
                 base.title,
                 on(DIM),
@@ -512,35 +521,42 @@ fn print_plan(plan: &Plan, pr_details: &[PrDetails]) {
                 base.proposed_base,
                 on(RESET),
             );
+            eprintln!("  {}", links.link(UI, base.pr_number, &line));
         }
     }
 
     if !plan.chains.is_empty() {
-        println!("\n{}Stack{} ({}):", on(DIM), on(RESET), plan.chains.len());
+        eprintln!("\n{}Stack{} ({}):", on(DIM), on(RESET), plan.chains.len());
         for chain in &plan.chains {
-            println!("  {}", format_chain(chain));
+            eprintln!("  {}", format_chain(links, chain));
         }
     }
 
     if !plan.unstack.is_empty() {
-        println!(
+        eprintln!(
             "\n{}Unstack{} ({}):",
             on(DIM),
             on(RESET),
             plan.unstack.len()
         );
-        for number in &plan.unstack {
-            let title = title_of.get(number).copied().unwrap_or_default();
-            println!("  {}#{number}{}  {title}", on(CYAN), on(RESET));
+        for &number in &plan.unstack {
+            let title = title_of.get(&number).copied().unwrap_or_default();
+            let line = format!(
+                "{}{}{}  {title}",
+                on(CYAN),
+                links.underlined_number(UI, number),
+                on(RESET)
+            );
+            eprintln!("  {}", links.link(UI, number, &line));
         }
         // Worth spelling out: a user watching a healthy stack get torn down
         // mid-run should know it is a precondition, not a mistake.
-        println!(
+        eprintln!(
             "  {}GitHub will not move a stacked PR's base ref, so these leave{}",
             on(DIM),
             on(RESET),
         );
-        println!(
+        eprintln!(
             "  {}their stack first and are stacked again afterwards.{}",
             on(DIM),
             on(RESET),
@@ -560,6 +576,7 @@ async fn apply(model: &impl Model, ctx: Gathered, plan: Plan) -> Result<()> {
         mut existing_stacks,
         ..
     } = ctx;
+    let links = PrLinks::from_details(&pr_details);
 
     // No spinner around the pushes: `jj git push` streams its own progress to
     // the terminal, and a live spinner would fight it for the line.
@@ -594,8 +611,8 @@ async fn apply(model: &impl Model, ctx: Gathered, plan: Plan) -> Result<()> {
         }
         existing_stacks.retain(|stack| !dissolved.contains(&stack.number));
 
-        for number in &unstacked {
-            println!("OK  #{number} unstacked");
+        for &number in &unstacked {
+            eprintln!("OK  {} unstacked", links.number(UI, number));
         }
     }
 
@@ -624,7 +641,11 @@ async fn apply(model: &impl Model, ctx: Gathered, plan: Plan) -> Result<()> {
         }
         spinner.stop();
         for base in &plan.bases {
-            println!("OK  #{} base -> {}", base.pr_number, base.proposed_base);
+            eprintln!(
+                "OK  {} base -> {}",
+                links.number(UI, base.pr_number),
+                base.proposed_base
+            );
         }
     }
 
@@ -632,7 +653,7 @@ async fn apply(model: &impl Model, ctx: Gathered, plan: Plan) -> Result<()> {
         let spinner = Spinner::start("Creating stacks");
         let results = create_stacks(gh, &target, &plan.chains, &pr_details, &existing_stacks).await;
         spinner.stop();
-        print_stack_results(&results?);
+        print_stack_results(&links, &results?);
     }
 
     Ok(())
@@ -681,6 +702,7 @@ async fn explicit(model: &impl Model, args: &StackArgs) -> Result<()> {
     }
 
     let chain = pr_details.iter().map(|pr| pr.number).collect::<Vec<u64>>();
+    let links = PrLinks::from_details(&pr_details);
     spinner.stop();
 
     // Naming the PRs is the confirmation here, so there is no prompt. The
@@ -695,8 +717,13 @@ async fn explicit(model: &impl Model, args: &StackArgs) -> Result<()> {
         return Ok(());
     }
     if args.dry_run {
-        println!("{}Stack{}: {}", on(DIM), on(RESET), format_chain(&chain));
-        println!("\n{}Dry run: nothing was changed{}", on(DIM), on(RESET));
+        eprintln!(
+            "{}Stack{}: {}",
+            on(DIM),
+            on(RESET),
+            format_chain(&links, &chain)
+        );
+        eprintln!("\n{}Dry run: nothing was changed{}", on(DIM), on(RESET));
         return Ok(());
     }
 
@@ -709,7 +736,7 @@ async fn explicit(model: &impl Model, args: &StackArgs) -> Result<()> {
     let existing_stacks = gh.list_stacks(&target.owner, &target.repo).await?;
     let results = create_stacks(gh, &target, &[chain], &pr_details, &existing_stacks).await;
     spinner.stop();
-    print_stack_results(&results?);
+    print_stack_results(&links, &results?);
 
     Ok(())
 }
@@ -739,42 +766,43 @@ async fn push_stale(jj: &impl Jj, pr_details: &[PrDetails], remote_name: &str) -
 }
 
 fn confirm() -> Result<bool> {
-    print!("\nApply this plan? [y/N] ");
-    io::stdout().flush()?;
+    eprint!("\nApply this plan? [y/N] ");
+    io::stderr().flush()?;
     let mut input = String::new();
     io::stdin().read_line(&mut input)?;
     let response = input.trim().to_lowercase();
     Ok(response == "y" || response == "yes")
 }
 
-/// Emit the ANSI code only when stdout is a terminal.
+/// Emit the ANSI code only when stderr, where all of this UI goes, is a
+/// terminal.
 fn on(code: &'static str) -> &'static str {
-    if io::stdout().is_terminal() { code } else { "" }
+    UI.on(code)
 }
 
 fn short_sha(sha: &str) -> String {
     sha.chars().take(8).collect()
 }
 
-/// `#1 -> #2 -> #3` for a chain of PR numbers.
-pub(crate) fn format_chain(chain: &[u64]) -> String {
+/// `#1 -> #2 -> #3` for a chain of PR numbers, each one hyperlinked.
+pub(crate) fn format_chain(links: &PrLinks, chain: &[u64]) -> String {
     chain
         .iter()
-        .map(|n| format!("#{n}"))
+        .map(|&n| links.number(UI, n))
         .collect::<Vec<_>>()
         .join(" \u{2192} ")
 }
 
 /// Report what [`crate::gh::stack_create::create_stacks`] did.
-pub(crate) fn print_stack_results(results: &[ChainResult]) {
+pub(crate) fn print_stack_results(links: &PrLinks, results: &[ChainResult]) {
     for result in results {
-        let chain = format_chain(&result.chain);
+        let chain = format_chain(links, &result.chain);
         for number in &result.retargeted {
             log::debug!("retargeted #{number}'s base ref to make {chain} chain");
         }
         match result.outcome {
-            ChainOutcome::Created(number) => println!("OK  stack #{number} created: {chain}"),
-            ChainOutcome::AlreadyExists => println!("OK  stack already exists: {chain}"),
+            ChainOutcome::Created(number) => eprintln!("OK  stack #{number} created: {chain}"),
+            ChainOutcome::AlreadyExists => eprintln!("OK  stack already exists: {chain}"),
         }
     }
 }
@@ -875,7 +903,11 @@ mod tests {
 
     #[test]
     fn chain_formats_bottom_to_top() {
-        assert_eq!(format_chain(&[1, 2, 3]), "#1 → #2 → #3");
+        // Tests run without a terminal, so the hyperlinks degrade to plain text.
+        assert_eq!(
+            format_chain(&PrLinks::default(), &[1, 2, 3]),
+            "#1 → #2 → #3"
+        );
     }
 
     #[test]

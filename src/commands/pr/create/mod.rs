@@ -11,12 +11,20 @@ use crate::{
     },
     model::Model,
     template::{self, TemplateSource},
+    ui::{PrLinks, Stream},
 };
 use anyhow::{Context, Result, anyhow, bail};
 use jj_gh_config_derive::subcommand_args;
 use std::collections::HashMap;
 
 mod title_picker;
+
+/// A PR this run produced: freshly created, or the already-open one found for
+/// the revision. The URL rides along so the summary can hyperlink it.
+struct CreatedPr {
+    number: u64,
+    html_url: String,
+}
 
 subcommand_args! {
     pub struct CreateArgs {
@@ -210,7 +218,7 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
     let mut created_prs = Vec::with_capacity(revs.len());
 
     for rev in revs {
-        let pr_number = create_single_pr(
+        let created = create_single_pr(
             jj,
             gh,
             env,
@@ -231,13 +239,19 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
             &target,
         )
         .await?;
-        created_prs.push(pr_number);
+        created_prs.push(created);
     }
 
+    // A summary block we format ourselves, so it goes to stderr directly rather
+    // than through the logger, which would prefix and recolor every line.
     if created_prs.len() > 1 {
-        println!("\nCreated {} PRs:", created_prs.len());
-        for pr_number in &created_prs {
-            println!("  #{pr_number}");
+        let links = created_prs
+            .iter()
+            .map(|pr| (pr.number, pr.html_url.clone()))
+            .collect::<PrLinks>();
+        eprintln!("\nCreated {} PRs:", created_prs.len());
+        for pr in &created_prs {
+            eprintln!("  {}", links.number(Stream::Stderr, pr.number));
         }
     }
 
@@ -247,8 +261,9 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
 
     // For multi-revision: detect chains among just the created PRs
     if created_prs.len() >= 2 {
+        let numbers = created_prs.iter().map(|pr| pr.number).collect::<Vec<u64>>();
         let spinner = crate::ui::Spinner::start("Fetching PR details for stack detection");
-        let pr_details = fetch_pr_details(gh, &target, &created_prs).await;
+        let pr_details = fetch_pr_details(gh, &target, &numbers).await;
         spinner.stop();
 
         // Build head_ref -> local_commit_id mapping from the revisions we created
@@ -271,7 +286,10 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
         let spinner = crate::ui::Spinner::start("Detecting stack chains");
         let results = link_stacks(gh, jj, &target, &pr_details, &head_to_local).await?;
         spinner.stop();
-        crate::commands::pr::stack::print_stack_results(&results);
+        crate::commands::pr::stack::print_stack_results(
+            &PrLinks::from_details(&pr_details),
+            &results,
+        );
     } else if created_prs.len() == 1 {
         // For single-revision: detect chains among all pushed PRs + the new one
         let spinner = crate::ui::Spinner::start("Fetching local PRs");
@@ -308,7 +326,7 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
         }
 
         // Ensure the newly created PR is included
-        let new_pr_number = created_prs[0];
+        let new_pr_number = created_prs[0].number;
         let already_included = pr_details.iter().any(|p| p.number == new_pr_number);
         if !already_included
             && let Ok(details) = gh.get_pr(&target.owner, &target.repo, new_pr_number).await
@@ -320,7 +338,10 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
         let spinner = crate::ui::Spinner::start("Detecting stack chains");
         let results = link_stacks(gh, jj, &target, &pr_details, &head_to_local).await?;
         spinner.stop();
-        crate::commands::pr::stack::print_stack_results(&results);
+        crate::commands::pr::stack::print_stack_results(
+            &PrLinks::from_details(&pr_details),
+            &results,
+        );
     }
 
     Ok(())
@@ -384,7 +405,7 @@ async fn link_stacks(
     .unwrap_or_default())
 }
 
-/// Create a single PR for one revision. Returns the created PR number.
+/// Create a single PR for one revision.
 #[expect(clippy::too_many_lines)]
 #[expect(clippy::too_many_arguments)]
 async fn create_single_pr(
@@ -406,7 +427,7 @@ async fn create_single_pr(
     default_title_source: &crate::config::DefaultTitleSource,
     remote: &str,
     target: &crate::gh::remote::Target,
-) -> Result<u64> {
+) -> Result<CreatedPr> {
     if *pick_title {
         crate::ui::tui::require_tty("--pick-title")?;
     }
@@ -432,8 +453,11 @@ async fn create_single_pr(
                 head_spec,
                 existing.title,
             );
-            println!("{}", existing.html_url);
-            return Ok(existing.number);
+            crate::ui::print_url(&existing.html_url);
+            return Ok(CreatedPr {
+                number: existing.number,
+                html_url: existing.html_url,
+            });
         }
     }
 
@@ -634,8 +658,11 @@ async fn create_single_pr(
         })?;
     spinner.stop();
 
-    println!("{}", created.html_url);
-    Ok(created.number)
+    crate::ui::print_url(&created.html_url);
+    Ok(CreatedPr {
+        number: created.number,
+        html_url: created.html_url,
+    })
 }
 
 const TITLE_RECORD_OPEN: char = '\u{E010}';

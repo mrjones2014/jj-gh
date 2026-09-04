@@ -197,7 +197,7 @@ async fn retry_pr(
         retry_failed_jobs(gh, owner, repo, pr_number, &runs).await?;
     }
 
-    println!("{html_url}");
+    crate::ui::print_url(html_url);
     Ok(())
 }
 

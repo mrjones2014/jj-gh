@@ -276,7 +276,7 @@ Use `--dry-run` or `--json` to print the plan and stop either way.
 
 ###### **Options:**
 
-- `--force` — Apply the plan without prompting. Required to apply anything when stdin or stdout is not a terminal, where the default is a dry run. Also unstacks PRs that are already in a different stack; answering the interactive prompt does the same
+- `--force` — Apply the plan without prompting. Required to apply anything when stdin or stderr is not a terminal, where the default is a dry run. Also unstacks PRs that are already in a different stack; answering the interactive prompt does the same
 - `--dry-run` — Print the proposed plan and exit without touching GitHub
 - `--json` — Emit the proposed plan as JSON. Implies `--dry-run`
 - `--push <AUTO_PUSH>` — Push bookmarks whose remote target has fallen behind before stacking. Default: true. Use `--no-push` to disable

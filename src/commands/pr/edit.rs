@@ -160,7 +160,7 @@ pub async fn run(model: &impl Model, args: &EditArgs) -> Result<()> {
         .with_context(|| format!("editing PR #{number}"))?;
 
     log::info!("Updated PR #{number}");
-    println!("{html_url}");
+    crate::ui::print_url(&html_url);
     Ok(())
 }
 

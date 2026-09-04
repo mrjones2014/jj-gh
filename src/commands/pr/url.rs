@@ -35,6 +35,6 @@ pub async fn run(model: &impl Model, args: &PrUrlArgs) -> Result<()> {
         .resolve_pr(remote, upstream_remote, number_or_rev)
         .await
         .context("resolving PR")?;
-    println!("{}", pr.html_url.trim());
+    crate::ui::print_url(&pr.html_url);
     Ok(())
 }
