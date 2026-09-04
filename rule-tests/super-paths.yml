@@ -1,0 +1,55 @@
+id: no-super-paths
+valid:
+  - |
+    use crate::gh::{Gh, PrDetails};
+  - |
+    fn caller() {
+        crate::commands::pr::stack::print_stack_results(&results);
+    }
+  - |
+    pub(super) fn emit() {}
+  - |
+    pub(super) struct SubInfo<'a> {
+        pub(super) name: &'a str,
+    }
+  - |
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn works() {
+            super::caller();
+        }
+    }
+  - |
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[tokio::test]
+        async fn works() {}
+    }
+invalid:
+  - |
+    use super::PrDetails;
+  - |
+    use super::{ArgInfo, SubInfo, collect_subs};
+  - |
+    use super::*;
+  - |
+    fn caller() {
+        super::stack::print_stack_results(&results);
+    }
+  - |
+    #[cfg(test)]
+    mod fake {
+        use super::{FileSystem, Path, Result};
+    }
+  - |
+    mod not_gated {
+        use super::Thing;
+
+        #[test]
+        fn works() {}
+    }

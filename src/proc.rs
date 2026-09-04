@@ -7,6 +7,8 @@
 //! - [`stream`] inherits the parent's stdio so output streams live and keeps
 //!   color/tty for display and progress commands. The child prints its own
 //!   stderr, so a failure needs no captured message.
+//! - [`stream_to_stderr`] is [`stream`] with the child's stdout moved onto our
+//!   stderr, for subprocesses whose output is UI rather than the result.
 //! - [`interactive`] attaches to the controlling terminal, so interactive
 //!   commands still work when the parent's stdout is piped.
 //! - [`capture_sync`] is the synchronous variant for pre-runtime config
@@ -99,6 +101,45 @@ pub async fn stream(argv: &[&str]) -> Result<()> {
         return Err(anyhow!("`{prog}` exited with {status}"));
     }
     Ok(())
+}
+
+/// Like [`stream`], but the child's stdout is redirected onto our stderr.
+///
+/// For subprocesses whose output is UI rather than the command's result, such
+/// as the `jj log` view `pr stack` shows above its plan: it must not land in
+/// `jj-gh pr stack | …`. Duplicating the stderr descriptor rather than
+/// capturing keeps the child looking at a terminal, so it still colors its
+/// output.
+pub async fn stream_to_stderr(argv: &[&str]) -> Result<()> {
+    let (prog, rest) = split(argv)?;
+    let status = Command::new(prog)
+        .args(rest)
+        .stdout(duplicate_stderr()?)
+        .status()
+        .await
+        .with_context(|| format!("failed to spawn `{prog}`"))?;
+    if !status.success() {
+        return Err(anyhow!("`{prog}` exited with {status}"));
+    }
+    Ok(())
+}
+
+/// `Stdio` can only be built from an *owned* descriptor, and there is no
+/// "inherit, but crossed over" variant. Handing it a borrowed fd 2 would have
+/// the child close our stderr on drop, so it gets a duplicate instead.
+fn duplicate_stderr() -> Result<std::process::Stdio> {
+    #[cfg(unix)]
+    let descriptor = {
+        use std::os::fd::AsFd;
+        std::io::stderr().as_fd().try_clone_to_owned()
+    };
+    #[cfg(windows)]
+    let descriptor = {
+        use std::os::windows::io::AsHandle;
+        std::io::stderr().as_handle().try_clone_to_owned()
+    };
+
+    Ok(descriptor.context("could not duplicate stderr")?.into())
 }
 
 /// Run `argv` attached to the controlling terminal.

@@ -17,6 +17,12 @@ query GetPrInternal($owner: String!, $name: String!, $number: Int!) {
       autoMergeRequest {
         mergeMethod
       }
+      stack {
+        number
+      }
+      stackEntry {
+        position
+      }
       reviewRequests(first: 100) {
         nodes {
           requestedReviewer {

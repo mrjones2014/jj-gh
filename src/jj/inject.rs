@@ -77,6 +77,12 @@ pub fn escape_jj_string(s: &str) -> String {
     s.replace('\\', r"\\").replace('"', "\\\"")
 }
 
+/// Wrap `s` as a jj template double-quoted string literal, escaping `\` and `"`.
+#[must_use]
+pub fn quote_jj(s: &str) -> String {
+    format!(r#""{}""#, escape_jj_string(s))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

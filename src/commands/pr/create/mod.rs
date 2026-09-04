@@ -1,16 +1,17 @@
 use crate::{
     cli::GlobalOpts,
-    config::{self, AutoMergeMethod},
+    config::{self, AutoMergeMethod, DefaultTitleSource},
     editor::{self, ApplyChangesCtx},
     frontmatter::Frontmatter,
     fs::RealFs,
     gh::{CreatePrRequest, Gh, remote},
     jj::{
         self, Jj,
-        inject::{TemplateAliases, escape_jj_string},
+        inject::{TemplateAliases, quote_jj},
     },
     model::Model,
     template::{self, TemplateSource},
+    ui::{PrLinks, Stream},
 };
 use anyhow::{Context, Result, anyhow, bail};
 use jj_gh_config_derive::subcommand_args;
@@ -18,11 +19,18 @@ use std::collections::HashMap;
 
 mod title_picker;
 
+/// A PR this run produced: freshly created, or the already-open one found for
+/// the revision. The URL rides along so the summary can hyperlink it.
+struct CreatedPr {
+    number: u64,
+    html_url: String,
+}
+
 subcommand_args! {
     pub struct CreateArgs {
-        /// Revision to create the PR from.
+        /// Revision(s) to create PR(s) from. Pass multiple revisions to create a stack.
         #[arg(value_name = "REV")]
-        pub rev: String,
+        pub revs: Vec<String>,
 
         /// Override the base bookmark. Default: closest ancestor bookmark on
         /// the stack, falling back to jj `trunk()`, then to the configured
@@ -78,7 +86,7 @@ subcommand_args! {
         /// `commit_id`, `author`, etc.). The following template aliases are also
         /// injected:
         ///
-        /// - `pr_title`: default title (first-line description of the oldest commit on the stack).
+        /// - `pr_title`: default title (first-line description of the oldest or newest commit, depending on `default_title_source`).
         ///
         /// - `pr_base`: resolved base branch; owner-qualified (`owner:branch`) for cross-fork PRs.
         ///
@@ -108,6 +116,13 @@ subcommand_args! {
         #[config(maps_to = "pr_create_title_template")]
         pub title_template: String,
 
+        /// Which commit's description to use as the default PR title.
+        /// `base` uses the oldest commit (default), `head` uses the newest.
+        /// Overrides config `default_title_source`.
+        #[arg(long = "title-source", value_name = "SOURCE", value_enum)]
+        #[config]
+        pub default_title_source: crate::config::DefaultTitleSource,
+
         /// Editor command, e.g. `--editor "nvim +7"`. Precedence: this flag,
         /// then `editor` in config, then `$VISUAL`, then `$EDITOR`.
         #[arg(short = 'e', long, value_name = "CMD", value_parser = crate::util::parse_shell_command)]
@@ -133,6 +148,21 @@ subcommand_args! {
         /// Hide the PR diff preview while creating the PR body. Overrides config.
         #[arg(long = "no-diffs", conflicts_with = "show_diffs")]
         pub no_diffs: bool,
+
+        /// Automatically link created PRs into a GitHub stack when stacked.
+        /// Default: true. Use `--no-stack` to disable.
+        #[arg(
+            long = "stack",
+            num_args = 0,
+            default_missing_value = "true",
+            default_value_if("no_stack", "true", Some("false"))
+        )]
+        #[config]
+        pub auto_stack: bool,
+
+        /// Disable automatic stack linking. Overrides config.
+        #[arg(long = "no-stack", conflicts_with = "auto_stack")]
+        pub no_stack: bool,
     }
 }
 
@@ -158,7 +188,7 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
                 gh_askpass: _,
                 askpass_timeout_secs: _,
             },
-        rev,
+        revs,
         base,
         draft,
         auto_merge,
@@ -175,21 +205,247 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
         no_template: _,
         pick_title,
         title_template,
+        // stack linking control
+        no_stack: _,
+        auto_stack,
+        // title source
+        default_title_source,
     } = args;
 
     let upstream_remote = crate::gh::remote::resolved_upstream_remote(upstream_remote);
     let (remote, target) = model.resolve_target(remote, Some(upstream_remote)).await?;
+
+    let mut created_prs = Vec::with_capacity(revs.len());
+
+    for rev in revs {
+        let created = create_single_pr(
+            jj,
+            gh,
+            env,
+            editor,
+            args,
+            rev,
+            base,
+            draft,
+            auto_merge,
+            editor_argv.as_ref(),
+            no_edit,
+            auto_merge_method,
+            show_diffs,
+            pick_title,
+            title_template,
+            default_title_source,
+            &remote,
+            &target,
+        )
+        .await?;
+        created_prs.push(created);
+    }
+
+    // A summary block we format ourselves, so it goes to stderr directly rather
+    // than through the logger, which would prefix and recolor every line.
+    if created_prs.len() > 1 {
+        let links = created_prs
+            .iter()
+            .map(|pr| (pr.number, pr.html_url.clone()))
+            .collect::<PrLinks>();
+        eprintln!("\nCreated {} PRs:", created_prs.len());
+        for pr in &created_prs {
+            eprintln!("  {}", links.number(Stream::Stderr, pr.number));
+        }
+    }
+
+    if !*auto_stack {
+        return Ok(());
+    }
+
+    // For multi-revision: detect chains among just the created PRs
+    if created_prs.len() >= 2 {
+        let numbers = created_prs.iter().map(|pr| pr.number).collect::<Vec<u64>>();
+        let spinner = crate::ui::Spinner::start("Fetching PR details for stack detection");
+        let pr_details = fetch_pr_details(gh, &target, &numbers).await;
+        spinner.stop();
+
+        // Build head_ref -> local_commit_id mapping from the revisions we created
+        let commit_infos = revs
+            .iter()
+            .map(|rev| jj.resolve_rev(rev))
+            .collect::<futures::future::JoinAll<_>>()
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>>>()?;
+        let head_to_local = commit_infos
+            .iter()
+            .filter_map(|info| {
+                info.bookmarks
+                    .first()
+                    .map(|bookmark| (bookmark.clone(), info.commit_id.clone()))
+            })
+            .collect::<HashMap<String, String>>();
+
+        let spinner = crate::ui::Spinner::start("Detecting stack chains");
+        let results = link_stacks(gh, jj, &target, &pr_details, &head_to_local).await?;
+        spinner.stop();
+        crate::commands::pr::stack::print_stack_results(
+            &PrLinks::from_details(&pr_details),
+            &results,
+        );
+    } else if created_prs.len() == 1 {
+        // For single-revision: detect chains among all pushed PRs + the new one
+        let spinner = crate::ui::Spinner::start("Fetching local PRs");
+        let bookmarks = jj.pushed_bookmarks(&remote).await?;
+        let branch_names = bookmarks
+            .iter()
+            .map(|b| b.name.clone())
+            .collect::<Vec<String>>();
+        let all_prs = gh
+            .local_pulls(
+                &target.owner,
+                &target.repo,
+                target.origin_owner(),
+                &branch_names,
+            )
+            .await?;
+        spinner.stop();
+
+        // Build head_to_local_commit mapping from bookmarks
+        let head_to_local = bookmarks
+            .iter()
+            .map(|b| (b.name.clone(), b.local_commit_id.clone()))
+            .collect::<HashMap<String, String>>();
+
+        // Fetch full details for stack detection
+        let spinner = crate::ui::Spinner::start("Fetching PR details for stack detection");
+        let mut pr_details = Vec::with_capacity(all_prs.len());
+        for pr in &all_prs {
+            pr_details.push(
+                gh.get_pr(&target.owner, &target.repo, pr.number)
+                    .await
+                    .context("Failed to fetch PR")?,
+            );
+        }
+
+        // Ensure the newly created PR is included
+        let new_pr_number = created_prs[0].number;
+        let already_included = pr_details.iter().any(|p| p.number == new_pr_number);
+        if !already_included
+            && let Ok(details) = gh.get_pr(&target.owner, &target.repo, new_pr_number).await
+        {
+            pr_details.push(details);
+        }
+        spinner.stop();
+
+        let spinner = crate::ui::Spinner::start("Detecting stack chains");
+        let results = link_stacks(gh, jj, &target, &pr_details, &head_to_local).await?;
+        spinner.stop();
+        crate::commands::pr::stack::print_stack_results(
+            &PrLinks::from_details(&pr_details),
+            &results,
+        );
+    }
+
+    Ok(())
+}
+
+/// Fetch full PR details for a list of PR numbers, logging warnings for failures.
+async fn fetch_pr_details(
+    gh: &impl Gh,
+    target: &crate::gh::remote::Target,
+    pr_numbers: &[u64],
+) -> Vec<crate::gh::PrDetails> {
+    let mut details = Vec::with_capacity(pr_numbers.len());
+    for &pr_number in pr_numbers {
+        if let Ok(d) = gh
+            .get_pr(&target.owner, &target.repo, pr_number)
+            .await
+            .inspect_err(|e| {
+                log::warn!("Failed to fetch PR #{pr_number} for stack detection: {e:#}");
+            })
+        {
+            details.push(d);
+        }
+    }
+    details
+}
+
+/// Detect stack chains among the given PRs and create stacks on GitHub.
+///
+/// Linking is best-effort: the PRs themselves are already created by the time
+/// this runs, so a stack failure is reported but does not fail the command.
+///
+/// Base refs are only realigned *within* a chain, by
+/// [`crate::gh::stack_create::create_stacks`]. The bottom PR keeps whatever
+/// base the user chose in the editor; reconciling every base against the graph
+/// is `jj-gh pr stack`'s job, not something `pr create` should do behind the
+/// user's back.
+///
+/// Returns what happened so the caller can stop its spinner before printing;
+/// writing to stdout under a live spinner leaves the glyph on the line.
+async fn link_stacks(
+    gh: &impl Gh,
+    jj: &impl Jj,
+    target: &crate::gh::remote::Target,
+    pr_details: &[crate::gh::PrDetails],
+    head_to_local_commit: &HashMap<String, String>,
+) -> Result<Vec<crate::gh::stack_create::ChainResult>> {
+    let shape = crate::gh::stack_detect::detect(pr_details, jj, head_to_local_commit, None).await?;
+    if shape.chains.is_empty() {
+        return Ok(Vec::new());
+    }
+    let existing_stacks = gh.list_stacks(&target.owner, &target.repo).await?;
+    Ok(crate::gh::stack_create::create_stacks(
+        gh,
+        target,
+        &shape.chains,
+        pr_details,
+        &existing_stacks,
+    )
+    .await
+    .inspect_err(|e| log::warn!("Failed to link PR stacks: {e:#}"))
+    .unwrap_or_default())
+}
+
+/// Create a single PR for one revision.
+#[expect(clippy::too_many_lines)]
+#[expect(clippy::too_many_arguments)]
+async fn create_single_pr(
+    jj: &impl Jj,
+    gh: &impl Gh,
+    env: &impl crate::auth::EnvReader,
+    editor: &impl crate::editor::Editor,
+    args: &CreateArgs,
+    rev: &str,
+    base: &crate::util::EvalWithCfgFallback<String>,
+    draft: &bool,
+    auto_merge: &bool,
+    editor_argv: Option<&crate::util::ShellCommand>,
+    no_edit: &bool,
+    auto_merge_method: &AutoMergeMethod,
+    show_diffs: &bool,
+    pick_title: &bool,
+    title_template: &str,
+    default_title_source: &crate::config::DefaultTitleSource,
+    remote: &str,
+    target: &crate::gh::remote::Target,
+) -> Result<CreatedPr> {
+    if *pick_title {
+        crate::ui::tui::require_tty("--pick-title")?;
+    }
+
+    let spinner = crate::ui::Spinner::start("Resolving revision");
     let info = jj.resolve_rev(rev).await?;
     let existing_branch = info.bookmarks.first().cloned();
 
     // Pre-flight only when we already have a bookmark; an unpushed rev can't have
     // a matching open PR.
     if let Some(branch) = &existing_branch {
+        spinner.set_message("Checking for existing PR".into());
         let head_spec = target.head_spec(branch);
-        if let Some(existing) = gh
+        let existing = gh
             .find_open_pr(&target.owner, &target.repo, &head_spec)
-            .await?
-        {
+            .await?;
+        if let Some(existing) = existing {
+            spinner.stop();
             log::info!(
                 "PR #{} is already {} for `{}`: {}",
                 existing.number,
@@ -197,14 +453,18 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
                 head_spec,
                 existing.title,
             );
-            println!("{}", existing.html_url);
-            return Ok(());
+            crate::ui::print_url(&existing.html_url);
+            return Ok(CreatedPr {
+                number: existing.number,
+                html_url: existing.html_url,
+            });
         }
     }
 
     // Jujutsu gives us the revision for an automatic base. For an explicit or
     // configured base, find the revision on the target remote. A local bookmark
     // with the same name can point to a different revision.
+    spinner.set_message("Detecting base branch".into());
     let (base_branch, local_base_rev) = if let Some(branch) = base.cli() {
         (branch.clone(), None)
     } else if let Some(ancestor) = jj.stacked_ancestor_bookmark(rev).await? {
@@ -220,6 +480,7 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
     } else if let Some(branch) = base.fallback() {
         (branch.clone(), None)
     } else {
+        spinner.stop();
         bail!(
             "could not detect base branch: `--base` not passed, no ancestor \
              bookmark on the stack, jj `trunk()` resolves to nothing, and \
@@ -227,6 +488,7 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
         );
     };
 
+    spinner.set_message("Verifying base branch on GitHub".into());
     let base_lookup = gh
         .lookup_base(&target.owner, &target.repo, &base_branch)
         .await?;
@@ -242,34 +504,38 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
     let base_rev = if let Some(base_rev) = local_base_rev {
         base_rev
     } else {
-        let target_remote = if jj.remote_url(upstream_remote).await?.is_some() {
-            upstream_remote
-        } else {
-            &remote
-        };
-        jj.remote_bookmark_sha(&base_branch, target_remote)
+        spinner.set_message("Resolving base revision".into());
+        jj.remote_bookmark_sha(&base_branch, remote)
             .await?
             .with_context(|| {
                 format!(
                     "base branch `{base_branch}` exists on GitHub, but the local repository does \
-                     not have `{base_branch}@{target_remote}`; fetch that remote and try again"
+                     not have `{base_branch}@{remote}`; fetch that remote and try again"
                 )
             })?
     };
     let title_revset = jj::title_base_revset(rev, &base_rev);
+    spinner.set_message("Generating title candidates".into());
     let candidates = resolve_title_candidates(jj, &title_revset, title_template).await?;
     let default_title = if *pick_title {
-        crate::ui::tui::require_tty("--pick-title")?;
         title_picker::pick(&candidates)?
     } else {
-        candidates
-            .first()
-            .context("no commits found in the PR revset")?
+        let candidate = match default_title_source {
+            DefaultTitleSource::Base => candidates.first(),
+            DefaultTitleSource::Head => candidates.last(),
+        }
+        .context("no commits found in the PR revset")?;
+        let source_label = match default_title_source {
+            DefaultTitleSource::Base => "oldest",
+            DefaultTitleSource::Head => "newest",
+        };
+        candidate
             .valid_title()
-            .context("oldest commit produced an invalid PR title")?
+            .with_context(|| format!("{source_label} commit produced an invalid PR title"))?
             .to_string()
     };
 
+    spinner.set_message("Loading PR template".into());
     let raw_template = load_template_for(
         args,
         jj,
@@ -291,7 +557,7 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
     let (final_fm, body) = if *no_edit {
         (initial_fm, raw_template.unwrap_or_default())
     } else {
-        let editor_argv = editor::resolve_editor(editor_argv.as_ref(), env)?;
+        let editor_argv = editor::resolve_editor(editor_argv, env)?;
         let diff_preview = if *show_diffs {
             jj.diff(&title_revset)
                 .await
@@ -304,6 +570,7 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
             .as_deref()
             .map(str::trim)
             .filter(|s| !s.is_empty());
+        spinner.stop();
         editor::round_trip(
             editor,
             &editor_argv,
@@ -318,9 +585,11 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
     let final_base_lookup = if final_base_branch == base_branch {
         base_lookup
     } else {
+        let spinner = crate::ui::spinner::Spinner::start("Verifying updated base branch");
         let lookup = gh
             .lookup_base(&target.owner, &target.repo, &final_base_branch)
             .await?;
+        spinner.stop();
         if !lookup.branch_exists {
             return Err(anyhow!(
                 "base branch `{final_base_branch}` does not exist on {}/{}",
@@ -331,7 +600,8 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
         lookup
     };
 
-    jj.push(rev, existing_branch.as_deref(), remote).await?;
+    jj.push(rev, existing_branch.as_deref(), remote.to_string())
+        .await?;
 
     let branch = if let Some(b) = existing_branch {
         b
@@ -345,6 +615,7 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
     };
     let head_spec = target.head_spec(&branch);
 
+    let spinner = crate::ui::spinner::Spinner::start("Creating pull request");
     let created = gh
         .create_pr(CreatePrRequest {
             title: final_fm.title.clone(),
@@ -376,6 +647,7 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
         has_merge_queue: created.has_merge_queue,
         before_label_ids: HashMap::new(),
     };
+    spinner.set_message("Applying PR metadata".into());
     editor::apply_frontmatter_diff(gh, &ctx, &before_fm, &body, &final_fm, &body)
         .await
         .with_context(|| {
@@ -384,9 +656,13 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
                 created.html_url
             )
         })?;
+    spinner.stop();
 
-    println!("{}", created.html_url);
-    Ok(())
+    crate::ui::print_url(&created.html_url);
+    Ok(CreatedPr {
+        number: created.number,
+        html_url: created.html_url,
+    })
 }
 
 const TITLE_RECORD_OPEN: char = '\u{E010}';
@@ -415,7 +691,7 @@ async fn resolve_title_candidates(
         r#""{TITLE_RECORD_OPEN}" ++ change_id.shortest(8) ++ "{TITLE_RECORD_SEPARATOR}" ++ ({title_template}) ++ "{TITLE_RECORD_CLOSE}""#
     );
     let rendered = jj
-        .eval_template(title_revset, &template, None, true)
+        .eval_template(title_revset, &template, None, true, false)
         .await
         .context("evaluating PR title template")?;
     parse_title_candidates(&rendered)
@@ -464,7 +740,13 @@ async fn load_template_for(
         TemplateSource::File(p) => template::load_template_file(&p, &fs),
         TemplateSource::JjTemplate(t) => {
             let oldest_rev_id = jj
-                .eval_template(title_revset, r#"commit_id.short(40) ++ "\n""#, None, true)
+                .eval_template(
+                    title_revset,
+                    r#"commit_id.short(40) ++ "\n""#,
+                    None,
+                    true,
+                    false,
+                )
                 .await
                 .context("resolving oldest commit id for `pr_oldest_rev_id` alias")?
                 .lines()
@@ -478,17 +760,12 @@ async fn load_template_for(
                 .alias("pr_oldest_rev_id", quote_jj(&oldest_rev_id));
             let tmp = aliases.write_temp_config()?;
             let body = jj
-                .eval_template(title_revset, &t, Some(tmp.path()), true)
+                .eval_template(title_revset, &t, Some(tmp.path()), true, false)
                 .await
                 .context("evaluating PR body template")?;
             Ok(Some(body.trim_end_matches('\n').to_string()))
         }
     }
-}
-
-/// Wrap `s` as a jj template double-quoted string literal, escaping `\` and `"`.
-fn quote_jj(s: &str) -> String {
-    format!(r#""{}""#, escape_jj_string(s))
 }
 
 #[cfg(test)]
@@ -527,5 +804,59 @@ mod tests {
     #[test]
     fn rejects_empty_candidate_set() {
         assert!(parse_title_candidates("").is_err());
+    }
+
+    #[test]
+    fn title_source_base_selects_first_candidate() {
+        let candidates = [
+            TitleCandidate {
+                change_id: "first".into(),
+                title: "First commit".into(),
+            },
+            TitleCandidate {
+                change_id: "second".into(),
+                title: "Second commit".into(),
+            },
+            TitleCandidate {
+                change_id: "third".into(),
+                title: "Third commit".into(),
+            },
+        ];
+
+        let candidate = match crate::config::DefaultTitleSource::Base {
+            crate::config::DefaultTitleSource::Base => candidates.first(),
+            crate::config::DefaultTitleSource::Head => candidates.last(),
+        }
+        .unwrap();
+
+        assert_eq!(candidate.change_id, "first");
+        assert_eq!(candidate.title, "First commit");
+    }
+
+    #[test]
+    fn title_source_head_selects_last_candidate() {
+        let candidates = [
+            TitleCandidate {
+                change_id: "first".into(),
+                title: "First commit".into(),
+            },
+            TitleCandidate {
+                change_id: "second".into(),
+                title: "Second commit".into(),
+            },
+            TitleCandidate {
+                change_id: "third".into(),
+                title: "Third commit".into(),
+            },
+        ];
+
+        let candidate = match crate::config::DefaultTitleSource::Head {
+            crate::config::DefaultTitleSource::Base => candidates.first(),
+            crate::config::DefaultTitleSource::Head => candidates.last(),
+        }
+        .unwrap();
+
+        assert_eq!(candidate.change_id, "third");
+        assert_eq!(candidate.title, "Third commit");
     }
 }

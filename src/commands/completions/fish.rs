@@ -1,4 +1,4 @@
-use super::{ArgInfo, collect_subs, first_help_line};
+use crate::commands::completions::{ArgInfo, collect_subs, first_help_line};
 use anyhow::Result;
 use clap::Command;
 use std::io::Write;

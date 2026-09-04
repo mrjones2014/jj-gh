@@ -12,6 +12,8 @@ mod reviewer;
 pub mod pr_lookup;
 pub mod real;
 pub mod remote;
+pub mod stack_create;
+pub mod stack_detect;
 pub use queries::{CiStatus, PrWithCiStatus};
 pub use reviewer::Reviewer;
 
@@ -51,6 +53,8 @@ pub struct PrDetails {
     pub labels: Vec<Label>,
     pub reviewers: Vec<Reviewer>,
     pub body: String,
+    /// Stack number if this PR is part of a stack, `None` otherwise.
+    pub stack_number: Option<u64>,
 }
 
 /// Result of [`Gh::lookup_base`]: the base repo's GraphQL node ID plus whether
@@ -92,6 +96,20 @@ impl UpdatePr {
     pub fn is_noop(&self) -> bool {
         self.title.is_none() && self.body.is_none() && self.base_ref_name.is_none()
     }
+}
+
+/// A pull request stack on GitHub. Stacks link related PRs together so
+/// GitHub's UI can show stack navigation and "merge the whole stack" features.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct PullRequestStack {
+    pub number: u64,
+    pub pull_requests: Vec<StackPullRequest>,
+}
+
+/// A PR entry within a stack.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct StackPullRequest {
+    pub number: u64,
 }
 
 /// One label on a PR, with both the human-readable name and the GraphQL
@@ -299,7 +317,7 @@ pub trait Gh {
 
     /// Fetch open PRs with head commit SHA and CI status, scoped to the given
     /// `branches` (head ref names) and `head_owner`. Used by `pr log` to build
-    /// a `commit_id` → PR mapping for jj template aliases. Owner filtering is
+    /// a `commit_id` -> PR mapping for jj template aliases. Owner filtering is
     /// required because unrelated forks commonly use the same branch names.
     ///
     /// The search is `is:pr is:open head:<b1> head:<b2> ...`. Implementations
@@ -355,4 +373,42 @@ pub trait Gh {
     ///
     /// Propagates API errors.
     async fn rerun_failed_jobs(&self, owner: &str, repo: &str, run_id: u64) -> Result<()>;
+
+    /// Create a pull request stack from an ordered list of PR numbers.
+    /// PRs should be ordered from bottom to top of the stack. Each PR's
+    /// base ref must match the previous PR's head ref.
+    ///
+    /// # Errors
+    ///
+    /// Propagates API errors. Returns 422 if PRs don't exist or can't form
+    /// a valid stack.
+    async fn create_stack(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr_numbers: &[u64],
+    ) -> Result<PullRequestStack>;
+
+    /// Remove unmerged PRs from a stack. PRs that cannot be unstacked
+    /// (e.g., queued for merge) are left in place. If all PRs are removed,
+    /// the stack is dissolved.
+    ///
+    /// # Errors
+    ///
+    /// Propagates API errors. Returns 409 if the stack is being modified
+    /// concurrently. Returns 422 if no PRs can be removed.
+    async fn unstack_prs(
+        &self,
+        owner: &str,
+        repo: &str,
+        stack_number: u64,
+        pr_numbers: &[u64],
+    ) -> Result<()>;
+
+    /// List all pull request stacks in a repository.
+    ///
+    /// # Errors
+    ///
+    /// Propagates API errors.
+    async fn list_stacks(&self, owner: &str, repo: &str) -> Result<Vec<PullRequestStack>>;
 }

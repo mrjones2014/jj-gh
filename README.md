@@ -4,6 +4,7 @@
 
 - Create PRs locally from your preferred editor, for any arbitrary revision ID
   - Intelligently supports stacked PRs by choosing the correct base if the revision has an ancestor bookmark for which an open PR exists
+  - Integrates with [GitHub Stacked PRs](https://github.com/orgs/community/discussions/201439)
 - Enable auto-merge for a PR by its revision ID, without having to know/find its PR number (e.g. `jj pr auto-merge zqxy`)
 - Create local bookmarks for PRs, including across forks (e.g. `jj pr fetch 1234 && jj new pr-1234/...`, useful for testing PRs to OSS repos)
 - Show PR metadata like number and CI status in commit graph (e.g. `jj pr log`)
@@ -166,14 +167,15 @@ jj pr edit rev-id
 # a limitation in the GitHub API, see:
 # https://github.com/mrjones2014/jj-gh/issues/103
 jj pr auto-merge rev-id
-# "restack" your PRs; say you have PRs 1 and 2, but
-# then realize you need to land PR 3 first. So
-# you rebase the commits for PRs 1 & 2 on top of
-# the commit for PR 3. Then `jj pr restack` will
-# recompute the base branches for all locally tracked
-# PRs, open an interactive editor for you to confirm or
-# make changes, then update the PR base branches on GitHub.
-jj pr restack
+# make GitHub match your local `jj` graph; say you have
+# PRs 1 and 2, but then realize you need to land PR 3
+# first. So you rebase the commits for PRs 1 & 2 on top
+# of the commit for PR 3. Then `jj pr stack` will push
+# any bookmarks that fell behind, recompute the base
+# branches for all locally tracked PRs, and create or
+# reshape the GitHub stacks to match. It shows you the
+# plan and asks for confirmation before touching anything.
+jj pr stack
 ```
 
 #### Tips and Tricks
@@ -190,7 +192,7 @@ editor = [
   "env",
   "JJ_GH=1",
   "nvim",
-  "+10",     # skip cursor past frontmatter
+  "+10",  # skip cursor past frontmatter
 ]
 ```
 
@@ -236,20 +238,20 @@ Options related to PR metadata may also be overridden via the [markdown frontmat
 ```toml
 [jj-gh]
 # Auth (one source required; see "Token source precedence" below for env vars and CLI flag)
-gh_askpass = ["op", "read", "op://Personal/github/token"] # preferred
-gh_token = "ghp_..."                                      # plain token, less safe
-askpass_timeout_secs = 20                                 # default 20
+gh_askpass = ["op", "read", "op://Personal/github/token"]  # preferred
+gh_token = "ghp_..."  # plain token, less safe
+askpass_timeout_secs = 20  # default 20
 
 # Behavior
-default_base_branch = "main" # default "master"
-draft = false                # default false
-auto_merge = false           # default false; enable auto-merge on PR after creation
+default_base_branch = "main"  # default "master"
+draft = false  # default false
+auto_merge = false  # default false; enable auto-merge on PR after creation
 auto_merge_method = "merge"  # default "merge"; one of "merge", "squash", "rebase"
 
 # DEPRECATED: this is now auto-detected from the repo, will be removed in a future version
-default_remote = "origin" # default remote to use
+default_remote = "origin"  # default remote to use
 
-upstream_remote = "upstream" # default remote to use for cross-fork PR fetching
+upstream_remote = "upstream"  # default remote to use for cross-fork PR fetching
 
 # PR body template. `pr_create_template` is a jj template string, evaluated
 # against the revset being PR'd in chronological order. `pr_create_template_file`
@@ -280,10 +282,11 @@ pr_fetch_bookmark_template = '"pr-" ++ pr_number ++ "/" ++ pr_branch'
 # added inline.
 pr_log_template = 'format_short_commit_header(self) ++ "#" ++ surround(" ", "", pr_number)'
 
-# default template to be used in interactive `jj pr restack` UI;
-# by default, it re-uses the `jj pr log` template, but may also be customized
-# separately
-pr_restack_template = 'format_short_commit_header(self) ++ "#" ++ surround(" ", "", pr_number)'
+# whether `jj pr stack` pushes bookmarks whose remote target has fallen behind
+# the local one before linking them into a GitHub stack. GitHub rejects a stack
+# whose head branches have not been pushed. The --push/--no-push flags override
+# this per-invocation.
+auto_push = true
 
 # Editor command. Outranks $VISUAL and $EDITOR; the
 # --editor flag still wins over this.
@@ -292,8 +295,12 @@ editor = [
   "+10",  # +10 jumps your cursor past the frontmatter
 ]
 
+# automatically link stacked PRs into a GitHub stack in `jj pr create`.
+# The --stack/--no-stack flags override this per-invocation.
+auto_stack = true
+
 # enable or disable the use of nerdfont icons
-# (e.g. in the `pr log` default template)
+# (e.g. in the default `pr log` and `pr stack` templates)
 # NOTE: if you have issues with nerdfont icons, its most likely your `$PAGER`,
 # you can fix it by either using something like `bat` (https://github.com/sharkdp/bat)
 # as your pager, or setting
@@ -402,9 +409,11 @@ a matching open PR:
 - `pr_meta`: pre-formatted hyperlinked PR number, colored CI icon, and merge
   status.
 
-### `pr restack`
+### `pr stack`
 
-Same aliases available as `pr log`. By default, `pr restack` uses the same template as `pr log`.
+Same aliases available as `pr log`. The `jj log` view `pr stack` prints above
+its plan uses the `pr log` template; `-T` is not accepted here, set
+`pr_log_template` instead.
 
 ## PR body template resolution
 

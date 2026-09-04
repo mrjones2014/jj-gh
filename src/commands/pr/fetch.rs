@@ -14,7 +14,7 @@ use crate::{
     git::real::GitOps,
     jj::{
         Jj, JjExt,
-        inject::{TemplateAliases, escape_jj_string},
+        inject::{TemplateAliases, quote_jj},
         remote_resolution_error,
     },
     model::Model,
@@ -199,7 +199,7 @@ pub async fn run(model: &impl Model, args: &FetchArgs) -> Result<()> {
     let aliases = build_fetch_aliases(&pr);
     let tmp = aliases.write_temp_config()?;
     let bookmark = jj
-        .eval_template("root()", tmpl, Some(tmp.path()), false)
+        .eval_template("root()", tmpl, Some(tmp.path()), false, false)
         .await
         .context("evaluating bookmark template")?
         .trim()
@@ -249,11 +249,6 @@ fn build_fetch_aliases(pr: &PrDetails) -> TemplateAliases {
             quote_jj(pr.head_repo_name.as_deref().unwrap_or("")),
         )
         .alias("pr_slug", quote_jj(&slugify(&pr.title)))
-}
-
-/// Wrap `s` as a jj template double-quoted string literal, escaping `\` and `"`.
-fn quote_jj(s: &str) -> String {
-    format!(r#""{}""#, escape_jj_string(s))
 }
 
 /// Sanitize a string into a bookmark-safe slug: lowercase, runs of
@@ -353,6 +348,7 @@ mod tests {
             template: &str,
             _config_file: Option<&Path>,
             reversed: bool,
+            _color: bool,
         ) -> Result<String> {
             self.eval_template_calls.lock().unwrap().push(EvalCall {
                 revset: revset.into(),
@@ -464,6 +460,20 @@ mod tests {
         async fn rerun_failed_jobs(&self, _: &str, _: &str, _: u64) -> Result<()> {
             unimplemented!("fetch does not call rerun_failed_jobs")
         }
+        async fn create_stack(
+            &self,
+            _: &str,
+            _: &str,
+            _: &[u64],
+        ) -> Result<crate::gh::PullRequestStack> {
+            unimplemented!("fetch does not call create_stack")
+        }
+        async fn unstack_prs(&self, _: &str, _: &str, _: u64, _: &[u64]) -> Result<()> {
+            unimplemented!("fetch does not call unstack_prs")
+        }
+        async fn list_stacks(&self, _: &str, _: &str) -> Result<Vec<crate::gh::PullRequestStack>> {
+            unimplemented!("fetch does not call list_stacks")
+        }
     }
 
     #[derive(Debug, Clone)]
@@ -513,6 +523,7 @@ mod tests {
             labels: vec![],
             reviewers: vec![],
             body: String::new(),
+            stack_number: None,
         }
     }
 

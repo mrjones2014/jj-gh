@@ -2,7 +2,7 @@
 name = "jj-gh"
 version = "0.2.10"
 edition = "2024"
-description = "`jj` tools for working with GitHub PRs from your terminal"
+description = "Manage GitHub PR Stacks natively with `jj`"
 repository = "https://github.com/mrjones2014/jj-gh"
 license = "MIT"
 include = [
@@ -42,7 +42,7 @@ flexi_logger = { version = "0.31", default-features = false, features = [
   "colors",
 ] }
 futures = "0.3"
-gix = { version = "0.86", default-features = false, features = [
+gix = { version = "0.87", default-features = false, features = [
   "basic",
   "blocking-http-transport-reqwest-native-tls",
   "blocking-network-client",
@@ -63,6 +63,7 @@ secrecy = { version = "0.10", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 shell-words = "1"
+supports-hyperlinks = "3.2.0"
 tempfile = "3"
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "process", "rt", "time"] }

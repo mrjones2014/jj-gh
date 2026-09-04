@@ -197,7 +197,7 @@ async fn retry_pr(
         retry_failed_jobs(gh, owner, repo, pr_number, &runs).await?;
     }
 
-    println!("{html_url}");
+    crate::ui::print_url(html_url);
     Ok(())
 }
 
@@ -347,6 +347,7 @@ mod tests {
             labels: Vec::<Label>::new(),
             reviewers: vec![],
             body: String::new(),
+            stack_number: None,
         }
     }
 
@@ -427,6 +428,7 @@ mod tests {
             _template: &str,
             _config_file: Option<&Path>,
             _reversed: bool,
+            _color: bool,
         ) -> Result<String> {
             unimplemented!()
         }
@@ -559,6 +561,20 @@ mod tests {
         async fn rerun_failed_jobs(&self, _o: &str, _r: &str, id: u64) -> Result<()> {
             self.calls.lock().unwrap().rerun_failed.push(id);
             Ok(())
+        }
+        async fn create_stack(
+            &self,
+            _: &str,
+            _: &str,
+            _: &[u64],
+        ) -> Result<crate::gh::PullRequestStack> {
+            unimplemented!()
+        }
+        async fn unstack_prs(&self, _: &str, _: &str, _: u64, _: &[u64]) -> Result<()> {
+            unimplemented!()
+        }
+        async fn list_stacks(&self, _: &str, _: &str) -> Result<Vec<crate::gh::PullRequestStack>> {
+            unimplemented!()
         }
     }
 

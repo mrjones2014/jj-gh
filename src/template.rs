@@ -132,7 +132,7 @@ mod tests {
 
     fn args() -> CreateArgs {
         CreateArgs {
-            rev: "@-".into(),
+            revs: vec!["@-".into()],
             base: crate::util::EvalWithCfgFallback::new(None, None),
             draft: false,
             no_draft: false,
@@ -148,6 +148,9 @@ mod tests {
             no_edit: false,
             show_diffs: true,
             no_diffs: false,
+            auto_stack: true,
+            no_stack: false,
+            default_title_source: crate::config::DefaultTitleSource::Base,
             globals: crate::cli::GlobalOpts {
                 verbose: 0,
                 quiet: false,

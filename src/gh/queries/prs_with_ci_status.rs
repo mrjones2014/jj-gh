@@ -73,8 +73,6 @@ pub struct PrWithCiStatus {
     /// not pushed it to the remote yet).
     pub head_sha: String,
     /// Name of the branch the PR is currently targeted at on the remote.
-    /// Used by `pr restack` to detect which PRs already point at the proposed
-    /// base.
     pub base_ref_name: String,
     /// Whether the PR is a draft.
     pub is_draft: bool,

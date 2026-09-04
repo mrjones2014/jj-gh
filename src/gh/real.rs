@@ -1,24 +1,25 @@
 //! `octocrab`-backed [`Gh`] implementation.
 
-use super::{
-    BaseLookup, CreatePrRequest, Gh, Label, PrCreated, PrDetails, PrSummary, Reviewer, UpdatePr,
-    WorkflowRun, WorkflowRunConclusion, WorkflowRunStatus,
-};
 use crate::{
     config::AutoMergeMethod,
-    gh::queries::{
-        ConvertToDraftInternal, ConvertToDraftResponseData, ConvertToDraftVariables,
-        CreatePrInternal, CreatePrResponseData, CreatePrVariables, DisableAutoMergeInternal,
-        DisableAutoMergeResponseData, DisableAutoMergeVariables, EnableAutoMergeInternal,
-        EnableAutoMergeResponseData, EnableAutoMergeVariables, FindOpenPrInternal,
-        FindOpenPrResponseData, FindOpenPrVariables, GetPrInternal,
-        GetPrInternalRepositoryPullRequest, GetPrResponseData, GetPrVariables, LookupBaseInternal,
-        LookupBaseResponseData, LookupBaseVariables, MarkReadyForReviewInternal,
-        MarkReadyForReviewResponseData, MarkReadyForReviewVariables, PrWithCiStatus,
-        PrsWithCiStatusInternal, PrsWithCiStatusResponseData, PrsWithCiStatusVariables,
-        PullRequestMergeMethod, PullRequestState, RemoveLabelsInternal, RemoveLabelsResponseData,
-        RemoveLabelsVariables, RequestedReviewer, UpdatePrInternal, UpdatePrResponseData,
-        UpdatePrVariables,
+    gh::{
+        BaseLookup, CreatePrRequest, Gh, Label, PrCreated, PrDetails, PrSummary, PullRequestStack,
+        Reviewer, UpdatePr, WorkflowRun, WorkflowRunConclusion, WorkflowRunStatus,
+        queries::{
+            ConvertToDraftInternal, ConvertToDraftResponseData, ConvertToDraftVariables,
+            CreatePrInternal, CreatePrResponseData, CreatePrVariables, DisableAutoMergeInternal,
+            DisableAutoMergeResponseData, DisableAutoMergeVariables, EnableAutoMergeInternal,
+            EnableAutoMergeResponseData, EnableAutoMergeVariables, FindOpenPrInternal,
+            FindOpenPrResponseData, FindOpenPrVariables, GetPrInternal,
+            GetPrInternalRepositoryPullRequest, GetPrResponseData, GetPrVariables,
+            LookupBaseInternal, LookupBaseResponseData, LookupBaseVariables,
+            MarkReadyForReviewInternal, MarkReadyForReviewResponseData,
+            MarkReadyForReviewVariables, PrWithCiStatus, PrsWithCiStatusInternal,
+            PrsWithCiStatusResponseData, PrsWithCiStatusVariables, PullRequestMergeMethod,
+            PullRequestState, RemoveLabelsInternal, RemoveLabelsResponseData,
+            RemoveLabelsVariables, RequestedReviewer, UpdatePrInternal, UpdatePrResponseData,
+            UpdatePrVariables,
+        },
     },
 };
 use anyhow::{Context, Result, anyhow};
@@ -316,6 +317,8 @@ impl Gh for OctocrabGh {
             auto_merge_request,
             review_requests,
             body,
+            stack,
+            stack_entry: _,
         } = data
             .repository
             .and_then(|r| r.pull_request)
@@ -324,6 +327,10 @@ impl Gh for OctocrabGh {
             Some(hr) => (Some(hr.owner.login), Some(hr.name)),
             None => (None, None),
         };
+        let stack_number = stack
+            .map(|s| u64::try_from(s.number))
+            .transpose()
+            .context("stack number out of range")?;
         Ok(PrDetails {
             number: u64::try_from(number).context("PR number out of range")?,
             title,
@@ -337,6 +344,7 @@ impl Gh for OctocrabGh {
             head_repo_name,
             graphql_node_id: id,
             in_merge_queue: merge_queue.is_some(),
+            stack_number,
             body,
             labels: labels
                 .and_then(|labels| labels.nodes)
@@ -473,6 +481,44 @@ impl Gh for OctocrabGh {
         }
         Ok(out)
     }
+
+    async fn create_stack(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr_numbers: &[u64],
+    ) -> Result<PullRequestStack> {
+        let route = format!("/repos/{owner}/{repo}/stacks");
+        let body = serde_json::json!({ "pull_requests": pr_numbers });
+        self.octo
+            .post::<_, PullRequestStack>(&route, Some(&body))
+            .await
+            .map_err(humanize)
+            .with_context(|| format!("creating stack in {owner}/{repo}"))
+    }
+
+    async fn unstack_prs(
+        &self,
+        owner: &str,
+        repo: &str,
+        stack_number: u64,
+        pr_numbers: &[u64],
+    ) -> Result<()> {
+        let route = format!("/repos/{owner}/{repo}/stacks/{stack_number}/unstack");
+        let body = serde_json::json!({ "pull_requests": pr_numbers });
+        post_no_content(&self.octo, &route, Some(&body))
+            .await
+            .with_context(|| format!("unstacking PRs from stack {stack_number} in {owner}/{repo}"))
+    }
+
+    async fn list_stacks(&self, owner: &str, repo: &str) -> Result<Vec<PullRequestStack>> {
+        let route = format!("/repos/{owner}/{repo}/stacks");
+        self.octo
+            .get::<Vec<PullRequestStack>, _, _>(&route, None::<&()>)
+            .await
+            .map_err(humanize)
+            .with_context(|| format!("listing stacks in {owner}/{repo}"))
+    }
 }
 
 fn is_local_pull(pr: &PrWithCiStatus, head_owner: &str) -> bool {
@@ -527,20 +573,20 @@ fn build_search_queries(owner: &str, repo: &str, branches: &[String]) -> Vec<Str
     queries
 }
 
-/// POST to a workflow-run action endpoint (`rerun` or `rerun-failed-jobs`).
-/// Octocrab has no typed wrapper for these, so we route through `_post` and
-/// reuse `map_github_error` for consistent error handling.
-async fn post_action_run(
+/// POST to an endpoint that answers `204 No Content`.
+///
+/// Octocrab's typed `post` always deserializes the response body, so an empty
+/// one fails with `JSON Error in .: EOF while parsing a value` even though the
+/// call succeeded. Routing through `_post` lets us check the status and ignore
+/// the body, while still reusing `map_github_error` for consistent errors.
+async fn post_no_content<B: serde::Serialize + ?Sized>(
     octo: &Octocrab,
-    owner: &str,
-    repo: &str,
-    run_id: u64,
-    action: &str,
+    route: &str,
+    body: Option<&B>,
 ) -> Result<()> {
-    let route = format!("/repos/{owner}/{repo}/actions/runs/{run_id}/{action}");
-    let uri = http::Uri::try_from(&route).with_context(|| format!("building URI for {route}"))?;
+    let uri = http::Uri::try_from(route).with_context(|| format!("building URI for {route}"))?;
     let response = octo
-        ._post(uri, None::<&()>)
+        ._post(uri, body)
         .await
         .map_err(humanize)
         .with_context(|| format!("POST {route}"))?;
@@ -549,6 +595,19 @@ async fn post_action_run(
         .map_err(humanize)
         .with_context(|| format!("POST {route}"))?;
     Ok(())
+}
+
+/// POST to a workflow-run action endpoint (`rerun` or `rerun-failed-jobs`).
+/// Octocrab has no typed wrapper for these.
+async fn post_action_run(
+    octo: &Octocrab,
+    owner: &str,
+    repo: &str,
+    run_id: u64,
+    action: &str,
+) -> Result<()> {
+    let route = format!("/repos/{owner}/{repo}/actions/runs/{run_id}/{action}");
+    post_no_content(octo, &route, None::<&()>).await
 }
 
 fn map_workflow_run(r: &octocrab::models::workflows::Run) -> WorkflowRun {
@@ -650,5 +709,44 @@ mod tests {
             assert!(q.len() <= MAX_SEARCH_QUERY_LEN, "batch too long: {q}");
             assert!(q.starts_with("repo:o/r is:pr is:open"));
         }
+    }
+
+    #[test]
+    fn parse_stack_response_parses_full_response() {
+        let json = serde_json::json!({
+            "number": 7,
+            "pull_requests": [
+                {
+                    "number": 101
+                },
+                {
+                    "number": 102
+                }
+            ]
+        });
+        let stack = serde_json::from_value::<PullRequestStack>(json).unwrap();
+        assert_eq!(stack.number, 7);
+        assert_eq!(stack.pull_requests.len(), 2);
+        assert_eq!(stack.pull_requests[0].number, 101);
+        assert_eq!(stack.pull_requests[1].number, 102);
+    }
+
+    #[test]
+    fn parse_stack_response_handles_empty_pull_requests() {
+        let json = serde_json::json!({
+            "number": 1,
+            "pull_requests": []
+        });
+        let stack = serde_json::from_value::<PullRequestStack>(json).unwrap();
+        assert!(stack.pull_requests.is_empty());
+    }
+
+    #[test]
+    fn parse_stack_response_errors_on_missing_fields() {
+        let json = serde_json::json!({
+            "pull_requests": []
+        });
+        let result = serde_json::from_value::<PullRequestStack>(json);
+        assert!(result.is_err());
     }
 }

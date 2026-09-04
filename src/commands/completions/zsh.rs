@@ -1,4 +1,4 @@
-use super::{ArgInfo, SubInfo, collect_subs, first_help_line};
+use crate::commands::completions::{ArgInfo, SubInfo, collect_subs, first_help_line};
 use anyhow::Result;
 use clap::Command;
 use core::fmt::Write as _;

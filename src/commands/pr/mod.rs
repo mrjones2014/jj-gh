@@ -8,8 +8,8 @@ mod create;
 mod edit;
 pub mod fetch;
 mod log;
-mod restack;
 mod retry_failed;
+mod stack;
 mod url;
 
 use crate::{
@@ -29,8 +29,8 @@ use self::log::{PrLogArgs, PrLogArgsInput};
 use auto_merge::{AutoMergeArgs, AutoMergeArgsInput};
 use edit::{EditArgs, EditArgsInput};
 use fetch::{FetchArgs, FetchArgsInput};
-use restack::{RestackArgs, RestackArgsInput};
 use retry_failed::{RetryFailedArgs, RetryFailedArgsInput};
+use stack::{StackArgs, StackArgsInput};
 
 pub use create::{CreateArgs, CreateArgsInput};
 
@@ -91,17 +91,6 @@ pub enum PrAction {
     #[command(visible_alias = "l")]
     Log(PrLogArgsInput),
 
-    /// Push the current `jj` stack shape up to GitHub by updating each PR's
-    /// base branch to match its closest stacked ancestor bookmark.
-    ///
-    /// Restack does not rewrite the jj graph; the user shapes the graph first
-    /// (e.g. via `jj rebase`) and then runs `jj-gh pr restack` to set each
-    /// PR's `baseRefName` on the remote. Launches an interactive TUI by
-    /// default. Pass `--dry-run` or `--json` to print the proposed plan
-    /// without making any API calls.
-    #[command(visible_alias = "rs")]
-    Restack(RestackArgsInput),
-
     /// Re-run failed CI jobs on a PR, or on all local PRs with failed CI.
     ///
     /// Resolves the PR from a revision (via its local bookmark) or PR number,
@@ -117,6 +106,28 @@ pub enum PrAction {
         group = clap::ArgGroup::new("retry_target").required(true).multiple(false)
     )]
     RetryFailed(RetryFailedArgsInput),
+
+    /// Make GitHub match the shape of the local `jj` graph.
+    ///
+    /// Pushes bookmarks whose remote target has fallen behind, moves each PR's
+    /// base branch onto its closest stacked ancestor bookmark, then creates,
+    /// reshapes, or dissolves GitHub stacks to match the local chains. The jj
+    /// graph is never rewritten: shape it yourself (e.g. via `jj rebase`),
+    /// then run this.
+    ///
+    /// Without arguments it reconciles every local PR, printing the `jj log`
+    /// it is working from and the proposed plan before touching anything.
+    /// Given revisions or PR numbers it asserts exactly that stack, bottom to
+    /// top, which is the escape hatch for when detection gets it wrong.
+    ///
+    /// Without arguments, applying needs a confirmation: answer the prompt, or
+    /// pass `--force`. Outside a terminal there is nobody to prompt, so the
+    /// plan is printed and `--force` is required to apply it. Naming the PRs
+    /// explicitly is itself the confirmation, so that form does not prompt.
+    ///
+    /// Use `--dry-run` or `--json` to print the plan and stop either way.
+    #[command(visible_alias = "s")]
+    Stack(StackArgsInput),
 
     /// Lookup the PR by the given number or revision ID and print its
     /// full URL. This is useful in pipes such as `jj-gh pr url <rev> | pbcopy`
@@ -162,13 +173,13 @@ pub async fn dispatch(global: GlobalOptsInput, action: PrAction) -> Result<()> {
             let args = PrLogArgs::resolve(input, &config, &globals);
             self::log::run(&model, &args).await?;
         }
-        PrAction::Restack(input) => {
-            let args = RestackArgs::resolve(input, &config, &globals);
-            restack::run(&model, &args).await?;
-        }
         PrAction::RetryFailed(input) => {
             let args = RetryFailedArgs::resolve(input, &config, &globals);
             retry_failed::run(&model, &args).await?;
+        }
+        PrAction::Stack(input) => {
+            let args = StackArgs::resolve(input, &config, &globals);
+            stack::run(&model, &args).await?;
         }
         PrAction::Url(input) => {
             let args = PrUrlArgs::resolve(input, &config, &globals);
@@ -203,6 +214,13 @@ mod tests {
     struct PrLogArgsParser {
         #[command(flatten)]
         args: PrLogArgsInput,
+    }
+
+    #[derive(clap::Parser, Debug)]
+    #[command(no_binary_name = true)]
+    struct StackArgsParser {
+        #[command(flatten)]
+        args: StackArgsInput,
     }
 
     #[derive(clap::Parser, Debug)]
@@ -275,6 +293,16 @@ mod tests {
 
     fn merged_edit(argv: &[&str], toml_config: &str) -> Config {
         let argv = parse_edit(argv);
+        let fig = config::defaults_figment()
+            .merge(config::JjConfProvider::from_memory("test", toml_config))
+            .merge(Serialized::defaults(&argv));
+        config::extract(&fig).unwrap()
+    }
+
+    fn merged_stack(argv: &[&str], toml_config: &str) -> Config {
+        let argv = StackArgsParser::try_parse_from(argv.iter().copied())
+            .expect("StackArgsInput failed to parse")
+            .args;
         let fig = config::defaults_figment()
             .merge(config::JjConfProvider::from_memory("test", toml_config))
             .merge(Serialized::defaults(&argv));
@@ -376,6 +404,84 @@ mod tests {
     }
 
     #[test]
+    fn create_auto_stack_defaults_on() {
+        let c = merged_create(&["@-"], "");
+        assert!(c.auto_stack);
+    }
+
+    #[test]
+    fn create_auto_stack_config_wins_over_bare_argv() {
+        let c = merged_create(
+            &["@-"],
+            "\
+            [jj-gh]\n\
+            auto_stack = false\n\
+            ",
+        );
+        assert!(!c.auto_stack);
+    }
+
+    #[test]
+    fn create_stack_flags_override_config() {
+        let c = merged_create(
+            &["@-", "--stack"],
+            "\
+            [jj-gh]\n\
+            auto_stack = false\n\
+            ",
+        );
+        assert!(c.auto_stack);
+
+        let c = merged_create(
+            &["@-", "--no-stack"],
+            "\
+            [jj-gh]\n\
+            auto_stack = true\n\
+            ",
+        );
+        assert!(!c.auto_stack);
+    }
+
+    #[test]
+    fn pr_stack_auto_push_defaults_on() {
+        let c = merged_stack(&[], "");
+        assert!(c.auto_push);
+    }
+
+    #[test]
+    fn pr_stack_auto_push_config_wins_over_bare_argv() {
+        let c = merged_stack(
+            &[],
+            "\
+            [jj-gh]\n\
+            auto_push = false\n\
+            ",
+        );
+        assert!(!c.auto_push);
+    }
+
+    #[test]
+    fn pr_stack_push_flags_override_config() {
+        let c = merged_stack(
+            &["--push"],
+            "\
+            [jj-gh]\n\
+            auto_push = false\n\
+            ",
+        );
+        assert!(c.auto_push);
+
+        let c = merged_stack(
+            &["--no-push"],
+            "\
+            [jj-gh]\n\
+            auto_push = true\n\
+            ",
+        );
+        assert!(!c.auto_push);
+    }
+
+    #[test]
     fn edit_bare_argv_lets_diff_config_win() {
         let c = merged_edit(
             &["42"],
@@ -451,6 +557,48 @@ mod tests {
         assert!(c.nerdfonts);
 
         let c = merged_pr_log(
+            &["--no-nerdfonts"],
+            "\n\
+            [jj-gh]\n\
+            nerdfonts = true\n\
+            ",
+        );
+        assert!(!c.nerdfonts);
+    }
+
+    #[test]
+    fn pr_stack_bare_argv_lets_config_nerdfonts_win() {
+        let c = merged_stack(
+            &[],
+            "\n\
+            [jj-gh]\n\
+            nerdfonts = true\n\
+            ",
+        );
+        assert!(c.nerdfonts);
+
+        let c = merged_stack(
+            &[],
+            "\n\
+            [jj-gh]\n\
+            nerdfonts = false\n\
+            ",
+        );
+        assert!(!c.nerdfonts);
+    }
+
+    #[test]
+    fn pr_stack_nerdfonts_flags_override_config() {
+        let c = merged_stack(
+            &["--nerdfonts"],
+            "\n\
+            [jj-gh]\n\
+            nerdfonts = false\n\
+            ",
+        );
+        assert!(c.nerdfonts);
+
+        let c = merged_stack(
             &["--no-nerdfonts"],
             "\n\
             [jj-gh]\n\

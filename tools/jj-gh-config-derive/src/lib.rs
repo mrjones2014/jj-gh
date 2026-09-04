@@ -310,6 +310,9 @@ pub fn config_schema(input: TokenStream) -> TokenStream {
         /// generated macro output.
         #[doc(hidden)]
         pub mod __schema {
+            // Generated at the macro call site, so it must pull in the
+            // surrounding module's items relatively; `crate::` cannot name it.
+            // ast-grep-ignore: no-super-paths
             use super::*;
             #(#schema_aliases)*
         }

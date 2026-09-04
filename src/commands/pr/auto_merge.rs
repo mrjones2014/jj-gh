@@ -49,6 +49,6 @@ pub async fn run(model: &impl Model, args: &AutoMergeArgs) -> Result<()> {
         .with_context(|| format!("enabling auto-merge on #{}", pr.number))?;
 
     log::info!("Enabled auto-merge for PR");
-    println!("{}", pr.html_url);
+    crate::ui::print_url(&pr.html_url);
     Ok(())
 }

@@ -39,7 +39,7 @@ pub use fake::FakeFs;
 
 #[cfg(test)]
 mod fake {
-    use super::{FileSystem, Path, Result};
+    use crate::fs::{FileSystem, Path, Result};
     use std::{collections::HashMap, path::PathBuf};
 
     pub struct FakeFs {

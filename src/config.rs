@@ -78,6 +78,9 @@ config_schema! {
     /// jj template string used to render candidate PR titles.
     pr_create_title_template: String = "description.first_line()".into(),
 
+    /// Which commit to use for the default PR title: `base` (oldest) or `head` (newest).
+    default_title_source: DefaultTitleSource = DefaultTitleSource::Base,
+
     /// Open new PRs as drafts.
     draft: bool = false,
 
@@ -86,6 +89,9 @@ config_schema! {
 
     /// Merge method used when auto-merge is enabled.
     auto_merge_method: AutoMergeMethod = AutoMergeMethod::Merge,
+
+    /// Link stacked PRs into a GitHub stack automatically.
+    auto_stack: bool = true,
 
     /// Editor command for the PR editor flow.
     editor: Option<crate::util::ShellCommand> = None,
@@ -102,8 +108,9 @@ config_schema! {
     /// jj template used by `pr log`.
     pr_log_template: Option<String> = None,
 
-    /// jj template used by `pr restack`. Falls back to `pr_log_template`.
-    pr_restack_template: Option<String> = None,
+    /// Push bookmarks whose remote target has fallen behind before `pr stack`
+    /// links them into a GitHub stack.
+    auto_push: bool = true,
 
     /// Render Nerd-Fonts glyphs in TUI output.
     nerdfonts: bool = true,
@@ -119,6 +126,19 @@ pub enum AutoMergeMethod {
     Merge,
     Squash,
     Rebase,
+}
+
+/// Which commit to use for the default PR title.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
+#[cfg_attr(feature = "schema-validation", derive(schemars::JsonSchema))]
+#[serde(rename_all = "lowercase")]
+#[clap(rename_all = "lowercase")]
+pub enum DefaultTitleSource {
+    /// Use the oldest commit in the PR (closest to the base branch).
+    #[default]
+    Base,
+    /// Use the newest commit in the PR (the head/top of the stack).
+    Head,
 }
 
 /// Build the layered figment without extracting. Callers (e.g. CLI dispatch)

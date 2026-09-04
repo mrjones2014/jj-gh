@@ -1,0 +1,25 @@
+id: no-super-paths
+language: Rust
+severity: error
+message: Reference items by their absolute `crate::` path instead of `super::`.
+note: >-
+  `super::` forces the reader to resolve the module tree relatively rather than absolutely. Spell the full path, e.g. `crate::commands::pr::stack::create_stacks`. The only exception is `use super::*;` inside a `#[cfg(test)] mod` that holds unit tests.
+rule:
+  kind: super
+  all:
+    # `pub(super)` is a visibility modifier, not a path reference.
+    - not:
+        inside:
+          kind: visibility_modifier
+    - not:
+        inside:
+          kind: mod_item
+          stopBy: end
+          all:
+            - follows:
+                kind: attribute_item
+                regex: ^#\[cfg\(test\)\]$
+            - has:
+                kind: attribute_item
+                stopBy: end
+                regex: ^#\[(tokio::)?test\]$
