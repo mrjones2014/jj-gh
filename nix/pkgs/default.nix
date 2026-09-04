@@ -27,7 +27,7 @@ let
 
   gen-docs = callPackage ./gen-docs.nix { };
   gen-manpage = callPackage ./gen-manpage.nix { };
-  jj-gh = callPackage ./jj-gh.nix { inherit gen-manpage; };
+  jj-gh = callPackage ./jj-gh.nix { };
   release-plz-patched = callPackage ./release-plz-patched.nix { };
   update-docs = callPackage ./update-docs.nix { inherit gen-docs; };
 in

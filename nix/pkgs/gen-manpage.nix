@@ -8,7 +8,7 @@ craneLib.buildPackage (
   // {
     inherit cargoArtifacts;
     pname = "gen-manpage";
-    cargoExtraArgs = "--package gen-manpage";
+    cargoExtraArgs = "--locked --package gen-manpage";
     doCheck = false;
   }
 )

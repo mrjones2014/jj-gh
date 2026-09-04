@@ -58,7 +58,14 @@
             ]);
           nativeBuildInputs = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.pkg-config ];
         };
-        cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+        # Explicitly workspace-wide. The root manifest has a `[package]`
+        # section, so a bare `cargo build` would select only `jj-gh` and the
+        # artifacts would miss deps that the devtool packages need. A superset
+        # is safe here: `--workspace` resolves the same features as every
+        # narrower selection used below, it just covers more crates.
+        cargoArtifacts = craneLib.buildDepsOnly (
+          commonArgs // { cargoExtraArgs = "--locked --workspace"; }
+        );
         treefmtEval = treefmt-nix.lib.evalModule pkgs (
           import ./nix/treefmt.nix {
             inherit pkgs;

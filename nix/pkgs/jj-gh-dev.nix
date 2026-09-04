@@ -7,7 +7,7 @@ craneLib.buildPackage (
   commonArgs
   // {
     inherit cargoArtifacts;
-    cargoExtraArgs = "--package jj-gh";
+    cargoExtraArgs = "--locked --package jj-gh";
     CARGO_PROFILE = "dev";
     doCheck = false;
   }
