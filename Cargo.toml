@@ -1,6 +1,6 @@
 [package]
 name = "jj-gh"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2024"
 description = "Manage GitHub PR Stacks natively with `jj`"
 repository = "https://github.com/mrjones2014/jj-gh"
@@ -48,7 +48,7 @@ gix = { version = "0.87", default-features = false, features = [
 ] }
 graphql_client = "0.16"
 http = "1"
-jj-gh-config-derive = { path = "tools/jj-gh-config-derive", version = "0.1.4" }
+jj-gh-config-derive = { path = "tools/jj-gh-config-derive", version = "0.1.5" }
 log = "0.4"
 # see: https://github.com/dependabot/dependabot-core/issues/14196
 noyalib = "0.0"

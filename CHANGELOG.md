@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1](https://github.com/mrjones2014/jj-gh/compare/jj-gh-v0.3.0...jj-gh-v0.3.1) - 2026-09-04
+
+### Added
+
+- *(pr)* Move `print-config-schema` devtool to `jj-gh config schema`
+
+### Fixed
+
+- *(pr-stack)* Accept `-T|--template` CLI flag
+
+### Other
+
+- *(deps)* bump noyalib from 0.0.22 to 0.0.27 ([#297](https://github.com/mrjones2014/jj-gh/pull/297))
+- *(deps)* update GitHub GraphQL schema ([#294](https://github.com/mrjones2014/jj-gh/pull/294))
+
 ## [0.3.0](https://github.com/mrjones2014/jj-gh/compare/jj-gh-v0.2.10...jj-gh-v0.3.0) - 2026-09-04
 
 ### Added
