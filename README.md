@@ -411,9 +411,8 @@ a matching open PR:
 
 ### `pr stack`
 
-Same aliases available as `pr log`. The `jj log` view `pr stack` prints above
-its plan uses the `pr log` template; `-T` is not accepted here, set
-`pr_log_template` instead.
+Same aliases available as `pr log`. `pr stack` will print a preview of `pr log`
+before outputting its stack plans.
 
 ## PR body template resolution
 

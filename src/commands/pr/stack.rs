@@ -101,8 +101,10 @@ subcommand_args! {
 
         /// Template for the `jj log` view shown above the plan. The same
         /// aliases as `pr log` are injected here. See `jj-gh pr log --help`.
-        #[config]
-        pub pr_log_template: Option<String>,
+        /// Defaults to `pr_log_template` from configuration.
+        #[arg(short = 'T', value_name = "TEMPLATE")]
+        #[config(maps_to = "pr_log_template")]
+        pub template: Option<String>,
     }
 }
 
@@ -442,7 +444,7 @@ async fn show_graph(args: &StackArgs, ctx: &Gathered) {
         &ctx.prs,
         &ctx.branch_to_local,
         args.nerdfonts,
-        args.pr_log_template.as_deref(),
+        args.template.as_deref(),
     );
     let Ok(tmp) = aliases
         .write_temp_config()
