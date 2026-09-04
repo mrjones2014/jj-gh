@@ -283,6 +283,7 @@ Use `--dry-run` or `--json` to print the plan and stop either way.
 - `--no-push` — Do not push bookmarks, even if their remote target is stale
 - `--nerdfonts <NERDFONTS>` — Force enable nerdfont icons in the `jj log` view shown above the plan. Overrides config. Use `--no-nerdfonts` to disable
 - `--no-nerdfonts` — Force the `jj log` view not to use nerdfont icons. Overrides config
+- `-T <TEMPLATE>` — Template for the `jj log` view shown above the plan. The same aliases as `pr log` are injected here. See `jj-gh pr log --help`. Defaults to `pr_log_template` from configuration
 
 ## `jj-gh pr url`
 
