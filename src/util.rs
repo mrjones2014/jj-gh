@@ -9,10 +9,9 @@ use std::future::Future;
 /// Newtype so clap parses it as a single value instead of a multi-value `Vec`,
 /// which otherwise panics when paired with a `value_parser` that yields a
 /// whole `Vec<String>` per occurrence.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(transparent)]
-#[cfg_attr(feature = "schema-validation", derive(schemars::JsonSchema))]
-#[cfg_attr(feature = "schema-validation", schemars(transparent))]
+#[schemars(transparent)]
 pub struct ShellCommand(pub Vec<String>);
 
 impl std::ops::Deref for ShellCommand {

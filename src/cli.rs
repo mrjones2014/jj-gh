@@ -127,6 +127,11 @@ pub enum Command {
         #[command(subcommand)]
         action: PrAction,
     },
+    /// Commands to work with jj-gh's own configuration.
+    Config {
+        #[command(subcommand)]
+        action: ConfigAction,
+    },
     /// Diagnostic subcommands. Useful for inspecting the resolved config and pre-flight checks.
     Debug {
         #[command(subcommand)]
@@ -151,6 +156,15 @@ pub enum Command {
         #[arg(long = "subcommand", value_name = "NAME", requires = "jj_alias")]
         jj_gh_subcommand: Option<SubcommandStr>,
     },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ConfigAction {
+    /// Print the JSON Schema for the `jj-gh` config table on stdout.
+    ///
+    /// Point an editor's JSON-schema support at the output to get completion
+    /// and validation for the `[jj-gh]` table in your jj config.
+    Schema,
 }
 
 #[derive(Debug, Subcommand)]

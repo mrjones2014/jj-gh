@@ -16,6 +16,8 @@ This document contains the help content for the `jj-gh` command-line program.
 - [`jj-gh pr retry-failed`↴](#jj-gh-pr-retry-failed)
 - [`jj-gh pr stack`↴](#jj-gh-pr-stack)
 - [`jj-gh pr url`↴](#jj-gh-pr-url)
+- [`jj-gh config`↴](#jj-gh-config)
+- [`jj-gh config schema`↴](#jj-gh-config-schema)
 - [`jj-gh debug`↴](#jj-gh-debug)
 - [`jj-gh debug config`↴](#jj-gh-debug-config)
 - [`jj-gh debug auth`↴](#jj-gh-debug-auth)
@@ -32,6 +34,7 @@ Manage GitHub PR Stacks natively with `jj`
 ###### **Subcommands:**
 
 - `pr` — Commands to work with PRs
+- `config` — Commands to work with jj-gh's own configuration
 - `debug` — Diagnostic subcommands. Useful for inspecting the resolved config and pre-flight checks
 - `completions` — Generate completions (on stdout) for the specified shell
 
@@ -299,6 +302,24 @@ Lookup the PR by the given number or revision ID and print its full URL. This is
 
 - `--remote <NAME>` — Git remote used for the user's own pushes and PR head lookups. Precedence: this flag, then git's auto-detected default push remote, then `default_remote` in config
 - `--upstream-remote <NAME>` — Git remote used as the PR target in fork workflows. Precedence: this flag, then `upstream_remote` in config, else the default upstream
+
+## `jj-gh config`
+
+Commands to work with jj-gh's own configuration
+
+**Usage:** `jj-gh config <COMMAND>`
+
+###### **Subcommands:**
+
+- `schema` — Print the JSON Schema for the `jj-gh` config table on stdout
+
+## `jj-gh config schema`
+
+Print the JSON Schema for the `jj-gh` config table on stdout.
+
+Point an editor's JSON-schema support at the output to get completion and validation for the `[jj-gh]` table in your jj config.
+
+**Usage:** `jj-gh config schema`
 
 ## `jj-gh debug`
 

@@ -32,6 +32,7 @@ pub async fn dispatch(bin_name: &str) -> anyhow::Result<()> {
     let global = args.global;
     match args.command {
         Command::Pr { action } => commands::pr::dispatch(global, action).await?,
+        Command::Config { action } => commands::config::dispatch(action)?,
         Command::Debug { action } => commands::debug::dispatch(global, action).await?,
         Command::Completions {
             shell,

@@ -106,7 +106,9 @@ impl Display for SubcommandStr {
 fn _ensure_subcmds_handled(cmd: crate::cli::Command) {
     let _ = match cmd {
         crate::Command::Pr { .. } => SubcommandStr::Pr,
-        subcmd @ (crate::Command::Debug { .. } | crate::Command::Completions { .. }) => {
+        subcmd @ (crate::Command::Config { .. }
+        | crate::Command::Debug { .. }
+        | crate::Command::Completions { .. }) => {
             unreachable!("{subcmd:?} is not supported in this position");
         }
     };

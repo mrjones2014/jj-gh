@@ -79,7 +79,6 @@
         inherit (packageSet)
           fetch-schema-app
           jj-gh
-          print-config-schema
           release-app
           release-plz-patched
           update-docs
@@ -124,7 +123,6 @@
             cargoArtifacts
             treefmtEval
             jj-gh
-            print-config-schema
             release-plz-patched
             update-docs
             ;

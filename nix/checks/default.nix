@@ -7,7 +7,6 @@
   treefmtEval,
   update-docs,
   jj-gh,
-  print-config-schema,
   release-plz-patched,
 }:
 let
@@ -21,7 +20,6 @@ let
       treefmtEval
       update-docs
       jj-gh
-      print-config-schema
       ;
   };
   checkFiles = pkgs.lib.filterAttrs (

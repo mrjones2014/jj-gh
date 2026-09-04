@@ -3,5 +3,6 @@
 //! ui, ...) is supporting infrastructure.
 
 pub mod completions;
+pub mod config;
 pub mod debug;
 pub mod pr;

@@ -517,6 +517,7 @@ async fn create_single_pr(
     let title_revset = jj::title_base_revset(rev, &base_rev);
     spinner.set_message("Generating title candidates".into());
     let candidates = resolve_title_candidates(jj, &title_revset, title_template).await?;
+    spinner.stop();
     let default_title = if *pick_title {
         title_picker::pick(&candidates)?
     } else {
@@ -535,7 +536,7 @@ async fn create_single_pr(
             .to_string()
     };
 
-    spinner.set_message("Loading PR template".into());
+    let spinner = crate::ui::Spinner::start("Loading PR template");
     let raw_template = load_template_for(
         args,
         jj,
