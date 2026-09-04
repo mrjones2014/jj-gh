@@ -115,6 +115,15 @@ type AddBlockedByPayload {
     clientMutationId: String
     issue: Issue
 }
+input AddCloseIssueReferencesInput {
+    clientMutationId: String
+    issueId: ID! @possibleTypes(concreteTypes: ["Issue"])
+    pullRequestIds: [ID!]! @possibleTypes(concreteTypes: ["PullRequest"])
+}
+type AddCloseIssueReferencesPayload {
+    clientMutationId: String
+    issue: Issue
+}
 input AddCommentInput {
     body: String!
     clientMutationId: String
@@ -2057,7 +2066,7 @@ input CreateIssueFieldInput {
     description: String
     name: String!
     options: [IssueFieldSingleSelectOptionInput!]
-    ownerId: ID! @possibleTypes(concreteTypes: ["Organization"])
+    ownerId: ID!
     visibility: IssueFieldVisibility
 }
 type CreateIssueFieldPayload {
@@ -3468,6 +3477,7 @@ type Enterprise implements Node @docsCategory(name: "enterprise-admin") {
         last: Int
         orderBy: EnterpriseTeamOrder = {field: ID, direction: ASC}
         query: String
+        userLogins: [String!]
   ): EnterpriseTeamConnection!
     id: ID!
     innersourceVulnerabilities(
@@ -6719,6 +6729,9 @@ type Mutation @docsCategory(name: "meta") {
     addBlockedBy(
         input: AddBlockedByInput!
   ): AddBlockedByPayload @docsCategory(name: "issues")
+    addCloseIssueReferences(
+        input: AddCloseIssueReferencesInput!
+  ): AddCloseIssueReferencesPayload @docsCategory(name: "issues")
     addComment(
         input: AddCommentInput!
   ): AddCommentPayload @docsCategory(name: "issues")
@@ -7196,6 +7209,9 @@ type Mutation @docsCategory(name: "meta") {
     removeBlockedBy(
         input: RemoveBlockedByInput!
   ): RemoveBlockedByPayload @docsCategory(name: "issues")
+    removeCloseIssueReferences(
+        input: RemoveCloseIssueReferencesInput!
+  ): RemoveCloseIssueReferencesPayload @docsCategory(name: "issues")
     removeEnterpriseAdmin(
         input: RemoveEnterpriseAdminInput!
   ): RemoveEnterpriseAdminPayload @docsCategory(name: "enterprise-admin")
@@ -13080,6 +13096,11 @@ type PullRequestReviewThreadEdge {
     cursor: String!
     node: PullRequestReviewThread
 }
+enum PullRequestReviewThreadResolutionReason @docsCategory(name: "pulls") {
+    ADDRESSED
+    INVALID
+    WONT_FIX
+}
 enum PullRequestReviewThreadSubjectType @docsCategory(name: "pulls") {
     FILE
     LINE
@@ -13879,6 +13900,15 @@ input RemoveBlockedByInput {
 }
 type RemoveBlockedByPayload {
     blockingIssue: Issue
+    clientMutationId: String
+    issue: Issue
+}
+input RemoveCloseIssueReferencesInput {
+    clientMutationId: String
+    issueId: ID! @possibleTypes(concreteTypes: ["Issue"])
+    pullRequestIds: [ID!]! @possibleTypes(concreteTypes: ["PullRequest"])
+}
+type RemoveCloseIssueReferencesPayload {
     clientMutationId: String
     issue: Issue
 }
@@ -16948,6 +16978,7 @@ type RerequestCheckSuitePayload {
 }
 input ResolveReviewThreadInput {
     clientMutationId: String
+    resolutionReason: PullRequestReviewThreadResolutionReason
     threadId: ID! @possibleTypes(concreteTypes: ["PullRequestReviewThread"])
 }
 type ResolveReviewThreadPayload {
