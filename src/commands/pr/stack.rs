@@ -469,14 +469,35 @@ async fn show_graph(args: &StackArgs, ctx: &Gathered) {
     }
 }
 
+/// PRs that leave their stack and are in no planned chain, so being unstacked
+/// is their end state rather than a step toward one. Everything else in
+/// `plan.unstack` comes down only so it can be rebuilt, and is described by the
+/// `Stack` section instead.
+fn prs_leaving_stacks(plan: &Plan) -> Vec<u64> {
+    let restacking = plan
+        .chains
+        .iter()
+        .flatten()
+        .copied()
+        .collect::<HashSet<u64>>();
+    plan.unstack
+        .iter()
+        .copied()
+        .filter(|number| !restacking.contains(number))
+        .collect()
+}
+
 fn print_plan(plan: &Plan, pr_details: &[PrDetails], links: &PrLinks) {
     let title_of = pr_details
         .iter()
         .map(|pr| (pr.number, pr.title.as_str()))
         .collect::<HashMap<u64, &str>>();
+    // The `jj log` above already ends in a blank-ish `~` row, so the first
+    // section butts right up against it and only later ones get a separator.
+    let mut first = true;
 
     if !plan.pushes.is_empty() {
-        eprintln!("\n{}Push{} ({}):", on(DIM), on(RESET), plan.pushes.len());
+        section(&mut first, "Push", &format!("({})", plan.pushes.len()));
         for push in &plan.pushes {
             let from = push
                 .remote_commit_id
@@ -496,11 +517,10 @@ fn print_plan(plan: &Plan, pr_details: &[PrDetails], links: &PrLinks) {
     }
 
     if !plan.bases.is_empty() {
-        eprintln!(
-            "\n{}Retarget base{} ({}):",
-            on(DIM),
-            on(RESET),
-            plan.bases.len()
+        section(
+            &mut first,
+            "Retarget base",
+            &format!("({})", plan.bases.len()),
         );
         for base in &plan.bases {
             // The whole line is the link target, so anywhere on the row is
@@ -525,43 +545,60 @@ fn print_plan(plan: &Plan, pr_details: &[PrDetails], links: &PrLinks) {
         }
     }
 
-    if !plan.chains.is_empty() {
-        eprintln!("\n{}Stack{} ({}):", on(DIM), on(RESET), plan.chains.len());
-        for chain in &plan.chains {
-            eprintln!("  {}", format_chain(links, chain));
+    // One block per chain, listed top to bottom so it reads in the same
+    // direction as the `jj log` above it. Naming the end state matters more
+    // than naming the steps: a stack that has to come down first is still
+    // going to exist when the run finishes.
+    let rebuilt = plan.unstack.iter().copied().collect::<HashSet<u64>>();
+    for chain in &plan.chains {
+        let detail = if chain.iter().any(|number| rebuilt.contains(number)) {
+            "(an existing stack will be recreated)"
+        } else {
+            "(a new stack will be created)"
+        };
+        section(&mut first, "Stack", detail);
+        for &number in chain.iter().rev() {
+            print_pr_line(links, number, title_of.get(&number).copied().unwrap_or(""));
         }
     }
 
-    if !plan.unstack.is_empty() {
-        eprintln!(
-            "\n{}Unstack{} ({}):",
-            on(DIM),
-            on(RESET),
-            plan.unstack.len()
-        );
-        for &number in &plan.unstack {
-            let title = title_of.get(&number).copied().unwrap_or_default();
-            let line = format!(
-                "{}{}{}  {title}",
-                on(CYAN),
-                links.underlined_number(UI, number),
-                on(RESET)
-            );
-            eprintln!("  {}", links.link(UI, number, &line));
+    let leaving = prs_leaving_stacks(plan);
+    if !leaving.is_empty() {
+        section(&mut first, "Unstack", &format!("({})", leaving.len()));
+        for &number in &leaving {
+            print_pr_line(links, number, title_of.get(&number).copied().unwrap_or(""));
         }
-        // Worth spelling out: a user watching a healthy stack get torn down
-        // mid-run should know it is a precondition, not a mistake.
+        // Worth spelling out: these are the ones that do not come back, and
+        // the reason is local, so the user can tell it from a mistake.
         eprintln!(
-            "  {}GitHub will not move a stacked PR's base ref, so these leave{}",
+            "  {}These are no longer part of a local chain, so they leave{}",
             on(DIM),
             on(RESET),
         );
-        eprintln!(
-            "  {}their stack first and are stacked again afterwards.{}",
-            on(DIM),
-            on(RESET),
-        );
+        eprintln!("  {}their stack for good.{}", on(DIM), on(RESET));
     }
+}
+
+/// A section header, separated from the section above it but not from the
+/// `jj log` view that precedes the first one.
+fn section(first: &mut bool, label: &str, detail: &str) {
+    if *first {
+        *first = false;
+    } else {
+        eprintln!();
+    }
+    eprintln!("{}{label}{} {detail}:", on(DIM), on(RESET));
+}
+
+/// `#123  title`, with the whole row hyperlinked to the PR.
+fn print_pr_line(links: &PrLinks, number: u64, title: &str) {
+    let line = format!(
+        "{}{}{}  {title}",
+        on(CYAN),
+        links.underlined_number(UI, number),
+        on(RESET),
+    );
+    eprintln!("  {}", links.link(UI, number, &line));
 }
 
 /// Apply the plan. Push first so GitHub sees the right commits, then move the
@@ -929,6 +966,26 @@ mod tests {
             }
             .is_empty()
         );
+    }
+
+    #[test]
+    fn a_pr_that_is_unstacked_only_to_be_rebuilt_is_not_reported_as_leaving() {
+        let plan = Plan {
+            chains: vec![vec![1, 2]],
+            unstack: vec![1, 2],
+            ..Default::default()
+        };
+        assert!(prs_leaving_stacks(&plan).is_empty());
+    }
+
+    #[test]
+    fn a_pr_with_no_chain_left_is_reported_as_leaving() {
+        let plan = Plan {
+            chains: vec![vec![1, 2]],
+            unstack: vec![1, 2, 9],
+            ..Default::default()
+        };
+        assert_eq!(prs_leaving_stacks(&plan), vec![9]);
     }
 
     #[test]
