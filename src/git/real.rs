@@ -9,14 +9,14 @@ pub trait GitOps {
     /// # Errors
     ///
     /// Propagates gix failures.
-    async fn local_bookmark_exists(&self, name: &str) -> Result<bool>;
+    fn local_bookmark_exists(&self, name: &str) -> Result<bool>;
 
     /// Fetch `refs/pull/<pr>/head` from `remote` into `refs/heads/<bookmark>`.
     ///
     /// # Errors
     ///
     /// Propagates gix failures.
-    async fn fetch_pr(&self, remote: &str, pr: u64, bookmark: &str, force: bool) -> Result<()>;
+    fn fetch_pr(&self, remote: &str, pr: u64, bookmark: &str, force: bool) -> Result<()>;
 }
 
 /// Production [`GitOps`] backed by a shared `gix::Repository` discovered
@@ -34,12 +34,12 @@ impl RealGit {
 }
 
 impl GitOps for RealGit {
-    async fn local_bookmark_exists(&self, name: &str) -> Result<bool> {
+    fn local_bookmark_exists(&self, name: &str) -> Result<bool> {
         let full = format!("refs/heads/{name}");
         Ok(self.repo.try_find_reference(full.as_str())?.is_some())
     }
 
-    async fn fetch_pr(&self, remote: &str, pr: u64, bookmark: &str, force: bool) -> Result<()> {
+    fn fetch_pr(&self, remote: &str, pr: u64, bookmark: &str, force: bool) -> Result<()> {
         let prefix = if force { "+" } else { "" };
         let refspec = format!("{prefix}refs/pull/{pr}/head:refs/heads/{bookmark}");
         let remote = self

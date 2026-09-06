@@ -376,11 +376,11 @@ mod tests {
     }
 
     impl crate::jj::Jj for FakeJj {
-        async fn default_remote(&self) -> Result<Option<String>> {
+        fn default_remote(&self) -> Result<Option<String>> {
             Ok(Some("origin".into()))
         }
 
-        async fn remote_names(&self) -> Result<Vec<String>> {
+        fn remote_names(&self) -> Result<Vec<String>> {
             Ok(vec!["origin".into()])
         }
 
@@ -393,7 +393,7 @@ mod tests {
         async fn first_commit_description(&self, _revset: &str) -> Result<String> {
             unimplemented!()
         }
-        async fn remote_url(&self, name: &str) -> Result<Option<String>> {
+        fn remote_url(&self, name: &str) -> Result<Option<String>> {
             // resolve_pr_with_target asks for default + upstream remote URLs.
             if name == "origin" {
                 Ok(Some("git@github.com:o/r.git".into()))
@@ -410,7 +410,7 @@ mod tests {
         async fn trunk_branch(&self) -> Result<Option<String>> {
             unimplemented!()
         }
-        async fn workspace_root(&self) -> Result<&PathBuf> {
+        fn workspace_root(&self) -> Result<&PathBuf> {
             Ok(&self.workspace_root)
         }
         async fn git_import(&self) -> Result<()> {

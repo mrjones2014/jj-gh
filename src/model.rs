@@ -144,11 +144,10 @@ pub trait Model {
     ) -> Result<(String, Target)> {
         let origin_url = self
             .jj()
-            .remote_url(&remote)
-            .await?
+            .remote_url(&remote)?
             .ok_or_else(|| anyhow!("`{remote}` remote is not configured"))?;
         let upstream_url = match upstream_remote {
-            Some(name) => self.jj().remote_url(name).await?,
+            Some(name) => self.jj().remote_url(name)?,
             None => None,
         };
         let target = remote::target(&origin_url, upstream_url.as_deref())?;
@@ -294,11 +293,11 @@ pub(crate) struct NoGit;
 
 #[cfg(test)]
 impl GitOps for NoGit {
-    async fn local_bookmark_exists(&self, _name: &str) -> Result<bool> {
+    fn local_bookmark_exists(&self, _name: &str) -> Result<bool> {
         unreachable!("test did not configure git operations")
     }
 
-    async fn fetch_pr(&self, _remote: &str, _pr: u64, _bookmark: &str, _force: bool) -> Result<()> {
+    fn fetch_pr(&self, _remote: &str, _pr: u64, _bookmark: &str, _force: bool) -> Result<()> {
         unreachable!("test did not configure git operations")
     }
 }

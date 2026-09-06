@@ -184,16 +184,16 @@ mod tests {
     }
 
     impl Jj for MockJj {
-        async fn default_remote(&self) -> Result<Option<String>> {
+        fn default_remote(&self) -> Result<Option<String>> {
             unimplemented!()
         }
-        async fn remote_names(&self) -> Result<Vec<String>> {
+        fn remote_names(&self) -> Result<Vec<String>> {
             unimplemented!()
         }
         async fn resolve_rev(&self, _rev: &str) -> Result<CommitInfo> {
             unimplemented!()
         }
-        async fn remote_url(&self, _name: &str) -> Result<Option<String>> {
+        fn remote_url(&self, _name: &str) -> Result<Option<String>> {
             unimplemented!()
         }
         async fn remote_bookmark_sha(
@@ -206,7 +206,7 @@ mod tests {
         async fn trunk_branch(&self) -> Result<Option<String>> {
             unimplemented!()
         }
-        async fn workspace_root(&self) -> Result<&PathBuf> {
+        fn workspace_root(&self) -> Result<&PathBuf> {
             Ok(&self.workspace_root)
         }
         async fn git_import(&self) -> Result<()> {
