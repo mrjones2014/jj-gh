@@ -68,8 +68,8 @@ async fn print_rev(globals: &GlobalOpts, _config: &Config, rev: &str) -> Result<
     let title_revset = jj::title_base_revset(rev, ancestor.as_deref().unwrap_or("trunk()"));
     let default_title = jj.first_commit_description(&title_revset).await?;
 
-    let origin_url = jj.remote_url(&remote).await?;
-    let upstream_url = jj.remote_url(upstream_remote).await?;
+    let origin_url = jj.remote_url(&remote)?;
+    let upstream_url = jj.remote_url(upstream_remote)?;
     let default_branch = jj.trunk_branch().await?;
     let default_branch_sha = match &default_branch {
         Some(branch) => jj.remote_bookmark_sha(branch, &remote).await?,

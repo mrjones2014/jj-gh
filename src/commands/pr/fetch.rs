@@ -59,12 +59,12 @@ fn ensure_colocated(workspace_root: &Path) -> Result<()> {
 /// name a remote that is not configured; the config `upstream_remote` silently
 /// falls through when its remote is absent (its default is the literal
 /// `upstream`, which most repos do not have).
-async fn resolve_host_remote(
+fn resolve_host_remote(
     jj: &impl Jj,
     remote: &EvalWithCfgFallback<String>,
     upstream_remote: &EvalWithCfgFallback<String>,
 ) -> Result<String> {
-    let names = jj.remote_names().await.unwrap_or_default();
+    let names = jj.remote_names().unwrap_or_default();
     let exists = |name: &str| names.iter().any(|n| n == name);
 
     if let Some(name) = upstream_remote.cli() {
@@ -88,7 +88,7 @@ async fn resolve_host_remote(
         }
         log::debug!("fetch: config upstream_remote `{name}` not configured; falling through");
     }
-    if let Some(name) = jj.auto_detected_remote().await {
+    if let Some(name) = jj.auto_detected_remote() {
         log::debug!("fetch: host remote from git auto-detect `{name}`");
         return Ok(name);
     }
@@ -176,7 +176,7 @@ pub async fn run(model: &impl Model, args: &FetchArgs) -> Result<()> {
             },
     } = args;
 
-    let workspace_root = jj.workspace_root().await?;
+    let workspace_root = jj.workspace_root()?;
     ensure_colocated(workspace_root)?;
 
     let spinner = Spinner::start("Resolving PR");
@@ -184,7 +184,7 @@ pub async fn run(model: &impl Model, args: &FetchArgs) -> Result<()> {
     // `refs/pull/N/head` lives on the repo that hosts the PR (the upstream in a
     // fork workflow), so fetch resolves the host remote rather than the push
     // remote used elsewhere.
-    let host = resolve_host_remote(jj, remote, upstream_remote).await?;
+    let host = resolve_host_remote(jj, remote, upstream_remote)?;
     let (remote, target) = model.resolve_target_for(host, None).await?;
 
     let pr = gh.get_pr(&target.owner, &target.repo, *pr_num).await?;
@@ -211,16 +211,13 @@ pub async fn run(model: &impl Model, args: &FetchArgs) -> Result<()> {
         ));
     }
 
-    if model.git().local_bookmark_exists(&bookmark).await? && !force {
+    if model.git().local_bookmark_exists(&bookmark)? && !force {
         return Err(anyhow!(
             "local bookmark `{bookmark}` already exists; pass --force to overwrite"
         ));
     }
 
-    model
-        .git()
-        .fetch_pr(&remote, *pr_num, &bookmark, *force)
-        .await?;
+    model.git().fetch_pr(&remote, *pr_num, &bookmark, *force)?;
     jj.git_import().await?;
     spinner.stop();
 
@@ -302,11 +299,11 @@ mod tests {
     }
 
     impl Jj for FakeJj {
-        async fn default_remote(&self) -> Result<Option<String>> {
+        fn default_remote(&self) -> Result<Option<String>> {
             Ok(self.auto_detect.clone())
         }
 
-        async fn remote_names(&self) -> Result<Vec<String>> {
+        fn remote_names(&self) -> Result<Vec<String>> {
             Ok(self.remote_names.clone())
         }
 
@@ -319,7 +316,7 @@ mod tests {
         async fn first_commit_description(&self, _revset: &str) -> Result<String> {
             unimplemented!("fetch does not call first_commit_description")
         }
-        async fn remote_url(&self, name: &str) -> Result<Option<String>> {
+        fn remote_url(&self, name: &str) -> Result<Option<String>> {
             assert_eq!(name, self.expected_remote);
             Ok(self.origin.clone())
         }
@@ -332,7 +329,7 @@ mod tests {
         async fn trunk_branch(&self) -> Result<Option<String>> {
             unimplemented!("fetch does not call trunk_branch")
         }
-        async fn workspace_root(&self) -> Result<&PathBuf> {
+        fn workspace_root(&self) -> Result<&PathBuf> {
             Ok(&self.workspace_root)
         }
         async fn git_import(&self) -> Result<()> {
@@ -490,10 +487,10 @@ mod tests {
     }
 
     impl GitOps for FakeGit {
-        async fn local_bookmark_exists(&self, _name: &str) -> Result<bool> {
+        fn local_bookmark_exists(&self, _name: &str) -> Result<bool> {
             Ok(self.exists)
         }
-        async fn fetch_pr(&self, remote: &str, pr: u64, bookmark: &str, force: bool) -> Result<()> {
+        fn fetch_pr(&self, remote: &str, pr: u64, bookmark: &str, force: bool) -> Result<()> {
             self.fetches.borrow_mut().push(FetchCall {
                 remote: remote.to_string(),
                 pr,

@@ -39,14 +39,14 @@ pub trait Jj {
     /// # Errors
     ///
     /// Propagates errors from the embedded git store query.
-    async fn default_remote(&self) -> Result<Option<String>>;
+    fn default_remote(&self) -> Result<Option<String>>;
 
     /// Names of every git remote configured in the repository, sorted.
     ///
     /// # Errors
     ///
     /// Propagates errors from the embedded git store query.
-    async fn remote_names(&self) -> Result<Vec<String>>;
+    fn remote_names(&self) -> Result<Vec<String>>;
 
     /// Resolve a single revision into commit metadata.
     ///
@@ -76,7 +76,7 @@ pub trait Jj {
     /// # Errors
     ///
     /// Propagates failures from the embedded git store query.
-    async fn remote_url(&self, name: &str) -> Result<Option<String>>;
+    fn remote_url(&self, name: &str) -> Result<Option<String>>;
 
     /// Commit SHA of `bookmark@remote` if it exists, else `Ok(None)`.
     ///
@@ -108,7 +108,7 @@ pub trait Jj {
     /// # Errors
     ///
     /// Propagates jj errors.
-    async fn workspace_root(&self) -> Result<&PathBuf>;
+    fn workspace_root(&self) -> Result<&PathBuf>;
 
     /// Run `jj git import` to re-read refs from the underlying git store.
     ///
@@ -193,15 +193,15 @@ pub trait JjExt {
     /// Auto-detect the default push remote, logging what git returned and
     /// mapping any store-query error to `None` (so resolution can fall through
     /// to the config fallback rather than aborting).
-    async fn auto_detected_remote(&self) -> Option<String>;
+    fn auto_detected_remote(&self) -> Option<String>;
 }
 
 impl<T> JjExt for T
 where
     T: Jj,
 {
-    async fn auto_detected_remote(&self) -> Option<String> {
-        match self.default_remote().await {
+    fn auto_detected_remote(&self) -> Option<String> {
+        match self.default_remote() {
             Ok(Some(name)) => {
                 log::debug!("remote: git auto-detected default push remote `{name}`");
                 Some(name)
@@ -218,8 +218,11 @@ where
     }
 
     async fn resolve_default_remote(&self, remote: &EvalWithCfgFallback<String>) -> Result<String> {
-        let Some(name) = remote.resolve(|| self.auto_detected_remote()).await else {
-            let names = self.remote_names().await.unwrap_or_default();
+        let Some(name) = remote
+            .resolve(|| async { self.auto_detected_remote() })
+            .await
+        else {
+            let names = self.remote_names().unwrap_or_default();
             return Err(remote_resolution_error(&names));
         };
         log::debug!("remote: resolved to `{name}`");

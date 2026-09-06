@@ -51,7 +51,7 @@ impl JjCli {
 }
 
 impl Jj for JjCli {
-    async fn default_remote(&self) -> Result<Option<String>> {
+    fn default_remote(&self) -> Result<Option<String>> {
         Ok(self
             .repo
             .find_default_remote(gix::remote::Direction::Push)
@@ -60,7 +60,7 @@ impl Jj for JjCli {
             .and_then(|remote| remote.name().map(|remote| remote.as_ref().to_string())))
     }
 
-    async fn remote_names(&self) -> Result<Vec<String>> {
+    fn remote_names(&self) -> Result<Vec<String>> {
         Ok(self
             .repo
             .remote_names()
@@ -133,7 +133,7 @@ impl Jj for JjCli {
             .to_string())
     }
 
-    async fn remote_url(&self, name: &str) -> Result<Option<String>> {
+    fn remote_url(&self, name: &str) -> Result<Option<String>> {
         let remote = self.repo.find_remote(name).ok();
         Ok(remote.and_then(|remote| {
             remote
@@ -194,7 +194,7 @@ impl Jj for JjCli {
         Ok(Some(sha).filter(|s| !s.is_empty()))
     }
 
-    async fn workspace_root(&self) -> Result<&PathBuf> {
+    fn workspace_root(&self) -> Result<&PathBuf> {
         Ok(&self.workspace_root)
     }
 

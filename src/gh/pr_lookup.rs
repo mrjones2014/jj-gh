@@ -59,10 +59,9 @@ pub async fn resolve_pr_with_target<J: Jj, G: Gh>(
 ) -> Result<(PrDetails, remote::Target)> {
     if let Ok(num) = number_or_rev.parse::<u64>() {
         let origin_url = jj
-            .remote_url(default_remote)
-            .await?
+            .remote_url(default_remote)?
             .ok_or_else(|| anyhow!("`{default_remote}` remote is not configured"))?;
-        let upstream_url = jj.remote_url(upstream_remote).await?;
+        let upstream_url = jj.remote_url(upstream_remote)?;
         let target = remote::target(&origin_url, upstream_url.as_deref())?;
         let pr = gh.get_pr(&target.owner, &target.repo, num).await?;
         Ok((pr, target))
@@ -105,10 +104,9 @@ pub async fn resolve_pr_for_rev<J: Jj, G: Gh>(
         .ok_or_else(|| anyhow!("no local bookmark on `{rev}`; nothing to look up"))?;
 
     let origin_url = jj
-        .remote_url(default_remote)
-        .await?
+        .remote_url(default_remote)?
         .ok_or_else(|| anyhow!("`{default_remote}` remote is not configured"))?;
-    let upstream_url = jj.remote_url(upstream_remote).await?;
+    let upstream_url = jj.remote_url(upstream_remote)?;
     let target = remote::target(&origin_url, upstream_url.as_deref())?;
     let head_spec = target.head_spec(&branch);
 
