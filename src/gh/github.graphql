@@ -7438,9 +7438,6 @@ type Mutation @docsCategory(name: "meta") {
     updateEnterpriseProfile(
         input: UpdateEnterpriseProfileInput!
   ): UpdateEnterpriseProfilePayload @docsCategory(name: "enterprise-admin")
-    updateEnterpriseProofOfPresenceRequiredSetting(
-        input: UpdateEnterpriseProofOfPresenceRequiredSettingInput!
-  ): UpdateEnterpriseProofOfPresenceRequiredSettingPayload @docsCategory(name: "enterprise-admin")
     updateEnterpriseRepositoryProjectsSetting(
         input: UpdateEnterpriseRepositoryProjectsSettingInput!
   ): UpdateEnterpriseRepositoryProjectsSettingPayload @docsCategory(name: "enterprise-admin")
@@ -10578,6 +10575,7 @@ enum OrganizationInvitationRole @docsCategory(name: "orgs") {
     REINSTATE
 }
 enum OrganizationInvitationSource @docsCategory(name: "orgs") {
+    ENTERPRISE_ORGANIZATION_CREATION
     MEMBER
     SCIM
     UNKNOWN
@@ -12424,11 +12422,6 @@ type PromoteRepositoryCustomPropertyPayload {
     clientMutationId: String
     repositoryCustomProperty: RepositoryCustomProperty
 }
-enum ProofOfPresenceRequirement @docsCategory(name: "enterprise-admin") {
-    MFA
-    NO_POLICY
-    REAUTH
-}
 type PropertyTargetDefinition @docsCategory(name: "repos") {
     name: String!
     propertyValues: [String!]!
@@ -13313,6 +13306,7 @@ enum PullRequestTimelineItemsItemType {
     ADDED_TO_MERGE_QUEUE_EVENT
     ADDED_TO_PROJECT_EVENT
     ADDED_TO_PROJECT_V2_EVENT
+    ADDED_TO_STACK_EVENT
     ARCHIVED_EVENT
     ASSIGNED_EVENT
     AUTOMATIC_BASE_CHANGE_FAILED_EVENT
@@ -13373,6 +13367,7 @@ enum PullRequestTimelineItemsItemType {
     REMOVED_FROM_MERGE_QUEUE_EVENT
     REMOVED_FROM_PROJECT_EVENT
     REMOVED_FROM_PROJECT_V2_EVENT
+    REMOVED_FROM_STACK_EVENT
     RENAMED_TITLE_EVENT
     REOPENED_EVENT
     REVIEW_DISMISSED_EVENT
@@ -16598,6 +16593,7 @@ type RepositoryRulesetBypassActor implements Node @docsCategory(name: "repos") {
     deployKey: Boolean!
     enterpriseOwner: Boolean!
     enterpriseRole: Boolean!
+    enterpriseRoleDatabaseId: BigInt
     id: ID!
     organizationAdmin: Boolean!
     repositoryRoleDatabaseId: Int
@@ -16624,7 +16620,8 @@ input RepositoryRulesetBypassActorInput @docsCategory(name: "repos") {
     bypassMode: RepositoryRulesetBypassActorBypassMode!
     deployKey: Boolean
     enterpriseOwner: Boolean
-    enterpriseRole: Boolean
+    enterpriseRole: Boolean @deprecated(reason: "Use enterpriseRoleDatabaseId.")
+    enterpriseRoleDatabaseId: BigInt
     organizationAdmin: Boolean
     repositoryRoleDatabaseId: Int
 }
@@ -19595,16 +19592,6 @@ input UpdateEnterpriseProfileInput {
 type UpdateEnterpriseProfilePayload {
     clientMutationId: String
     enterprise: Enterprise
-}
-input UpdateEnterpriseProofOfPresenceRequiredSettingInput {
-    clientMutationId: String
-    enterpriseId: ID! @possibleTypes(concreteTypes: ["Enterprise"])
-    settingValue: ProofOfPresenceRequirement!
-}
-type UpdateEnterpriseProofOfPresenceRequiredSettingPayload {
-    clientMutationId: String
-    enterprise: Enterprise
-    message: String
 }
 input UpdateEnterpriseRepositoryProjectsSettingInput {
     clientMutationId: String
