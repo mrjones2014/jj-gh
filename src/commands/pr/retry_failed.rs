@@ -416,11 +416,14 @@ mod tests {
         async fn git_import(&self) -> Result<()> {
             unimplemented!()
         }
-        async fn pushed_bookmarks(&self, _remote: &str) -> Result<Vec<PushedBookmark>> {
-            Ok(vec![PushedBookmark {
+        fn pushed_bookmarks(
+            &self,
+            _remote: &str,
+        ) -> impl Future<Output = Result<Vec<PushedBookmark>>> {
+            std::future::ready(Ok(vec![PushedBookmark {
                 name: "feat".into(),
                 local_commit_id: "local".into(),
-            }])
+            }]))
         }
         async fn eval_template(
             &self,
@@ -515,8 +518,8 @@ mod tests {
         async fn disable_auto_merge(&self, _id: &str) -> Result<()> {
             unimplemented!()
         }
-        async fn get_pr(&self, _o: &str, _r: &str, _n: u64) -> Result<PrDetails> {
-            Ok(self.pr.clone())
+        fn get_pr(&self, _o: &str, _r: &str, _n: u64) -> impl Future<Output = Result<PrDetails>> {
+            std::future::ready(Ok(self.pr.clone()))
         }
         async fn get_pr_diff(&self, _: &str, _: &str, _: u64) -> Result<String> {
             unimplemented!()
@@ -528,39 +531,54 @@ mod tests {
         ) -> Result<()> {
             unimplemented!()
         }
-        async fn local_pulls(
+        fn local_pulls(
             &self,
             _o: &str,
             _r: &str,
             _head_owner: &str,
             _b: &[String],
-        ) -> Result<Vec<PrWithCiStatus>> {
-            Ok(std::mem::take(&mut *self.local_prs.lock().unwrap()))
+        ) -> impl Future<Output = Result<Vec<PrWithCiStatus>>> {
+            std::future::ready(Ok(std::mem::take(&mut *self.local_prs.lock().unwrap())))
         }
-        async fn list_workflow_runs_for_sha(
+        fn list_workflow_runs_for_sha(
             &self,
             _o: &str,
             _r: &str,
             _sha: &str,
-        ) -> Result<Vec<WorkflowRun>> {
+        ) -> impl Future<Output = Result<Vec<WorkflowRun>>> {
             let mut q = self.list_responses.lock().unwrap();
-            if q.len() > 1 {
+            std::future::ready(if q.len() > 1 {
                 Ok(q.remove(0))
             } else {
                 Ok(q.first().cloned().unwrap_or_default())
-            }
+            })
         }
-        async fn cancel_workflow_run(&self, _o: &str, _r: &str, id: u64) -> Result<()> {
+        fn cancel_workflow_run(
+            &self,
+            _o: &str,
+            _r: &str,
+            id: u64,
+        ) -> impl Future<Output = Result<()>> {
             self.calls.lock().unwrap().cancelled.push(id);
-            Ok(())
+            std::future::ready(Ok(()))
         }
-        async fn rerun_workflow_run(&self, _o: &str, _r: &str, id: u64) -> Result<()> {
+        fn rerun_workflow_run(
+            &self,
+            _o: &str,
+            _r: &str,
+            id: u64,
+        ) -> impl Future<Output = Result<()>> {
             self.calls.lock().unwrap().rerun.push(id);
-            Ok(())
+            std::future::ready(Ok(()))
         }
-        async fn rerun_failed_jobs(&self, _o: &str, _r: &str, id: u64) -> Result<()> {
+        fn rerun_failed_jobs(
+            &self,
+            _o: &str,
+            _r: &str,
+            id: u64,
+        ) -> impl Future<Output = Result<()>> {
             self.calls.lock().unwrap().rerun_failed.push(id);
-            Ok(())
+            std::future::ready(Ok(()))
         }
         async fn create_stack(
             &self,

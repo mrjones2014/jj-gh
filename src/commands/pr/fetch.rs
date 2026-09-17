@@ -332,27 +332,27 @@ mod tests {
         fn workspace_root(&self) -> Result<&PathBuf> {
             Ok(&self.workspace_root)
         }
-        async fn git_import(&self) -> Result<()> {
+        fn git_import(&self) -> impl Future<Output = Result<()>> {
             *self.import_calls.lock().unwrap() += 1;
-            Ok(())
+            std::future::ready(Ok(()))
         }
         async fn pushed_bookmarks(&self, _remote: &str) -> Result<Vec<crate::jj::PushedBookmark>> {
             unimplemented!("fetch does not call pushed_bookmarks")
         }
-        async fn eval_template(
+        fn eval_template(
             &self,
             revset: &str,
             template: &str,
             _config_file: Option<&Path>,
             reversed: bool,
             _color: bool,
-        ) -> Result<String> {
+        ) -> impl Future<Output = Result<String>> {
             self.eval_template_calls.lock().unwrap().push(EvalCall {
                 revset: revset.into(),
                 template: template.into(),
                 reversed,
             });
-            Ok(self.eval_template_return.clone())
+            std::future::ready(Ok(self.eval_template_return.clone()))
         }
         async fn diff(&self, _revset: &str) -> Result<String> {
             unimplemented!("fetch does not call diff")
@@ -415,11 +415,16 @@ mod tests {
         async fn disable_auto_merge(&self, _pr_node_id: &str) -> Result<()> {
             unimplemented!("fetch does not call disable_auto_merge")
         }
-        async fn get_pr(&self, owner: &str, repo: &str, number: u64) -> Result<PrDetails> {
+        fn get_pr(
+            &self,
+            owner: &str,
+            repo: &str,
+            number: u64,
+        ) -> impl Future<Output = Result<PrDetails>> {
             assert_eq!(owner, self.expected.0);
             assert_eq!(repo, self.expected.1);
             assert_eq!(number, self.expected.2);
-            Ok(self.pr.clone())
+            std::future::ready(Ok(self.pr.clone()))
         }
         async fn get_pr_diff(&self, _: &str, _: &str, _: u64) -> Result<String> {
             unimplemented!("fetch does not call get_pr_diff")

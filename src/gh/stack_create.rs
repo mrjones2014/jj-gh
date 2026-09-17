@@ -342,7 +342,7 @@ mod tests {
         async fn remove_labels(&self, _: &str, _: &[String]) -> Result<()> {
             unimplemented!()
         }
-        async fn update_pr(&self, req: UpdatePr) -> Result<()> {
+        fn update_pr(&self, req: UpdatePr) -> impl Future<Output = Result<()>> {
             let base = req
                 .base_ref_name
                 .expect("stack_create only updates base refs");
@@ -350,7 +350,7 @@ mod tests {
                 node_id: req.pr_node_id,
                 base,
             });
-            Ok(())
+            std::future::ready(Ok(()))
         }
         async fn set_draft(&self, _: &str, _: bool) -> Result<()> {
             unimplemented!()
@@ -393,39 +393,39 @@ mod tests {
         async fn rerun_failed_jobs(&self, _: &str, _: &str, _: u64) -> Result<()> {
             unimplemented!()
         }
-        async fn create_stack(
+        fn create_stack(
             &self,
             _: &str,
             _: &str,
             pr_numbers: &[u64],
-        ) -> Result<PullRequestStack> {
+        ) -> impl Future<Output = Result<PullRequestStack>> {
             self.record(Call::Created(pr_numbers.to_vec()));
             let mut next = self.next_stack_number.lock().unwrap();
             let number = *next;
             *next += 1;
-            Ok(PullRequestStack {
+            std::future::ready(Ok(PullRequestStack {
                 number,
                 pull_requests: pr_numbers
                     .iter()
                     .map(|&number| StackPullRequest { number })
                     .collect(),
-            })
+            }))
         }
-        async fn unstack_prs(
+        fn unstack_prs(
             &self,
             _: &str,
             _: &str,
             stack_number: u64,
             pr_numbers: &[u64],
-        ) -> Result<()> {
+        ) -> impl Future<Output = Result<()>> {
             if self.unstack_fails {
-                return Err(anyhow!("stack {stack_number} cannot be modified"));
+                return std::future::ready(Err(anyhow!("stack {stack_number} cannot be modified")));
             }
             self.record(Call::Unstacked {
                 stack: stack_number,
                 prs: pr_numbers.to_vec(),
             });
-            Ok(())
+            std::future::ready(Ok(()))
         }
         async fn list_stacks(&self, _: &str, _: &str) -> Result<Vec<PullRequestStack>> {
             unimplemented!("callers pass the existing stacks in")

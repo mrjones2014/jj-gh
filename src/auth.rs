@@ -184,8 +184,8 @@ mod tests {
     }
 
     impl ProcessRunner for FakeRunner {
-        async fn run(&self, _: &[impl AsRef<OsStr>], _: Duration) -> SpawnOutcome {
-            self.outcome.clone()
+        fn run(&self, _: &[impl AsRef<OsStr>], _: Duration) -> impl Future<Output = SpawnOutcome> {
+            std::future::ready(self.outcome.clone())
         }
     }
 
@@ -433,17 +433,21 @@ mod tests {
     struct EchoRunner;
 
     impl ProcessRunner for EchoRunner {
-        async fn run(&self, argv: &[impl AsRef<OsStr>], _: Duration) -> SpawnOutcome {
+        fn run(
+            &self,
+            argv: &[impl AsRef<OsStr>],
+            _: Duration,
+        ) -> impl Future<Output = SpawnOutcome> {
             let joined = argv
                 .iter()
                 .map(|a| a.as_ref().to_string_lossy().into_owned())
                 .collect::<Vec<_>>()
                 .join(" ");
-            SpawnOutcome::Completed {
+            std::future::ready(SpawnOutcome::Completed {
                 code: Some(0),
                 stdout: joined.into_bytes(),
                 stderr: vec![],
-            }
+            })
         }
     }
 

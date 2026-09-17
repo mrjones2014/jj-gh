@@ -212,8 +212,11 @@ mod tests {
         async fn git_import(&self) -> Result<()> {
             unimplemented!()
         }
-        async fn stacked_ancestor_bookmark(&self, rev: &str) -> Result<Option<String>> {
-            Ok(self.ancestors.get(rev).cloned().flatten())
+        fn stacked_ancestor_bookmark(
+            &self,
+            rev: &str,
+        ) -> impl Future<Output = Result<Option<String>>> {
+            std::future::ready(Ok(self.ancestors.get(rev).cloned().flatten()))
         }
         async fn first_commit_description(&self, _revset: &str) -> Result<String> {
             unimplemented!()
