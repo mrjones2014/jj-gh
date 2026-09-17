@@ -461,6 +461,7 @@ async fn show_graph(args: &StackArgs, ctx: &Gathered) {
         "--config-file",
         &cfg,
         "log",
+        "--no-pager",
         "-r",
         &revset,
         "-T",
