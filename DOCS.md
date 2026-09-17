@@ -91,7 +91,7 @@ Open your preferred editor to create a PR from a revision.
 
 Opens your editor to a markdown file where you can write the PR description, and set PR metadata like title, labels, auto-merge, etc. via the markdown frontmatter. This supports stacked PRs; by default the base branch is set to the closest ancestor bookmark if one exists, otherwise `trunk()`.
 
-**Usage:** `jj-gh pr create [OPTIONS] [REV]...`
+**Usage:** `jj-gh pr create [OPTIONS] <REV>...`
 
 **Command Alias:** `c`
 

@@ -14,7 +14,7 @@ use std::collections::HashMap;
 subcommand_args! {
     pub struct EditArgs {
         /// PR number, or revision ID to look up a PR from.
-        #[arg(value_name = "PR_NUM|REV")]
+        #[arg(value_name = "PR_NUM|REV", required = true)]
         pub number_or_rev: String,
 
         /// Edit even if the PR body is empty. By default, `jj-gh` refuses to edit

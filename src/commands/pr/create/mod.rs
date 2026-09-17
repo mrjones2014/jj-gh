@@ -29,7 +29,7 @@ struct CreatedPr {
 subcommand_args! {
     pub struct CreateArgs {
         /// Revision(s) to create PR(s) from. Pass multiple revisions to create a stack.
-        #[arg(value_name = "REV")]
+        #[arg(value_name = "REV", required = true)]
         pub revs: Vec<String>,
 
         /// Override the base bookmark. Default: closest ancestor bookmark on
