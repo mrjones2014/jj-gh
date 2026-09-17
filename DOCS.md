@@ -115,6 +115,7 @@ Opens your editor to a markdown file where you can write the PR description, and
   Mutually exclusive with `--template-file` and `--no-template`.
 
   All standard jj template builtins are available (`description`, `commit_id`, `author`, etc.). The following template aliases are also injected:
+
   - `pr_title`: default title (first-line description of the oldest or newest commit, depending on `default_title_source`).
 
   - `pr_base`: resolved base branch; owner-qualified (`owner:branch`) for cross-fork PRs.
@@ -184,6 +185,7 @@ See: <https://github.com/jj-vcs/jj/issues/4388>
 - `-T`, `--template <TEMPLATE>` — Override the bookmark template. The argument is a jj template string evaluated once against `root()` (no commit context). Default: `pr_fetch_bookmark_template` in config, else `"pr-" ++ pr_number ++ "/" ++ pr_branch"`.
 
   All standard jj template builtins are available (`description`, `commit_id`, `author`, etc.). The following template aliases are also injected:
+
   - `pr_number`: PR number as a decimal string.
 
   - `pr_title`: PR title.
@@ -217,6 +219,7 @@ This works by injecting template aliases keyed by `commit_id` and renders inline
 - `<JJ_LOG_ARGS>` — Arguments forwarded verbatim to the underlying `jj log` invocation. Pass after `--`, e.g. `jj-gh pr log -- -r 'mine()' -T builtin_log_compact`. If you pass `-T` / `--template`, the default PR-aware template is not applied.
 
   All standard jj template builtins are available (`description`, `commit_id`, `author`, etc.). The following template aliases are also injected:
+
   - `pr_number`: PR number as a string, or empty for commits without a PR.
 
   - `pr_url`: PR URL, or empty.
