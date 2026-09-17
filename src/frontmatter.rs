@@ -287,9 +287,9 @@ mod tests {
 
     struct CaptureEditor(Mutex<Option<String>>);
     impl Editor for CaptureEditor {
-        async fn edit(&self, _argv: &[String], initial: &str) -> Result<String> {
+        fn edit(&self, _argv: &[String], initial: &str) -> impl Future<Output = Result<String>> {
             *self.0.lock().unwrap() = Some(initial.to_string());
-            Ok(initial.to_string())
+            std::future::ready(Ok(initial.to_string()))
         }
     }
     #[tokio::test]
@@ -317,8 +317,8 @@ mod tests {
 
     struct EchoEditor;
     impl Editor for EchoEditor {
-        async fn edit(&self, _argv: &[String], initial: &str) -> Result<String> {
-            Ok(initial.to_string())
+        fn edit(&self, _argv: &[String], initial: &str) -> impl Future<Output = Result<String>> {
+            std::future::ready(Ok(initial.to_string()))
         }
     }
 

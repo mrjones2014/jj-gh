@@ -275,8 +275,8 @@ impl<J: Jj, G: Gh, GO: GitOps> Model for TestModel<'_, J, G, GO> {
         &self.env
     }
 
-    async fn gh(&self) -> Result<&Self::Gh> {
-        Ok(self.gh)
+    fn gh(&self) -> impl Future<Output = Result<&Self::Gh>> {
+        std::future::ready(Ok(self.gh))
     }
 
     fn git(&self) -> &Self::Git {
