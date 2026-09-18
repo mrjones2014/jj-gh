@@ -2516,9 +2516,9 @@ checksum = "9737e026353e5cd0736f98eddae28665118eb6f6600902a7f50db585621fecb6"
 
 [[package]]
 name = "noyalib"
-version = "0.0.28"
+version = "0.0.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f075ef19fa3bcf8697c0ef96c37d5c435d339a40ab8081cae3aac3a4e7fee9a"
+checksum = "190b855ac3a2a1ff710c203db23da6aec67f4317af6e226960d40f181ceeccac"
 dependencies = [
  "hashbrown 0.17.1",
  "indexmap",
@@ -2527,7 +2527,6 @@ dependencies = [
  "memchr",
  "rustc-hash",
  "ryu",
- "serde",
  "serde_core",
  "serde_ignored",
  "smallvec",
