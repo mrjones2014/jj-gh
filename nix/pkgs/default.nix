@@ -42,9 +42,9 @@ in
   release-app = callPackage ./release.nix { inherit release-plz-patched; };
 
   packages = {
+    inherit gen-docs gen-manpage release-plz-patched;
     default = jj-gh;
     dev = callPackage ./jj-gh-dev.nix { };
-    inherit gen-docs gen-manpage;
     udeps = callPackage ./udeps.nix { };
   };
 }

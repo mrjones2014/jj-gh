@@ -1,11 +1,14 @@
 { pkgs }:
-# TODO remove when PR merges and nixpkgs updated: https://github.com/release-plz/release-plz/pull/2857
-pkgs.release-plz.overrideAttrs (old: {
-  patches = (old.patches or [ ]) ++ [
-    (pkgs.fetchpatch {
-      name = "walk-all-branches-2857.patch";
-      url = "https://github.com/release-plz/release-plz/commit/2dbce2513eea25920c0e37826d3c4eb38e25dcd4.patch";
-      hash = "sha256-jcY7luLkI4YCLM93KhL1vaKkFMdPnGMzBEePJ+cHjkc=";
-    })
-  ];
+# TODO remove when nixpkgs has version 0.3.170
+pkgs.release-plz.overrideAttrs (old: rec {
+  version = "0.3.170";
+  src = old.src.override {
+    hash = "sha256-iOwpEYNlBeu3Xr+X02rHsw0fr5lfO7v1h+Zc1UG7W6A=";
+  };
+  cargoDeps = pkgs.rustPlatform.fetchCargoVendor {
+    inherit src;
+    name = "release-plz-${version}-vendor";
+    hash = "sha256-7bxLpn37uyy8xFT5aRgN9321kbJ1ZFFo0kc1aLGxH1k=";
+  };
+  patches = [ ];
 })
