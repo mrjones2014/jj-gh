@@ -1,6 +1,6 @@
 [package]
 name = "jj-gh"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2024"
 description = "Manage GitHub PR Stacks natively with `jj`"
 repository = "https://github.com/mrjones2014/jj-gh"
