@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2](https://github.com/mrjones2014/jj-gh/compare/jj-gh-v0.3.1...jj-gh-v0.3.2) - 2026-10-08
+
+### Added
+
+- *(ci)* add a `stable` branch that points to the newest release
+
+### Other
+
+- *(deps)* bump rustls from 0.23.43 to 0.23.45 ([#324](https://github.com/mrjones2014/jj-gh/pull/324))
+- *(deps)* update GitHub GraphQL schema ([#314](https://github.com/mrjones2014/jj-gh/pull/314))
+
 ## [0.3.1](https://github.com/mrjones2014/jj-gh/compare/jj-gh-v0.3.0...jj-gh-v0.3.1) - 2026-09-17
 
 ### Added
