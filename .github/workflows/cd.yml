@@ -37,3 +37,21 @@ jobs:
           locked: true
           checksum: sha256
           include: ${{ matrix.include }}
+  # Move the `stable` branch to each new release, so that a Nix flake can
+  # use `github:mrjones2014/jj-gh/stable` as an input and get the latest
+  # release. The push is not a force push, so it can only move the branch
+  # forward. If the release commit is not a descendant of `stable`, the job
+  # fails and the branch does not change.
+  update-stable-branch:
+    if: ${{ !github.event.release.prerelease }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # Git needs the full history to know that the push moves the branch
+      # forward. With a shallow clone, it rejects the push.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          fetch-depth: 0
+      - run: git push origin HEAD:refs/heads/stable
