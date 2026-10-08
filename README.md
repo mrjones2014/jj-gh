@@ -30,11 +30,12 @@ like GitHub's special `refs/pull/123/head` refs, so it uses [gix](https://github
 
   <summary>With Nix</summary>
 
-Add the flake input:
+Add the flake input. The `stable` branch points to the latest release; use `github:mrjones2014/jj-gh` to follow `master`,
+or `github:mrjones2014/jj-gh/jj-gh-v0.3.1` to pin to a release tag instead:
 
 ```nix
 {
-  inputs.jj-gh.url = "github:mrjones2014/jj-gh";
+  inputs.jj-gh.url = "github:mrjones2014/jj-gh/stable";
   outputs =
     {
       self,
