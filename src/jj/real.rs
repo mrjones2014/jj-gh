@@ -1,6 +1,6 @@
 //! `jj` CLI-backed [`Jj`] implementation.
 //!
-//! Remote-URL reads go through `gix` against the colocated git store
+//! Remote-URL reads go through `gix` against the git store
 //! reported by `jj git root` (which resolves secondary jj workspaces to
 //! the primary workspace's store). The repository is discovered once at
 //! [`JjCli::new`] and reused for every subsequent gix operation.
@@ -38,7 +38,7 @@ impl JjCli {
     ///
     /// Propagates failures from `jj git root` or git store discovery.
     pub async fn new() -> Result<Self> {
-        let repo = open_colocated_store().await?;
+        let repo = open_git_store().await?;
         Ok(Self::from_repository(Rc::new(repo)))
     }
 
@@ -261,9 +261,10 @@ impl Jj for JjCli {
     }
 }
 
-pub(crate) async fn open_colocated_store() -> Result<gix::Repository> {
+/// Open the workspace's git store, located via `jj git root` so colocated
+/// and non-colocated workflows both work.
+pub(crate) async fn open_git_store() -> Result<gix::Repository> {
     let git_root = git_root().await?;
-    ensure_colocated(&git_root)?;
     gix::open(&git_root).with_context(|| format!("opening git store at `{}`", git_root.display()))
 }
 
@@ -280,25 +281,6 @@ async fn git_root() -> Result<PathBuf> {
         return Err(anyhow!("jj git root returned an empty path"));
     }
     Ok(PathBuf::from(path))
-}
-
-/// Verify the git store is colocated with the jj repo, i.e. sits next to it
-/// as a `.git` directory. A non-colocated repo keeps its store embedded
-/// under `.jj/repo/store/git` instead.
-fn ensure_colocated(git_root: &Path) -> Result<()> {
-    let colocated = git_root
-        .parent()
-        .is_some_and(|root| root.join(".jj").is_dir());
-    if colocated {
-        Ok(())
-    } else {
-        Err(anyhow!(
-            "the git store at `{}` is not colocated with the jj repository. \
-             jj-gh reads remote configuration from the colocated git store; \
-             use a repository initialized with `jj git init --colocate`.",
-            git_root.display()
-        ))
-    }
 }
 
 async fn run_jj(args: &[&str]) -> Result<Vec<u8>> {
@@ -369,27 +351,6 @@ fn pr_diff_argv(base_oid: &str, head_oid: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn colocated_store_next_to_jj_dir_is_accepted() {
-        let tmp = tempfile::tempdir().unwrap();
-        std::fs::create_dir(tmp.path().join(".jj")).unwrap();
-        let git_root = tmp.path().join(".git");
-        std::fs::create_dir(&git_root).unwrap();
-        ensure_colocated(&git_root).unwrap();
-    }
-
-    #[test]
-    fn embedded_store_is_rejected_as_not_colocated() {
-        let tmp = tempfile::tempdir().unwrap();
-        let git_root = tmp.path().join(".jj/repo/store/git");
-        std::fs::create_dir_all(&git_root).unwrap();
-        let err = ensure_colocated(&git_root).unwrap_err().to_string();
-        assert!(
-            err.contains("not colocated"),
-            "unexpected error message: {err}"
-        );
-    }
 
     #[test]
     fn eval_template_argv_minimal() {

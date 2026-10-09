@@ -20,7 +20,7 @@ pub trait GitOps {
 }
 
 /// Production [`GitOps`] backed by a shared `gix::Repository` discovered
-/// once at the workspace root.
+/// once at startup.
 #[repr(transparent)]
 pub struct RealGit {
     repo: Rc<gix::Repository>,

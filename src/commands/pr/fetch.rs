@@ -5,8 +5,8 @@
 //! against an injected `--config-file` that defines `pr_*` aliases populated
 //! from the PR's GitHub metadata.
 //!
-//! Requires a colocated git repository: jj cannot yet fetch arbitrary refs
-//! (only `refs/heads/*`), so we shell to git for the special pull ref.
+//! The special `refs/pull/123/head` ref is fetched via `git` because `jj`
+//! cannot yet fetch arbitrary refs (only `refs/heads/*`).
 
 use crate::{
     cli::GlobalOpts,
@@ -259,6 +259,7 @@ mod tests {
     use std::cell::RefCell;
     use std::path::Path;
     use std::sync::Mutex;
+    use tempfile::TempDir;
 
     #[derive(Debug, Clone, Default)]
     struct EvalCall {
@@ -796,6 +797,28 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn works_without_git_dir_at_workspace_root() {
+        // The git store is located via `jj git root` (e.g.
+        // `.jj/repo/store/git`), so no `.git` directory is required at the
+        // workspace root.
+        let dir = TempDir::new().unwrap();
+        assert!(!dir.path().join(".git").exists());
+        let jj = jj_for(Some("git@github.com:o/r.git"), "pr-1234/feature/foo");
+        let gh = gh_for(details(), "o", "r");
+        let git = FakeGit {
+            exists: false,
+            fetches: RefCell::new(vec![]),
+        };
+        run(&TestModel::new(&jj, &gh, &git), &args(1234, None, false))
+            .await
+            .unwrap();
+
+        let calls = git.fetches.borrow();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].bookmark, "pr-1234/feature/foo");
+        assert_eq!(*jj.import_calls.lock().unwrap(), 1);
+    }
     #[test]
     fn slugify_handles_punct_and_case() {
         assert_eq!(

@@ -21,8 +21,7 @@ See [DOCS.md](./DOCS.md) for all commands, flags, and features. PRs welcome and 
 
 ## Requirements
 
-`jj` must be on `PATH`. `pr fetch` additionally requires a colocated Git repository because `jj` cannot yet fetch arbitrary refs
-like GitHub's special `refs/pull/123/head` refs, so it uses [gix](https://github.com/GitoxideLabs/gitoxide).
+`jj` must be on `PATH`, and the repository must use the Git backend (the simple backend is not supported). `pr fetch` fetches GitHub's special `refs/pull/123/head` refs via [gix](https://github.com/GitoxideLabs/gitoxide) because `jj` cannot yet fetch arbitrary refs.
 
 ## Install
 
