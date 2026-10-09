@@ -314,6 +314,16 @@ type AddReactionPayload {
     reactionGroups: [ReactionGroup!]
     subject: Reactable
 }
+input AddRelatesToInput {
+    clientMutationId: String
+    issueId: ID! @possibleTypes(concreteTypes: ["Issue"])
+    relatedIssueId: ID! @possibleTypes(concreteTypes: ["Issue"])
+}
+type AddRelatesToPayload {
+    clientMutationId: String
+    issue: Issue
+    relatedIssue: Issue
+}
 input AddStarInput {
     clientMutationId: String
     starrableId: ID! @possibleTypes(concreteTypes: ["Gist", "Repository", "Topic"], abstractType: "Starrable")
@@ -386,6 +396,14 @@ type AddedToProjectV2Event implements Node & ProjectV2Event @docsCategory(name: 
     id: ID!
     project: ProjectV2
     wasAutomated: Boolean!
+}
+type AddedToStackEvent implements Node @docsCategory(name: "pulls") {
+    actor: Actor
+    createdAt: DateTime!
+    id: ID!
+    pullRequest: PullRequest
+    stackId: BigInt
+    stackNumber: Int
 }
 input AgentAssignmentInput @docsCategory(name: "users") {
     baseRef: String
@@ -4987,6 +5005,13 @@ type Issue implements Assignable &
         last: Int
         orderBy: ReactionOrder
   ): ReactionConnection!
+    relatesTo(
+        after: String
+        before: String
+        first: Int
+        last: Int
+        orderBy: IssueRelatesToOrder = {field: RELATES_TO_ADDED_AT, direction: DESC}
+  ): IssueConnection!
     repository: Repository!
     resourcePath: URI!
     state: IssueState!
@@ -5458,6 +5483,14 @@ enum IssueOrderField @docsCategory(name: "issues") {
     COMMENTS
     CREATED_AT
     UPDATED_AT
+}
+input IssueRelatesToOrder @docsCategory(name: "issues") {
+    direction: OrderDirection!
+    field: IssueRelatesToOrderField!
+}
+enum IssueRelatesToOrderField @docsCategory(name: "issues") {
+    CREATED_AT
+    RELATES_TO_ADDED_AT
 }
 enum IssueSearchType @docsCategory(name: "issues") {
     HYBRID
@@ -6774,6 +6807,9 @@ type Mutation @docsCategory(name: "meta") {
     addReaction(
         input: AddReactionInput!
   ): AddReactionPayload @docsCategory(name: "reactions")
+    addRelatesTo(
+        input: AddRelatesToInput!
+  ): AddRelatesToPayload @docsCategory(name: "issues")
     addStar(
         input: AddStarInput!
   ): AddStarPayload @docsCategory(name: "activity")
@@ -7225,6 +7261,9 @@ type Mutation @docsCategory(name: "meta") {
     removeReaction(
         input: RemoveReactionInput!
   ): RemoveReactionPayload @docsCategory(name: "reactions")
+    removeRelatesTo(
+        input: RemoveRelatesToInput!
+  ): RemoveRelatesToPayload @docsCategory(name: "issues")
     removeStar(
         input: RemoveStarInput!
   ): RemoveStarPayload @docsCategory(name: "activity")
@@ -7261,6 +7300,9 @@ type Mutation @docsCategory(name: "meta") {
     rerequestCheckSuite(
         input: RerequestCheckSuiteInput!
   ): RerequestCheckSuitePayload @docsCategory(name: "checks")
+    rerequestReviews(
+        input: RerequestReviewsInput!
+  ): RerequestReviewsPayload @docsCategory(name: "pulls")
     resolveReviewThread(
         input: ResolveReviewThreadInput!
   ): ResolveReviewThreadPayload @docsCategory(name: "pulls")
@@ -12030,6 +12072,7 @@ enum ProjectV2ItemType @docsCategory(name: "projects") {
 }
 input ProjectV2Iteration @docsCategory(name: "projects") {
     duration: Int!
+    id: String
     startDate: Date!
     title: String!
 }
@@ -13205,6 +13248,7 @@ union PullRequestTimelineItems @docsCategory(name: "pulls") =
   | AddedToMergeQueueEvent
   | AddedToProjectEvent
   | AddedToProjectV2Event
+  | AddedToStackEvent
   | AssignedEvent
   | AutoMergeDisabledEvent
   | AutoMergeEnabledEvent
@@ -13264,6 +13308,7 @@ union PullRequestTimelineItems @docsCategory(name: "pulls") =
   | RemovedFromMergeQueueEvent
   | RemovedFromProjectEvent
   | RemovedFromProjectV2Event
+  | RemovedFromStackEvent
   | RenamedTitleEvent
   | ReopenedEvent
   | ReviewDismissedEvent
@@ -13502,9 +13547,11 @@ type Query implements Node @docsCategory(name: "meta") {
         epssPercentile: Float
         first: Int
         identifier: SecurityAdvisoryIdentifierFilter
+        isWithdrawn: Boolean
         last: Int
         orderBy: SecurityAdvisoryOrder = {field: UPDATED_AT, direction: DESC}
         publishedSince: DateTime
+        severities: [SecurityAdvisorySeverity!]
         updatedSince: DateTime
   ): SecurityAdvisoryConnection!
     securityAdvisory(
@@ -14001,6 +14048,16 @@ type RemoveReactionPayload {
     reactionGroups: [ReactionGroup!]
     subject: Reactable
 }
+input RemoveRelatesToInput {
+    clientMutationId: String
+    issueId: ID! @possibleTypes(concreteTypes: ["Issue"])
+    relatedIssueId: ID! @possibleTypes(concreteTypes: ["Issue"])
+}
+type RemoveRelatesToPayload {
+    clientMutationId: String
+    issue: Issue
+    relatedIssue: Issue
+}
 input RemoveStarInput {
     clientMutationId: String
     starrableId: ID! @possibleTypes(concreteTypes: ["Gist", "Repository", "Topic"], abstractType: "Starrable")
@@ -14060,6 +14117,14 @@ type RemovedFromProjectV2Event implements Node & ProjectV2Event @docsCategory(na
     id: ID!
     project: ProjectV2
     wasAutomated: Boolean!
+}
+type RemovedFromStackEvent implements Node @docsCategory(name: "pulls") {
+    actor: Actor
+    createdAt: DateTime!
+    id: ID!
+    pullRequest: PullRequest
+    stackId: BigInt
+    stackNumber: Int
 }
 type RenamedTitleEvent implements Node @docsCategory(name: "issues") {
     actor: Actor
@@ -15811,6 +15876,7 @@ type Repository implements Node &
         privacy: RepositoryPrivacy
         visibility: RepositoryVisibility
   ): RepositoryConnection!
+    fullDatabaseId: BigInt
     fundingLinks: [FundingLink!]!
     hasDiscussionsEnabled: Boolean!
     hasIssuesEnabled: Boolean!
@@ -16967,6 +17033,19 @@ type RerequestCheckSuitePayload {
     checkSuite: CheckSuite
     clientMutationId: String
 }
+input RerequestReviewsInput {
+    botIds: [ID!] @possibleTypes(concreteTypes: ["Bot"])
+    clientMutationId: String
+    pullRequestId: ID! @possibleTypes(concreteTypes: ["PullRequest"])
+    teamIds: [ID!] @possibleTypes(concreteTypes: ["EnterpriseTeam", "Team"], abstractType: "TeamReviewRequestable")
+    userIds: [ID!] @possibleTypes(concreteTypes: ["User"])
+}
+type RerequestReviewsPayload {
+    actor: Actor
+    clientMutationId: String
+    pullRequest: PullRequest
+    requestedReviewersEdge: UserEdge
+}
 input ResolveReviewThreadInput {
     clientMutationId: String
     resolutionReason: PullRequestReviewThreadResolutionReason
@@ -17220,6 +17299,7 @@ enum SearchType @docsCategory(name: "search") {
 }
 type SecurityAdvisory implements Node @docsCategory(name: "security-advisories") {
     classification: SecurityAdvisoryClassification!
+    cveId: String
     cvss: CVSS!
     @deprecated(
       reason: "`cvss` will be removed. New `cvss_severities` field will now contain both `cvss_v3` and `cvss_v4` properties. Removal on 2025-10-01 UTC."
@@ -17235,14 +17315,18 @@ type SecurityAdvisory implements Node @docsCategory(name: "security-advisories")
     description: String!
     epss: EPSS
     ghsaId: String!
+    githubReviewedAt: DateTime
     id: ID!
     identifiers: [SecurityAdvisoryIdentifier!]!
     notificationsPermalink: URI
+    nvdPublishedAt: DateTime
     origin: String!
     permalink: URI
     publishedAt: DateTime!
     references: [SecurityAdvisoryReference!]!
+    repositoryAdvisoryUrl: URI
     severity: SecurityAdvisorySeverity!
+    sourceCodeLocation: URI
     summary: String!
     updatedAt: DateTime!
     vulnerabilities(
