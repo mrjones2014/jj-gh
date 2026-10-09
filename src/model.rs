@@ -166,7 +166,7 @@ pub struct ModelImpl<'a> {
 }
 
 impl<'a> ModelImpl<'a> {
-    /// Open the colocated git store and construct its local jj/git clients.
+    /// Open the git store and construct its local jj/git clients.
     /// GitHub auth and client construction remain lazy until [`Model::gh`].
     ///
     /// Holds the resolved `globals` so token resolution can rank the
@@ -174,9 +174,9 @@ impl<'a> ModelImpl<'a> {
     ///
     /// # Errors
     ///
-    /// Propagates failures from colocated git-store discovery.
+    /// Propagates failures from git-store discovery.
     pub async fn new(config: &'a Config, globals: &'a GlobalOpts) -> Result<Self> {
-        let repo = Rc::new(crate::jj::real::open_colocated_store().await?);
+        let repo = Rc::new(crate::jj::real::open_git_store().await?);
         Ok(Self {
             config,
             globals,

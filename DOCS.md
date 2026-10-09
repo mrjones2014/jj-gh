@@ -168,7 +168,7 @@ Resolves the PR from a revision (via its local bookmark) or a PR number, fetches
 
 Fetch a pull request into a local bookmark.
 
-This command accepts either a revision ID or a PR number. If given a revision ID, the PR number will be looked up via the API. Requires a colocated git repository; the special `refs/pull/123/head` ref is fetched via `git` because `jj` cannot yet fetch arbitrary refs.
+This command accepts either a revision ID or a PR number. If given a revision ID, the PR number will be looked up via the API. The special `refs/pull/123/head` ref is fetched via `git` because `jj` cannot yet fetch arbitrary refs.
 
 See: <https://github.com/jj-vcs/jj/issues/4388>
 
