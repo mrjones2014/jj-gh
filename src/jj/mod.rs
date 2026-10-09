@@ -7,7 +7,7 @@
 use crate::util::EvalWithCfgFallback;
 use anyhow::Result;
 use serde::Deserialize;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 pub mod inject;
 pub mod real;
@@ -102,13 +102,6 @@ pub trait Jj {
     ///
     /// Propagates jj errors.
     async fn trunk_branch(&self) -> Result<Option<String>>;
-
-    /// Absolute path to the jj workspace root.
-    ///
-    /// # Errors
-    ///
-    /// Propagates jj errors.
-    fn workspace_root(&self) -> Result<&PathBuf>;
 
     /// Run `jj git import` to re-read refs from the underlying git store.
     ///

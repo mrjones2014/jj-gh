@@ -166,7 +166,7 @@ pub struct ModelImpl<'a> {
 }
 
 impl<'a> ModelImpl<'a> {
-    /// Discover the current workspace and construct its local jj/git clients.
+    /// Open the colocated git store and construct its local jj/git clients.
     /// GitHub auth and client construction remain lazy until [`Model::gh`].
     ///
     /// Holds the resolved `globals` so token resolution can rank the
@@ -174,10 +174,9 @@ impl<'a> ModelImpl<'a> {
     ///
     /// # Errors
     ///
-    /// Propagates failures from workspace or colocated git-store discovery.
+    /// Propagates failures from colocated git-store discovery.
     pub async fn new(config: &'a Config, globals: &'a GlobalOpts) -> Result<Self> {
-        let (repo, workspace_root) = crate::jj::real::discover_workspace().await?;
-        let repo = Rc::new(repo);
+        let repo = Rc::new(crate::jj::real::open_colocated_store().await?);
         Ok(Self {
             config,
             globals,
@@ -185,7 +184,7 @@ impl<'a> ModelImpl<'a> {
             env: OsEnv,
             gh: OnceCell::new(),
             git: RealGit::new(Rc::clone(&repo)),
-            jj: JjCli::from_repository(repo, workspace_root),
+            jj: JjCli::from_repository(repo),
         })
     }
 }

@@ -161,18 +161,16 @@ mod tests {
     use super::*;
     use crate::jj::{CommitInfo, Jj, PushedBookmark};
     use anyhow::Result;
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
 
     struct MockJj {
         ancestors: HashMap<String, Option<String>>,
-        workspace_root: PathBuf,
     }
 
     impl MockJj {
         fn new() -> Self {
             Self {
                 ancestors: HashMap::new(),
-                workspace_root: PathBuf::from("/tmp"),
             }
         }
 
@@ -205,9 +203,6 @@ mod tests {
         }
         async fn trunk_branch(&self) -> Result<Option<String>> {
             unimplemented!()
-        }
-        fn workspace_root(&self) -> Result<&PathBuf> {
-            Ok(&self.workspace_root)
         }
         async fn git_import(&self) -> Result<()> {
             unimplemented!()

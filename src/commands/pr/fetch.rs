@@ -23,7 +23,6 @@ use crate::{
 };
 use anyhow::{Context, Result, anyhow};
 use jj_gh_config_derive::subcommand_args;
-use std::path::Path;
 
 /// Default jj template used to render the bookmark name when neither the
 /// `pr_fetch_bookmark_template` config nor the `-T|--template` CLI flag is
@@ -35,21 +34,6 @@ pub const DEFAULT_FETCH_TEMPLATE: &str = r#""pr-" ++ pr_number ++ "/" ++ pr_bran
 /// characters keeps the slug short while leaving room for surrounding template
 /// text.
 const PR_SLUG_MAX_LEN: usize = 50;
-
-/// Verify the workspace is a colocated git repo. Returns an explanatory error
-/// otherwise.
-fn ensure_colocated(workspace_root: &Path) -> Result<()> {
-    if workspace_root.join(".git").exists() {
-        return Ok(());
-    }
-    Err(anyhow!(
-        "`jj pr fetch` requires a colocated git repository (a `.git` directory \
-         at the workspace root, `{}`). jj cannot yet fetch arbitrary refs like \
-         `refs/pull/123/head`, so we shell out to git for this step. Use a repo \
-         that was initialized with `jj git init --colocate`.",
-        workspace_root.display()
-    ))
-}
 
 /// Resolve the remote that hosts the PR (where `refs/pull/N/head` lives).
 ///
@@ -155,8 +139,8 @@ subcommand_args! {
 
 /// # Errors
 ///
-/// Propagates errors from any step (auth, GH API, colocation, git fetch, jj
-/// import, template eval).
+/// Propagates errors from any step (auth, GH API, git fetch, jj import,
+/// template eval).
 pub async fn run(model: &impl Model, args: &FetchArgs) -> Result<()> {
     let jj = model.jj();
     let gh = model.gh().await?;
@@ -175,9 +159,6 @@ pub async fn run(model: &impl Model, args: &FetchArgs) -> Result<()> {
                 askpass_timeout_secs: _,
             },
     } = args;
-
-    let workspace_root = jj.workspace_root()?;
-    ensure_colocated(workspace_root)?;
 
     let spinner = Spinner::start("Resolving PR");
 
@@ -276,9 +257,8 @@ mod tests {
     use crate::jj::CommitInfo;
     use crate::model::TestModel;
     use std::cell::RefCell;
-    use std::path::PathBuf;
+    use std::path::Path;
     use std::sync::Mutex;
-    use tempfile::TempDir;
 
     #[derive(Debug, Clone, Default)]
     struct EvalCall {
@@ -288,7 +268,6 @@ mod tests {
     }
 
     struct FakeJj {
-        workspace_root: PathBuf,
         origin: Option<String>,
         expected_remote: String,
         remote_names: Vec<String>,
@@ -328,9 +307,6 @@ mod tests {
         }
         async fn trunk_branch(&self) -> Result<Option<String>> {
             unimplemented!("fetch does not call trunk_branch")
-        }
-        fn workspace_root(&self) -> Result<&PathBuf> {
-            Ok(&self.workspace_root)
         }
         fn git_import(&self) -> impl Future<Output = Result<()>> {
             *self.import_calls.lock().unwrap() += 1;
@@ -565,15 +541,8 @@ mod tests {
         }
     }
 
-    fn colocated_workspace() -> TempDir {
-        let dir = TempDir::new().unwrap();
-        std::fs::create_dir(dir.path().join(".git")).unwrap();
-        dir
-    }
-
-    fn jj_for(dir: &TempDir, origin: Option<&str>, eval_return: &str) -> FakeJj {
+    fn jj_for(origin: Option<&str>, eval_return: &str) -> FakeJj {
         FakeJj {
-            workspace_root: dir.path().to_path_buf(),
             origin: origin.map(str::to_string),
             expected_remote: "origin".into(),
             remote_names: vec!["origin".into(), "fork".into()],
@@ -591,8 +560,7 @@ mod tests {
 
     #[tokio::test]
     async fn happy_path_prints_bookmark_and_imports() {
-        let dir = colocated_workspace();
-        let jj = jj_for(&dir, Some("git@github.com:o/r.git"), "pr-1234/feature/foo");
+        let jj = jj_for(Some("git@github.com:o/r.git"), "pr-1234/feature/foo");
         let gh = gh_for(details(), "o", "r");
         let git = FakeGit {
             exists: false,
@@ -613,8 +581,7 @@ mod tests {
 
     #[tokio::test]
     async fn remote_flag_selects_host_remote() {
-        let dir = colocated_workspace();
-        let mut jj = jj_for(&dir, Some("git@github.com:o/r.git"), "pr-1234/feature/foo");
+        let mut jj = jj_for(Some("git@github.com:o/r.git"), "pr-1234/feature/foo");
         jj.expected_remote = "fork".into();
         let gh = gh_for(details(), "o", "r");
         let git = FakeGit {
@@ -634,12 +601,7 @@ mod tests {
 
     #[tokio::test]
     async fn upstream_remote_flag_selects_host_remote() {
-        let dir = colocated_workspace();
-        let mut jj = jj_for(
-            &dir,
-            Some("git@github.com:up-owner/r.git"),
-            "pr-1234/feature/foo",
-        );
+        let mut jj = jj_for(Some("git@github.com:up-owner/r.git"), "pr-1234/feature/foo");
         jj.expected_remote = "up".into();
         jj.remote_names = vec!["origin".into(), "up".into()];
         let gh = gh_for(details(), "up-owner", "r");
@@ -660,8 +622,7 @@ mod tests {
 
     #[tokio::test]
     async fn upstream_remote_flag_missing_errors() {
-        let dir = colocated_workspace();
-        let mut jj = jj_for(&dir, Some("git@github.com:o/r.git"), "irrelevant");
+        let mut jj = jj_for(Some("git@github.com:o/r.git"), "irrelevant");
         jj.remote_names = vec!["origin".into()];
         let gh = gh_for(details(), "o", "r");
         let git = FakeGit {
@@ -682,8 +643,7 @@ mod tests {
 
     #[tokio::test]
     async fn no_remote_resolves_teaching_error() {
-        let dir = colocated_workspace();
-        let mut jj = jj_for(&dir, None, "irrelevant");
+        let mut jj = jj_for(None, "irrelevant");
         // No explicit flags, no config, and git cannot auto-detect a default.
         jj.remote_names = vec!["NixOS".into(), "up".into()];
         jj.auto_detect = None;
@@ -709,8 +669,7 @@ mod tests {
 
     #[tokio::test]
     async fn existing_bookmark_without_force_errors() {
-        let dir = colocated_workspace();
-        let jj = jj_for(&dir, Some("git@github.com:o/r.git"), "pr-1234/feature/foo");
+        let jj = jj_for(Some("git@github.com:o/r.git"), "pr-1234/feature/foo");
         let gh = gh_for(details(), "o", "r");
         let git = FakeGit {
             exists: true,
@@ -726,8 +685,7 @@ mod tests {
 
     #[tokio::test]
     async fn force_flag_passes_through() {
-        let dir = colocated_workspace();
-        let jj = jj_for(&dir, Some("git@github.com:o/r.git"), "pr-1234/feature/foo");
+        let jj = jj_for(Some("git@github.com:o/r.git"), "pr-1234/feature/foo");
         let gh = gh_for(details(), "o", "r");
         let git = FakeGit {
             exists: true,
@@ -744,8 +702,7 @@ mod tests {
 
     #[tokio::test]
     async fn config_template_is_used() {
-        let dir = colocated_workspace();
-        let jj = jj_for(&dir, Some("git@github.com:o/r.git"), "cfg-from-template");
+        let jj = jj_for(Some("git@github.com:o/r.git"), "cfg-from-template");
         let gh = gh_for(details(), "o", "r");
         let git = FakeGit {
             exists: false,
@@ -770,8 +727,7 @@ mod tests {
 
     #[tokio::test]
     async fn cli_template_overrides_config() {
-        let dir = colocated_workspace();
-        let jj = jj_for(&dir, Some("git@github.com:o/r.git"), "from-cli");
+        let jj = jj_for(Some("git@github.com:o/r.git"), "from-cli");
         let gh = gh_for(details(), "o", "r");
         let git = FakeGit {
             exists: false,
@@ -792,8 +748,7 @@ mod tests {
 
     #[tokio::test]
     async fn default_template_used_when_no_override() {
-        let dir = colocated_workspace();
-        let jj = jj_for(&dir, Some("git@github.com:o/r.git"), "pr-1234/feature/foo");
+        let jj = jj_for(Some("git@github.com:o/r.git"), "pr-1234/feature/foo");
         let gh = gh_for(details(), "o", "r");
         let git = FakeGit {
             exists: false,
@@ -809,8 +764,7 @@ mod tests {
 
     #[tokio::test]
     async fn empty_bookmark_rendering_errors() {
-        let dir = colocated_workspace();
-        let jj = jj_for(&dir, Some("git@github.com:o/r.git"), "   ");
+        let jj = jj_for(Some("git@github.com:o/r.git"), "   ");
         let gh = gh_for(details(), "o", "r");
         let git = FakeGit {
             exists: false,
@@ -826,8 +780,7 @@ mod tests {
 
     #[tokio::test]
     async fn missing_origin_errors_clearly() {
-        let dir = colocated_workspace();
-        let jj = jj_for(&dir, None, "irrelevant");
+        let jj = jj_for(None, "irrelevant");
         let gh = gh_for(details(), "o", "r");
         let git = FakeGit {
             exists: false,
@@ -841,23 +794,6 @@ mod tests {
                 .contains("`origin` remote is not configured"),
             "msg: {err}"
         );
-    }
-
-    #[tokio::test]
-    async fn non_colocated_repo_errors_with_explanation() {
-        let dir = TempDir::new().unwrap();
-        let jj = jj_for(&dir, Some("git@github.com:o/r.git"), "irrelevant");
-        let gh = gh_for(details(), "o", "r");
-        let git = FakeGit {
-            exists: false,
-            fetches: RefCell::new(vec![]),
-        };
-        let err = run(&TestModel::new(&jj, &gh, &git), &args(1234, None, false))
-            .await
-            .unwrap_err();
-        let msg = format!("{err:#}");
-        assert!(msg.contains("colocated"), "msg: {msg}");
-        assert!(msg.contains("refs/pull/123/head"), "msg: {msg}");
     }
 
     #[test]

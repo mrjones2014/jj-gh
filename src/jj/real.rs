@@ -1,7 +1,8 @@
 //! `jj` CLI-backed [`Jj`] implementation.
 //!
 //! Remote-URL reads go through `gix` against the colocated git store
-//! discovered at the workspace root. The repository is discovered once at
+//! reported by `jj git root` (which resolves secondary jj workspaces to
+//! the primary workspace's store). The repository is discovered once at
 //! [`JjCli::new`] and reused for every subsequent gix operation.
 
 use crate::jj::{CommitInfo, Jj, PushedBookmark, jj_argv};
@@ -23,30 +24,26 @@ fn json_object_template(fields: &[(&str, &str)]) -> String {
 
 /// Production [`Jj`] impl that shells out to the system `jj` binary.
 ///
-/// Caches the workspace root and a `gix::Repository` discovered at
-/// construction so all gix-backed reads share one handle.
+/// Caches a `gix::Repository` discovered at construction so all gix-backed
+/// reads share one handle.
 pub struct JjCli {
     repo: Rc<gix::Repository>,
-    workspace_root: PathBuf,
 }
 
 impl JjCli {
-    /// Resolve the workspace root via `jj` and discover its colocated git
-    /// store. Subsequent gix operations reuse the cached [`gix::Repository`].
+    /// Resolve the git store via `jj git root` and open it with gix.
+    /// Subsequent gix operations reuse the cached [`gix::Repository`].
     ///
     /// # Errors
     ///
-    /// Propagates failures from `jj workspace root` or gix discovery.
+    /// Propagates failures from `jj git root` or git store discovery.
     pub async fn new() -> Result<Self> {
-        let (repo, workspace_root) = discover_workspace().await?;
-        Ok(Self::from_repository(Rc::new(repo), workspace_root))
+        let repo = open_colocated_store().await?;
+        Ok(Self::from_repository(Rc::new(repo)))
     }
 
-    pub(crate) fn from_repository(repo: Rc<gix::Repository>, workspace_root: PathBuf) -> Self {
-        Self {
-            repo,
-            workspace_root,
-        }
+    pub(crate) fn from_repository(repo: Rc<gix::Repository>) -> Self {
+        Self { repo }
     }
 }
 
@@ -194,10 +191,6 @@ impl Jj for JjCli {
         Ok(Some(sha).filter(|s| !s.is_empty()))
     }
 
-    fn workspace_root(&self) -> Result<&PathBuf> {
-        Ok(&self.workspace_root)
-    }
-
     async fn git_import(&self) -> Result<()> {
         run_jj_passthrough(&["git", "import"])
             .await
@@ -268,22 +261,44 @@ impl Jj for JjCli {
     }
 }
 
-pub(crate) async fn discover_workspace() -> Result<(gix::Repository, PathBuf)> {
-    let workspace_root = workspace_root().await?;
-    let repo = gix::discover(&workspace_root)?;
-    Ok((repo, workspace_root))
+pub(crate) async fn open_colocated_store() -> Result<gix::Repository> {
+    let git_root = git_root().await?;
+    ensure_colocated(&git_root)?;
+    gix::open(&git_root).with_context(|| format!("opening git store at `{}`", git_root.display()))
 }
 
-async fn workspace_root() -> Result<PathBuf> {
-    let stdout = run_jj(&["workspace", "root"]).await?;
+/// Absolute path of the repository's git store, via `jj git root`. Run from
+/// a secondary workspace, this reports the primary workspace's store, so
+/// callers need no workspace resolution of their own.
+async fn git_root() -> Result<PathBuf> {
+    let stdout = run_jj(&["git", "root"]).await?;
     let path = std::str::from_utf8(&stdout)
-        .context("jj workspace root output is not UTF-8")?
+        .context("jj git root output is not UTF-8")?
         .trim()
         .to_string();
     if path.is_empty() {
-        return Err(anyhow!("jj workspace root returned an empty path"));
+        return Err(anyhow!("jj git root returned an empty path"));
     }
     Ok(PathBuf::from(path))
+}
+
+/// Verify the git store is colocated with the jj repo, i.e. sits next to it
+/// as a `.git` directory. A non-colocated repo keeps its store embedded
+/// under `.jj/repo/store/git` instead.
+fn ensure_colocated(git_root: &Path) -> Result<()> {
+    let colocated = git_root
+        .parent()
+        .is_some_and(|root| root.join(".jj").is_dir());
+    if colocated {
+        Ok(())
+    } else {
+        Err(anyhow!(
+            "the git store at `{}` is not colocated with the jj repository. \
+             jj-gh reads remote configuration from the colocated git store; \
+             use a repository initialized with `jj git init --colocate`.",
+            git_root.display()
+        ))
+    }
 }
 
 async fn run_jj(args: &[&str]) -> Result<Vec<u8>> {
@@ -354,6 +369,27 @@ fn pr_diff_argv(base_oid: &str, head_oid: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn colocated_store_next_to_jj_dir_is_accepted() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(tmp.path().join(".jj")).unwrap();
+        let git_root = tmp.path().join(".git");
+        std::fs::create_dir(&git_root).unwrap();
+        ensure_colocated(&git_root).unwrap();
+    }
+
+    #[test]
+    fn embedded_store_is_rejected_as_not_colocated() {
+        let tmp = tempfile::tempdir().unwrap();
+        let git_root = tmp.path().join(".jj/repo/store/git");
+        std::fs::create_dir_all(&git_root).unwrap();
+        let err = ensure_colocated(&git_root).unwrap_err().to_string();
+        assert!(
+            err.contains("not colocated"),
+            "unexpected error message: {err}"
+        );
+    }
 
     #[test]
     fn eval_template_argv_minimal() {

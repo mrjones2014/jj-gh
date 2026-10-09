@@ -325,7 +325,7 @@ mod tests {
         jj::{CommitInfo, PushedBookmark},
         model::TestModel,
     };
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
     use std::sync::Mutex;
 
     fn pr_details(number: u64, sha: &str) -> PrDetails {
@@ -363,17 +363,7 @@ mod tests {
         }
     }
 
-    struct FakeJj {
-        workspace_root: PathBuf,
-    }
-
-    impl FakeJj {
-        fn new() -> Self {
-            Self {
-                workspace_root: PathBuf::from("/tmp"),
-            }
-        }
-    }
+    struct FakeJj;
 
     impl crate::jj::Jj for FakeJj {
         fn default_remote(&self) -> Result<Option<String>> {
@@ -409,9 +399,6 @@ mod tests {
         }
         async fn trunk_branch(&self) -> Result<Option<String>> {
             unimplemented!()
-        }
-        fn workspace_root(&self) -> Result<&PathBuf> {
-            Ok(&self.workspace_root)
         }
         async fn git_import(&self) -> Result<()> {
             unimplemented!()
@@ -666,7 +653,7 @@ mod tests {
             ),
         ];
         let gh = FakeGh::new(pr, vec![runs]);
-        let jj = FakeJj::new();
+        let jj = FakeJj;
 
         run_with(
             &TestModel::without_git(&jj, &gh),
@@ -694,7 +681,7 @@ mod tests {
             local_pr(42, "failed", CiStatus::Failed),
             local_pr(43, "pending", CiStatus::Pending),
         ]);
-        let jj = FakeJj::new();
+        let jj = FakeJj;
 
         run_with(
             &TestModel::without_git(&jj, &gh),
@@ -723,7 +710,7 @@ mod tests {
             vec![initial, completed.clone(), completed],
         )
         .with_local_prs(vec![local_pr(42, "failed", CiStatus::Failed)]);
-        let jj = FakeJj::new();
+        let jj = FakeJj;
 
         run_with(
             &TestModel::without_git(&jj, &gh),
@@ -751,7 +738,7 @@ mod tests {
             wr(2, WorkflowRunStatus::InProgress, None),
         ];
         let gh = FakeGh::new(pr, vec![runs]);
-        let jj = FakeJj::new();
+        let jj = FakeJj;
 
         let err = run_with(
             &TestModel::without_git(&jj, &gh),
@@ -785,7 +772,7 @@ mod tests {
             ),
         ];
         let gh = FakeGh::new(pr, vec![runs]);
-        let jj = FakeJj::new();
+        let jj = FakeJj;
 
         run_with(
             &TestModel::without_git(&jj, &gh),
@@ -846,7 +833,7 @@ mod tests {
         // Fourth: same all-done state for the post-poll re-list before rerun.
         let post_poll = all_done.clone();
         let gh = FakeGh::new(pr, vec![initial, still_running, all_done, post_poll]);
-        let jj = FakeJj::new();
+        let jj = FakeJj;
 
         run_with(
             &TestModel::without_git(&jj, &gh),
@@ -867,7 +854,7 @@ mod tests {
         let pr = pr_details(13, "sha");
         let stuck = vec![wr(1, WorkflowRunStatus::InProgress, None)];
         let gh = FakeGh::new(pr, vec![stuck]);
-        let jj = FakeJj::new();
+        let jj = FakeJj;
 
         let err = run_with(
             &TestModel::without_git(&jj, &gh),
@@ -902,7 +889,7 @@ mod tests {
         ];
         // Same list returned for both the initial and re-list before rerun.
         let gh = FakeGh::new(pr, vec![runs.clone(), runs]);
-        let jj = FakeJj::new();
+        let jj = FakeJj;
 
         run_with(
             &TestModel::without_git(&jj, &gh),
