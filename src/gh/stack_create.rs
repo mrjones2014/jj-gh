@@ -513,8 +513,8 @@ mod tests {
             .unwrap();
 
         assert_eq!(results[0].outcome, ChainOutcome::AlreadyExists);
-        assert!(gh.created().is_empty());
-        assert!(gh.unstacked().is_empty());
+        assert_eq!(gh.created(), [] as [Vec<u64>; 0]);
+        assert_eq!(gh.unstacked(), [] as [(u64, Vec<u64>); 0]);
     }
 
     #[tokio::test]
@@ -620,7 +620,7 @@ mod tests {
             format!("{err:#}").contains("#2"),
             "unexpected error: {err:#}"
         );
-        assert!(gh.created().is_empty());
+        assert_eq!(gh.created(), [] as [Vec<u64>; 0]);
     }
 
     #[tokio::test]
@@ -672,7 +672,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(gh.calls().is_empty());
+        assert_eq!(gh.calls(), [] as [Call; 0]);
     }
 
     #[tokio::test]
@@ -695,7 +695,7 @@ mod tests {
             gh.retargeted().is_empty(),
             "must not retarget after failing"
         );
-        assert!(gh.created().is_empty());
+        assert_eq!(gh.created(), [] as [Vec<u64>; 0]);
     }
 
     #[tokio::test]

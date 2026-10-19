@@ -1101,7 +1101,10 @@ mod tests {
     fn intact_stack_with_no_retargets_is_left_alone() {
         let prs = [pr(1, Some(7)), pr(2, Some(7))];
         let existing = [stack(7, &[1, 2])];
-        assert!(prs_to_unstack(&[vec![1, 2]], &prs, &existing, &retargeting(&[])).is_empty());
+        assert_eq!(
+            prs_to_unstack(&[vec![1, 2]], &prs, &existing, &retargeting(&[])),
+            [] as [u64; 0]
+        );
     }
 
     #[test]
@@ -1164,7 +1167,7 @@ mod tests {
             unstack: vec![1, 2],
             ..Default::default()
         };
-        assert!(prs_leaving_stacks(&plan).is_empty());
+        assert_eq!(prs_leaving_stacks(&plan), [] as [u64; 0]);
     }
 
     #[test]

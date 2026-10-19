@@ -330,7 +330,7 @@ mod tests {
             .args;
         assert!(parsed.all);
         assert!(parsed.cancel);
-        assert!(parsed.revsets.is_empty());
+        assert_eq!(parsed.revsets, [] as [String; 0]);
     }
 
     #[test]

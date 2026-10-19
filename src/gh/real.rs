@@ -757,7 +757,7 @@ mod tests {
 
     #[test]
     fn empty_branches_produces_no_queries() {
-        assert!(build_search_queries("o", "r", &[]).is_empty());
+        assert_eq!(build_search_queries("o", "r", &[]), [] as [String; 0]);
     }
 
     #[test]

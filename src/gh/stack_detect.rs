@@ -295,15 +295,15 @@ mod tests {
     async fn no_prs_returns_empty() {
         let jj = MockJj::new();
         let shape = detect(&[], &jj, &HashMap::new(), None).await.unwrap();
-        assert!(shape.chains.is_empty());
-        assert!(shape.bases.is_empty());
+        assert_eq!(shape.chains, [] as [Vec<u64>; 0]);
+        assert_eq!(shape.bases, [] as [crate::gh::stack_detect::BasePlan; 0]);
     }
 
     #[tokio::test]
     async fn single_pr_forms_no_chain() {
         let jj = MockJj::new().with_ancestor("sha1", None);
         let prs = vec![pr(1, "branch-a", "sha1")];
-        assert!(chains_of(&prs, &jj).await.is_empty());
+        assert_eq!(chains_of(&prs, &jj).await, [] as [Vec<u64>; 0]);
     }
 
     #[tokio::test]
@@ -312,7 +312,7 @@ mod tests {
             .with_ancestor("sha1", None)
             .with_ancestor("sha2", None);
         let prs = vec![pr(1, "branch-a", "sha1"), pr(2, "branch-b", "sha2")];
-        assert!(chains_of(&prs, &jj).await.is_empty());
+        assert_eq!(chains_of(&prs, &jj).await, [] as [Vec<u64>; 0]);
     }
 
     #[tokio::test]
@@ -363,7 +363,7 @@ mod tests {
             .with_ancestor("sha1", None)
             .with_ancestor("sha2", Some("branch-not-in-set"));
         let prs = vec![pr(1, "branch-a", "sha1"), pr(2, "branch-b", "sha2")];
-        assert!(chains_of(&prs, &jj).await.is_empty());
+        assert_eq!(chains_of(&prs, &jj).await, [] as [Vec<u64>; 0]);
     }
 
     #[tokio::test]
@@ -396,7 +396,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(shape.chains.is_empty());
+        assert_eq!(shape.chains, [] as [Vec<u64>; 0]);
         assert_eq!(shape.bases.len(), 1);
         assert_eq!(shape.bases[0].proposed_base, "main");
         assert!(!shape.bases[0].is_no_change());
@@ -419,6 +419,6 @@ mod tests {
         let shape = detect(&prs, &jj, &HashMap::new(), Some("main"))
             .await
             .unwrap();
-        assert!(shape.bases.is_empty());
+        assert_eq!(shape.bases, [] as [crate::gh::stack_detect::BasePlan; 0]);
     }
 }

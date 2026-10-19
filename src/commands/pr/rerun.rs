@@ -966,9 +966,9 @@ mod tests {
 
         let calls = gh.calls.lock().unwrap();
         assert_eq!(calls.rerun_failed, vec![2, 3]);
-        assert!(calls.cancelled.is_empty());
-        assert!(calls.rerun.is_empty());
-        assert!(calls.list_jobs.is_empty());
+        assert_eq!(calls.cancelled, [] as [u64; 0]);
+        assert_eq!(calls.rerun, [] as [u64; 0]);
+        assert_eq!(calls.list_jobs, [] as [u64; 0]);
     }
 
     #[tokio::test]
@@ -995,8 +995,8 @@ mod tests {
 
         let calls = gh.calls.lock().unwrap();
         assert_eq!(calls.rerun_failed, vec![1]);
-        assert!(calls.cancelled.is_empty());
-        assert!(calls.rerun.is_empty());
+        assert_eq!(calls.cancelled, [] as [u64; 0]);
+        assert_eq!(calls.rerun, [] as [u64; 0]);
     }
 
     #[tokio::test]
@@ -1020,9 +1020,9 @@ mod tests {
         assert!(msg.contains("still in progress"), "msg: {msg}");
 
         let calls = gh.calls.lock().unwrap();
-        assert!(calls.cancelled.is_empty());
-        assert!(calls.rerun.is_empty());
-        assert!(calls.rerun_failed.is_empty());
+        assert_eq!(calls.cancelled, [] as [u64; 0]);
+        assert_eq!(calls.rerun, [] as [u64; 0]);
+        assert_eq!(calls.rerun_failed, [] as [u64; 0]);
     }
 
     #[tokio::test]
@@ -1052,7 +1052,7 @@ mod tests {
         .unwrap();
 
         let calls = gh.calls.lock().unwrap();
-        assert!(calls.rerun_failed.is_empty());
+        assert_eq!(calls.rerun_failed, [] as [u64; 0]);
     }
 
     #[tokio::test]
@@ -1087,8 +1087,8 @@ mod tests {
 
         let calls = gh.calls.lock().unwrap();
         assert_eq!(calls.rerun, vec![1, 2]);
-        assert!(calls.rerun_failed.is_empty());
-        assert!(calls.cancelled.is_empty());
+        assert_eq!(calls.rerun_failed, [] as [u64; 0]);
+        assert_eq!(calls.cancelled, [] as [u64; 0]);
     }
 
     #[tokio::test]
@@ -1141,7 +1141,7 @@ mod tests {
         assert_eq!(calls.list_jobs, vec![1, 2]);
         assert_eq!(calls.cancelled, vec![1]);
         assert_eq!(calls.rerun_failed, vec![1, 3]);
-        assert!(calls.rerun.is_empty());
+        assert_eq!(calls.rerun, [] as [u64; 0]);
     }
 
     #[tokio::test]
@@ -1171,8 +1171,8 @@ mod tests {
         .unwrap();
 
         let calls = gh.calls.lock().unwrap();
-        assert!(calls.list_jobs.is_empty());
-        assert!(calls.cancelled.is_empty());
+        assert_eq!(calls.list_jobs, [] as [u64; 0]);
+        assert_eq!(calls.cancelled, [] as [u64; 0]);
         assert_eq!(calls.rerun_failed, vec![2]);
     }
 
@@ -1237,10 +1237,10 @@ mod tests {
         .expect("cancel --all-jobs should restart the full pipeline");
 
         let calls = gh.calls.lock().unwrap();
-        assert!(calls.list_jobs.is_empty());
+        assert_eq!(calls.list_jobs, [] as [u64; 0]);
         assert_eq!(calls.cancelled, vec![2, 3]);
         assert_eq!(calls.rerun, vec![1, 2, 3]);
-        assert!(calls.rerun_failed.is_empty());
+        assert_eq!(calls.rerun_failed, [] as [u64; 0]);
     }
 
     #[tokio::test]
@@ -1264,7 +1264,7 @@ mod tests {
 
         let calls = gh.calls.lock().unwrap();
         assert_eq!(calls.cancelled, vec![1]);
-        assert!(calls.rerun.is_empty());
+        assert_eq!(calls.rerun, [] as [u64; 0]);
     }
 
     #[tokio::test]
@@ -1425,8 +1425,8 @@ mod tests {
         let calls = gh.calls.lock().unwrap();
         assert_eq!(calls.listed_shas, vec!["failed"]);
         assert_eq!(calls.rerun_failed, vec![2]);
-        assert!(calls.cancelled.is_empty());
-        assert!(calls.rerun.is_empty());
+        assert_eq!(calls.cancelled, [] as [u64; 0]);
+        assert_eq!(calls.rerun, [] as [u64; 0]);
     }
 
     #[tokio::test]
@@ -1502,7 +1502,7 @@ mod tests {
         .expect("nothing to do should be a clean exit");
 
         let calls = gh.calls.lock().unwrap();
-        assert!(calls.listed_shas.is_empty());
+        assert_eq!(calls.listed_shas, [] as [String; 0]);
     }
 
     #[test]

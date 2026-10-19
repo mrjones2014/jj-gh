@@ -194,7 +194,7 @@ mod tests {
         let (fm, body) = Frontmatter::parse(buffer).unwrap();
         assert_eq!(fm.title, "hello");
         assert_eq!(fm.base, "main");
-        assert!(fm.labels.is_empty());
+        assert_eq!(fm.labels, [] as [String; 0]);
         assert!(!fm.draft);
         assert!(!fm.auto_merge);
         assert_eq!(fm.auto_merge_method, AutoMergeMethod::Merge);
