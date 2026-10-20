@@ -32,4 +32,6 @@ in
 checks
 // {
   inherit jj-gh;
+  # Built by CI before the check matrix so every check pulls it from Cachix.
+  cargo-artifacts = cargoArtifacts;
 }
