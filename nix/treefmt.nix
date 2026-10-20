@@ -1,31 +1,12 @@
-{ pkgs, rustToolchain }:
-{
-  projectRootFile = "flake.nix";
-  programs = {
-    rustfmt = {
-      enable = true;
-      package = rustToolchain;
-    };
-    prettier = {
-      enable = true;
-      includes = [
-        "*.md"
-        "*.gql"
-        "*.json"
-      ];
-      excludes = [ "CHANGELOG.md" ];
-    };
-    taplo.enable = true;
-    yamlfmt.enable = true;
-    nixfmt.enable = true;
-    actionlint.enable = true;
-  };
-  settings.formatter.tombi = {
-    command = "${pkgs.tombi}/bin/tombi";
-    options = [
-      "format"
-      "--offline"
-    ];
-    includes = [ "*.toml" ];
-  };
+{ pkgs }:
+pkgs.treefmt.withConfig {
+  runtimeInputs = [
+    pkgs.actionlint
+    pkgs.nixfmt
+    pkgs.prettier
+    pkgs.rustfmt
+    pkgs.tombi
+    pkgs.yamlfmt
+  ];
+  settings = pkgs.lib.importTOML ../treefmt.toml;
 }

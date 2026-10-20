@@ -44,11 +44,6 @@ jobs:
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
           extraPullNames: nix-community
       - run: nix build .#checks.x86_64-linux.${{ matrix.target }} --print-build-logs
-      # we don't really ever need to rebuild this, so pin it in cachix
-      - if: matrix.target == 'release-plz-patched' && github.event_name == 'push'
-        run: |
-          path=$(nix build .#checks.x86_64-linux.release-plz-patched --print-out-paths --no-link)
-          cachix pin jj-gh release-plz-patched "$path"
   flake-check:
     needs: [discover_checks, check]
     if: always()
@@ -56,25 +51,8 @@ jobs:
     steps:
       - if: ${{ needs.discover_checks.result != 'success' || needs.check.result != 'success' }}
         run: exit 1
-  udeps:
-    runs-on: ubuntu-latest
-    if: ${{ github.event_name != 'pull_request' }}
-    steps:
-      - uses: wimpysworld/nothing-but-nix@v10
-      - uses: actions/checkout@v7
-      - uses: cachix/install-nix-action@v31
-        with:
-          extra_nix_config: |
-            experimental-features = nix-command flakes
-            access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
-      - uses: cachix/cachix-action@v17
-        with:
-          name: jj-gh
-          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          extraPullNames: nix-community
-      - run: nix build .#udeps --print-build-logs
   release-plz:
-    needs: [flake-check, udeps]
+    needs: [flake-check]
     if: ${{ github.repository_owner == 'mrjones2014' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/master' }}
     runs-on: ubuntu-latest
     permissions:

@@ -1,13 +1,13 @@
 {
   pkgs,
   gen-docs,
-  treefmtEval,
+  treefmt,
 }:
 pkgs.writeShellApplication {
   name = "update-docs";
   runtimeInputs = [
     gen-docs
-    treefmtEval.config.build.wrapper
+    treefmt
   ];
   text = ''
     gen-docs > DOCS.md

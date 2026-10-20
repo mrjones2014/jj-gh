@@ -1,0 +1,30 @@
+tree-root-file = "flake.nix"
+excludes = ["*.lock", ".gitattributes", ".gitignore", "LICENSE"]
+
+[formatter.actionlint]
+command = "actionlint"
+includes = [".github/workflows/*.yml", ".github/workflows/*.yaml"]
+
+[formatter.nixfmt]
+command = "nixfmt"
+includes = ["*.nix"]
+
+[formatter.prettier]
+command = "prettier"
+options = ["--write"]
+includes = ["*.md", "*.gql", "*.json"]
+excludes = ["CHANGELOG.md"]
+
+[formatter.rustfmt]
+command = "rustfmt"
+options = ["--config", "skip_children=true", "--edition", "2024"]
+includes = ["*.rs"]
+
+[formatter.tombi]
+command = "tombi"
+options = ["format", "--offline"]
+includes = ["*.toml"]
+
+[formatter.yamlfmt]
+command = "yamlfmt"
+includes = ["*.yaml", "*.yml"]

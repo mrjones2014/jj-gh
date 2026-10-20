@@ -2,145 +2,130 @@
   description = "Configurable jj subcommand for GitHub PR workflows";
 
   inputs = {
-    crane.url = "github:ipetkov/crane";
-    flake-utils.url = "github:numtide/flake-utils";
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
-    rust-overlay = {
-      url = "github:oxalica/rust-overlay";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-    treefmt-nix = {
-      url = "github:numtide/treefmt-nix";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
+    crane.url = "github:ipetkov/crane";
   };
 
   outputs =
     {
       self,
       crane,
-      flake-utils,
       nixpkgs,
-      rust-overlay,
-      treefmt-nix,
     }:
-    flake-utils.lib.eachSystem [ "aarch64-darwin" "aarch64-linux" "x86_64-linux" ] (
-      system:
-      let
-        pkgs = import nixpkgs {
-          inherit system;
-          overlays = [ (import rust-overlay) ];
-        };
-        rustToolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
-        craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
+    let
+      inherit (nixpkgs) lib;
 
-        src =
-          let
-            root = ./.;
-          in
-          pkgs.lib.fileset.toSource {
-            inherit root;
-            fileset = pkgs.lib.fileset.unions [
-              (craneLib.fileset.commonCargoSources root)
-              (pkgs.lib.fileset.fileFilter (f: f.hasExt "gql") root)
-              (pkgs.lib.fileset.fileFilter (f: f.hasExt "graphql") root)
+      forAllSystems =
+        f:
+        lib.genAttrs [ "aarch64-darwin" "aarch64-linux" "x86_64-linux" ] (
+          system:
+          f (
+            import ./nix/pkgs {
+              pkgs = nixpkgs.legacyPackages.${system};
+              inherit crane;
+            }
+          )
+        );
+    in
+    {
+      packages = forAllSystems (
+        {
+          jj-gh,
+          dev,
+          gen-docs,
+          gen-manpage,
+          ...
+        }:
+        {
+          default = jj-gh;
+          inherit
+            dev
+            gen-docs
+            gen-manpage
+            ;
+        }
+      );
+
+      apps = forAllSystems (
+        {
+          jj-gh,
+          update-docs,
+          release-app,
+          fetch-schema-app,
+          ...
+        }:
+        let
+          mkApp = drv: {
+            type = "app";
+            program = lib.getExe drv;
+          };
+        in
+        {
+          default = mkApp jj-gh;
+          docs = mkApp update-docs;
+          release = mkApp release-app;
+          fetch-schema = mkApp fetch-schema-app;
+        }
+      );
+
+      formatter = forAllSystems ({ treefmt, ... }: treefmt);
+
+      devShells = forAllSystems (
+        {
+          pkgs,
+          craneLib,
+          jj-gh,
+          treefmt,
+          ...
+        }:
+        {
+          default = craneLib.devShell {
+            inputsFrom = [ jj-gh ];
+            packages = [
+              pkgs.cargo-nextest
+              pkgs.cargo-semver-checks
+              pkgs.cargo-machete
+              pkgs.ast-grep
+              pkgs.jujutsu
+              pkgs.rust-analyzer
+              treefmt
             ];
           };
-        commonArgs = {
-          inherit src;
-          strictDeps = true;
-          buildInputs =
-            (pkgs.lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
-              pkgs.libiconv
-            ])
-            ++ (pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
-              pkgs.openssl
-            ]);
-          nativeBuildInputs = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.pkg-config ];
-        };
-        # Explicitly workspace-wide. The root manifest has a `[package]`
-        # section, so a bare `cargo build` would select only `jj-gh` and the
-        # artifacts would miss deps that the devtool packages need. A superset
-        # is safe here: `--workspace` resolves the same features as every
-        # narrower selection used below, it just covers more crates.
-        cargoArtifacts = craneLib.buildDepsOnly (
-          commonArgs // { cargoExtraArgs = "--locked --workspace"; }
-        );
-        treefmtEval = treefmt-nix.lib.evalModule pkgs (
-          import ./nix/treefmt.nix {
-            inherit pkgs;
-            inherit rustToolchain;
-          }
-        );
-        packageSet = import ./nix/pkgs {
-          inherit
-            pkgs
-            crane
-            craneLib
-            commonArgs
-            cargoArtifacts
-            rustToolchain
-            treefmtEval
-            ;
-        };
-        inherit (packageSet)
-          fetch-schema-app
-          jj-gh
-          release-app
-          release-plz-patched
-          update-docs
-          ;
-      in
-      {
-        inherit (packageSet) packages;
-        apps = {
-          default = flake-utils.lib.mkApp { drv = jj-gh; };
-          docs = flake-utils.lib.mkApp {
-            drv = update-docs;
-            name = "update-docs";
-          };
-          release = flake-utils.lib.mkApp {
-            drv = release-app;
-            name = "release";
-          };
-          fetch-schema = flake-utils.lib.mkApp {
-            drv = fetch-schema-app;
-            name = "fetch-schema";
-          };
-        };
-        formatter = treefmtEval.config.build.wrapper;
-        devShells.default = craneLib.devShell {
-          inputsFrom = [ jj-gh ];
-          packages = [
-            pkgs.cargo-nextest
-            pkgs.cargo-semver-checks
-            pkgs.cargo-udeps
-            pkgs.ast-grep
-            pkgs.jujutsu
-            pkgs.rust-analyzer
-            treefmtEval.config.build.wrapper
-          ];
-        };
-        checks = import ./nix/checks {
+        }
+      );
+
+      checks = forAllSystems (
+        {
+          pkgs,
+          craneLib,
+          commonArgs,
+          cargoArtifacts,
+          treefmt,
+          jj-gh,
+          update-docs,
+          ...
+        }:
+        import ./nix/checks {
           inherit
             self
             pkgs
             craneLib
             commonArgs
             cargoArtifacts
-            treefmtEval
+            treefmt
             jj-gh
-            release-plz-patched
             update-docs
             ;
-        };
-      }
-    )
-    // {
+        }
+      );
+
       overlays.default = final: _prev: {
         jj-gh = self.packages.${final.stdenv.hostPlatform.system}.default;
       };
-      homeManagerModules.default = import ./nix/hm-module.nix self;
-      homeManagerModules.jj-gh = import ./nix/hm-module.nix self;
+
+      homeManagerModules = rec {
+        default = jj-gh;
+        jj-gh = import ./nix/hm-module.nix self;
+      };
     };
 }

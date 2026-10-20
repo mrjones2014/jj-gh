@@ -1,2 +1,2 @@
-{ self, treefmtEval }:
-treefmtEval.config.build.check self
+{ self, treefmt }:
+treefmt.check self
