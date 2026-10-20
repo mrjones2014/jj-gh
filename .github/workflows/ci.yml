@@ -22,9 +22,34 @@ jobs:
             experimental-features = nix-command flakes
             access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
       - id: checks
-        run: echo "targets=$(nix eval --json .#checks.x86_64-linux --apply builtins.attrNames)" >> "$GITHUB_OUTPUT"
+        run: |
+          targets=$(nix eval --json .#checks.x86_64-linux --apply 'checks: builtins.filter (name: name != "cargo-artifacts") (builtins.attrNames checks)')
+          echo "targets=$targets" >> "$GITHUB_OUTPUT"
+  # Build the crane dependency artifacts once before the matrix, otherwise every
+  # check job builds them concurrently after a dependency change.
+  cargo_artifacts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: wimpysworld/nothing-but-nix@v10
+      - uses: actions/checkout@v7
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
+      - uses: cachix/cachix-action@v17
+        with:
+          name: jj-gh
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          extraPullNames: nix-community
+      # Skip the build when Cachix already has the artifacts, so this job doesn't
+      # download them for nothing.
+      - run: |
+          out=$(nix eval --raw .#checks.x86_64-linux.cargo-artifacts.outPath)
+          nix path-info --store https://jj-gh.cachix.org "$out" \
+            || nix build .#checks.x86_64-linux.cargo-artifacts --print-build-logs
   check:
-    needs: discover_checks
+    needs: [discover_checks, cargo_artifacts]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -45,11 +70,11 @@ jobs:
           extraPullNames: nix-community
       - run: nix build .#checks.x86_64-linux.${{ matrix.target }} --print-build-logs
   flake-check:
-    needs: [discover_checks, check]
+    needs: [discover_checks, cargo_artifacts, check]
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - if: ${{ needs.discover_checks.result != 'success' || needs.check.result != 'success' }}
+      - if: ${{ needs.discover_checks.result != 'success' || needs.cargo_artifacts.result != 'success' || needs.check.result != 'success' }}
         run: exit 1
   release-plz:
     needs: [flake-check]
