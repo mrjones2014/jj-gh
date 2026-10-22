@@ -4,7 +4,6 @@
 //! the editor (inheriting stdio), then reads back. Tests use a fake.
 
 use crate::{
-    auth::EnvReader,
     frontmatter::Frontmatter,
     gh::{Gh, Reviewer, UpdatePr, remote},
     util::ShellCommand,
@@ -21,45 +20,22 @@ pub trait Editor {
     async fn edit(&self, argv: &[String], initial: &str) -> Result<String>;
 }
 
-/// Editor argv from the shell environment: `$VISUAL` then `$EDITOR`, each
-/// shell-split. Returns the first non-empty, parseable value.
-///
-/// Last resort in the precedence chain (flag > config > `$VISUAL` > `$EDITOR`),
-/// consulted by `resolve_editor` only when neither the `--editor` flag nor the
-/// config `editor` is set. A value that fails to shell-split is logged and
-/// skipped so a malformed env var does not abort the whole flow.
-pub fn editor_from_env<E: EnvReader>(env: &E) -> Option<ShellCommand> {
-    for (name, value) in [("VISUAL", env.get("VISUAL")), ("EDITOR", env.get("EDITOR"))] {
-        let Some(raw) = value.filter(|s| !s.trim().is_empty()) else {
-            continue;
-        };
-        match shell_words::split(&raw) {
-            Ok(parts) if !parts.is_empty() => return Some(ShellCommand(parts)),
-            Ok(_) => {}
-            Err(e) => log::warn!("ignoring ${name}: could not shell-split: {e}"),
-        }
-    }
-    None
-}
-
-/// Resolve the editor argv. `editor` carries the `--editor` flag merged over the
-/// config `editor` (flag wins); when both are absent it falls back to
-/// `$VISUAL`/`$EDITOR`. Precedence: flag > config > `$VISUAL` > `$EDITOR`.
+/// Resolve the editor argv. `editor` carries the `--editor` flag merged over
+/// the figment config stack, which layers the jj-gh `editor` key over jj's own
+/// `ui.editor` (see [`crate::config`]). jj resolves `$JJ_EDITOR`, `$VISUAL`,
+/// and `$EDITOR` into `ui.editor` itself, so there is no separate env fallback
+/// here. Precedence: flag > jj-gh `editor` > `$JJ_EDITOR` > jj `ui.editor` >
+/// `$VISUAL` > `$EDITOR`.
 ///
 /// # Errors
 ///
 /// Returns an error when every source is empty.
-pub fn resolve_editor<E: EnvReader>(
-    editor: Option<&ShellCommand>,
-    env: &E,
-) -> Result<ShellCommand> {
-    editor
-        .filter(|c| !c.is_empty())
-        .cloned()
-        .or_else(|| editor_from_env(env))
-        .ok_or_else(|| {
-            anyhow!("no editor configured; set --editor, `editor` in config, $VISUAL, or $EDITOR")
-        })
+pub fn resolve_editor(editor: Option<&ShellCommand>) -> Result<ShellCommand> {
+    editor.filter(|c| !c.is_empty()).cloned().ok_or_else(|| {
+        anyhow!(
+            "no editor configured; set --editor, `editor` in jj-gh config, jj's `ui.editor`, $VISUAL, or $EDITOR"
+        )
+    })
 }
 
 /// Render `fm` + `body` into the editor buffer, run the editor, and parse the
@@ -227,104 +203,39 @@ impl Editor for TempfileEditor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
-
-    #[derive(Default)]
-    struct FakeEnv(HashMap<String, String>);
-
-    impl FakeEnv {
-        fn with(pairs: &[(&str, &str)]) -> Self {
-            Self(
-                pairs
-                    .iter()
-                    .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
-                    .collect(),
-            )
-        }
-    }
-
-    impl EnvReader for FakeEnv {
-        fn get(&self, key: &str) -> Option<String> {
-            self.0.get(key).cloned()
-        }
-    }
 
     fn cmd(parts: &[&str]) -> ShellCommand {
         ShellCommand(parts.iter().map(|s| (*s).to_string()).collect())
     }
 
-    /// Mirror how `pr create` / `pr edit` resolve the editor: CLI flag, then
-    /// config, then `$VISUAL`/`$EDITOR`. `flag.or(cfg)` models the figment merge
-    /// where a present `--editor` wins over the config value.
-    fn resolve(
-        flag: Option<ShellCommand>,
-        cfg: Option<ShellCommand>,
-        env: &FakeEnv,
-    ) -> Option<ShellCommand> {
+    /// Mirror how `pr create` / `pr edit` resolve the editor. `flag.or(cfg)`
+    /// models the figment merge where a present `--editor` wins over the
+    /// config value (which itself layers jj-gh `editor` over jj `ui.editor`;
+    /// see `crate::config` tests for that merge).
+    fn resolve(flag: Option<ShellCommand>, cfg: Option<ShellCommand>) -> Option<ShellCommand> {
         let merged = flag.or(cfg);
-        resolve_editor(merged.as_ref(), env).ok()
+        resolve_editor(merged.as_ref()).ok()
     }
 
     #[test]
-    fn visual_outranks_editor() {
-        let env = FakeEnv::with(&[("VISUAL", "nvim +7"), ("EDITOR", "vi")]);
-        assert_eq!(editor_from_env(&env), Some(cmd(&["nvim", "+7"])));
-    }
-
-    #[test]
-    fn editor_env_used_when_visual_absent() {
-        let env = FakeEnv::with(&[("EDITOR", "vi")]);
-        assert_eq!(editor_from_env(&env), Some(cmd(&["vi"])));
-    }
-
-    #[test]
-    fn empty_visual_falls_through_to_editor() {
-        let env = FakeEnv::with(&[("VISUAL", ""), ("EDITOR", "vi")]);
-        assert_eq!(editor_from_env(&env), Some(cmd(&["vi"])));
-    }
-
-    #[test]
-    fn malformed_env_is_skipped() {
-        let env = FakeEnv::with(&[("VISUAL", "nvim '"), ("EDITOR", "vi")]);
-        assert_eq!(editor_from_env(&env), Some(cmd(&["vi"])));
-    }
-
-    #[test]
-    fn no_env_returns_none() {
-        assert_eq!(editor_from_env(&FakeEnv::default()), None);
-    }
-
-    #[tokio::test]
-    async fn flag_outranks_env_and_config() {
-        let env = FakeEnv::with(&[("VISUAL", "vim"), ("EDITOR", "vi")]);
-        let got = resolve(Some(cmd(&["code", "--wait"])), Some(cmd(&["nano"])), &env);
+    fn flag_outranks_config() {
+        let got = resolve(Some(cmd(&["code", "--wait"])), Some(cmd(&["nano"])));
         assert_eq!(got, Some(cmd(&["code", "--wait"])));
     }
 
-    #[tokio::test]
-    async fn config_outranks_env() {
-        let env = FakeEnv::with(&[("VISUAL", "vim")]);
-        let got = resolve(None, Some(cmd(&["nano"])), &env);
+    #[test]
+    fn config_used_when_no_flag() {
+        let got = resolve(None, Some(cmd(&["nano"])));
         assert_eq!(got, Some(cmd(&["nano"])));
     }
 
-    #[tokio::test]
-    async fn config_used_when_no_flag_or_env() {
-        let env = FakeEnv::default();
-        let got = resolve(None, Some(cmd(&["nano"])), &env);
-        assert_eq!(got, Some(cmd(&["nano"])));
+    #[test]
+    fn empty_command_treated_as_unset() {
+        assert_eq!(resolve(None, Some(cmd(&[]))), None);
     }
 
-    #[tokio::test]
-    async fn env_used_when_no_flag_or_config() {
-        let env = FakeEnv::with(&[("EDITOR", "vi")]);
-        let got = resolve(None, None, &env);
-        assert_eq!(got, Some(cmd(&["vi"])));
-    }
-
-    #[tokio::test]
-    async fn none_when_all_empty() {
-        let env = FakeEnv::default();
-        assert_eq!(resolve(None, None, &env), None);
+    #[test]
+    fn none_when_all_empty() {
+        assert_eq!(resolve(None, None), None);
     }
 }

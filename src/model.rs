@@ -5,7 +5,7 @@
 //! have one canonical home.
 
 use crate::{
-    auth::{self, EnvReader, OsEnv},
+    auth,
     cli::GlobalOpts,
     config::Config,
     editor::{Editor, TempfileEditor},
@@ -25,13 +25,11 @@ use tokio::sync::OnceCell;
 
 pub trait Model {
     type Editor: Editor;
-    type Env: EnvReader;
     type Gh: Gh;
     type Git: GitOps;
     type Jj: Jj;
 
     fn editor(&self) -> &Self::Editor;
-    fn env(&self) -> &Self::Env;
     async fn gh(&self) -> Result<&Self::Gh>;
     fn git(&self) -> &Self::Git;
     fn jj(&self) -> &Self::Jj;
@@ -159,7 +157,6 @@ pub struct ModelImpl<'a> {
     config: &'a Config,
     globals: &'a GlobalOpts,
     editor: TempfileEditor,
-    env: OsEnv,
     gh: OnceCell<OctocrabGh>,
     git: RealGit,
     jj: JjCli,
@@ -181,7 +178,6 @@ impl<'a> ModelImpl<'a> {
             config,
             globals,
             editor: TempfileEditor,
-            env: OsEnv,
             gh: OnceCell::new(),
             git: RealGit::new(Rc::clone(&repo)),
             jj: JjCli::from_repository(repo),
@@ -191,17 +187,12 @@ impl<'a> ModelImpl<'a> {
 
 impl Model for ModelImpl<'_> {
     type Editor = TempfileEditor;
-    type Env = OsEnv;
     type Gh = OctocrabGh;
     type Git = RealGit;
     type Jj = JjCli;
 
     fn editor(&self) -> &Self::Editor {
         &self.editor
-    }
-
-    fn env(&self) -> &Self::Env {
-        &self.env
     }
 
     async fn gh(&self) -> Result<&Self::Gh> {
@@ -232,7 +223,6 @@ pub struct LocalPulls {
 #[cfg(test)]
 pub(crate) struct TestModel<'a, J, G, GO = NoGit> {
     editor: TempfileEditor,
-    env: OsEnv,
     gh: &'a G,
     git: &'a GO,
     jj: &'a J,
@@ -243,7 +233,6 @@ impl<'a, J, G, GO> TestModel<'a, J, G, GO> {
     pub(crate) fn new(jj: &'a J, gh: &'a G, git: &'a GO) -> Self {
         Self {
             editor: TempfileEditor,
-            env: OsEnv,
             gh,
             git,
             jj,
@@ -261,17 +250,12 @@ impl<'a, J, G> TestModel<'a, J, G> {
 #[cfg(test)]
 impl<J: Jj, G: Gh, GO: GitOps> Model for TestModel<'_, J, G, GO> {
     type Editor = TempfileEditor;
-    type Env = OsEnv;
     type Gh = G;
     type Git = GO;
     type Jj = J;
 
     fn editor(&self) -> &Self::Editor {
         &self.editor
-    }
-
-    fn env(&self) -> &Self::Env {
-        &self.env
     }
 
     fn gh(&self) -> impl Future<Output = Result<&Self::Gh>> {

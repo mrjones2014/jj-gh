@@ -288,8 +288,10 @@ pr_log_template = 'format_short_commit_header(self) ++ "#" ++ surround(" ", "", 
 # this per-invocation.
 auto_push = true
 
-# Editor command. Outranks $VISUAL and $EDITOR; the
-# --editor flag still wins over this.
+# Editor command. Outranks jj's ui.editor and the
+# $JJ_EDITOR/$VISUAL/$EDITOR vars jj resolves into it;
+# the --editor flag still wins over this. When unset,
+# jj's ui.editor (env included) is used.
 editor = [
   "nvim",
   "+10",  # +10 jumps your cursor past the frontmatter

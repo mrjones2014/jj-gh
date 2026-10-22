@@ -23,7 +23,8 @@ subcommand_args! {
         pub force: bool,
 
         /// Editor command, e.g. `--editor "nvim +7"`. Precedence: this flag,
-        /// then `editor` in config, then `$VISUAL`, then `$EDITOR`.
+        /// then `editor` in config, then jj's `ui.editor` (which jj itself
+        /// resolves from `$JJ_EDITOR`, `$VISUAL`, and `$EDITOR`).
         #[arg(short = 'e', long, value_name = "CMD", value_parser = crate::util::parse_shell_command)]
         #[config]
         pub editor: Option<crate::util::ShellCommand>,
@@ -74,7 +75,7 @@ pub async fn run(model: &impl Model, args: &EditArgs) -> Result<()> {
                 askpass_timeout_secs: _,
             },
     } = args;
-    let editor_argv = editor::resolve_editor(editor_cfg.as_ref(), model.env())?;
+    let editor_argv = editor::resolve_editor(editor_cfg.as_ref())?;
     let spinner = Spinner::start("Resolving PR");
 
     let upstream_remote = crate::gh::remote::resolved_upstream_remote(upstream_remote);
