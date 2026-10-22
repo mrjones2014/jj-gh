@@ -2,15 +2,16 @@
 //!
 //! Values come from (low to high priority):
 //! 1. Built-in defaults via [`Config::default`].
-//! 2. jj user config (`jj config list --user jj-gh`).
-//! 3. jj repo config (`jj config list --repo jj-gh`).
-//! 4. jj workspace config (`jj config list --workspace jj-gh`).
-//! 5. File pointed to by `$JJ_GH_EXTRA_CONFIG`.
-//! 6. Env overlay (`JJ_GH_TEMPLATE`, `JJ_GH_TEMPLATE_FILE`).
+//! 2. jj's own `ui.editor` (`jj config list ui.editor`), mapped to `editor`.
+//!    jj resolves `$JJ_EDITOR`/`$VISUAL`/`$EDITOR` into this value itself.
+//! 3. jj user config (`jj config list --user jj-gh`).
+//! 4. jj repo config (`jj config list --repo jj-gh`).
+//! 5. jj workspace config (`jj config list --workspace jj-gh`).
+//! 6. File pointed to by `$JJ_GH_EXTRA_CONFIG`.
+//! 7. Env overlay (`JJ_GH_TEMPLATE`, `JJ_GH_TEMPLATE_FILE`).
 //!
 //! Token sources (`--gh-askpass`, `$GH_ASKPASS`, `$JJ_GH_TOKEN`, `$GH_TOKEN`,
-//! `gh_token`) and the editor env (`$VISUAL`/`$EDITOR`) are resolved outside
-//! this figment stack, in [`crate::auth`] and [`crate::editor`] respectively.
+//! `gh_token`) are resolved outside this figment stack, in [`crate::auth`].
 //!
 //! We ask jj for the merged `jj-gh` subtree per scope via
 //! `jj config list --<level> jj-gh` rather than reading config files
@@ -34,6 +35,8 @@ use jj_gh_config_derive::config_schema;
 use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+
+const UI_EDITOR_KEY: &str = "ui.editor";
 
 config_schema! {
     /// Askpass helper command that prints a GitHub token on stdout. Lowest of
@@ -93,7 +96,9 @@ config_schema! {
     /// Link stacked PRs into a GitHub stack automatically.
     auto_stack: bool = true,
 
-    /// Editor command for the PR editor flow.
+    /// Editor command for the PR editor flow. When unset, falls back to jj's
+    /// `ui.editor` (which jj itself resolves from `$JJ_EDITOR`, `$VISUAL`, and
+    /// `$EDITOR`).
     editor: Option<crate::util::ShellCommand> = None,
 
     /// Show a preview of the PR diffs while creating PR body.
@@ -170,7 +175,9 @@ pub fn load_figment() -> Figment {
     // subtree (user < repo < workspace, plus conf.d and `--config`), so the
     // main config path needs just one jj subprocess. The scoped queries below
     // exist only for the per-layer template split.
-    let mut fig = defaults_figment().merge(jj_config_provider(None));
+    let mut fig = defaults_figment()
+        .merge(jj_ui_editor_provider())
+        .merge(jj_config_provider(None));
     if let Some(p) = std::env::var_os("JJ_GH_EXTRA_CONFIG") {
         fig = fig.merge(JjConfProvider::from_file(PathBuf::from(p)));
     }
@@ -274,6 +281,95 @@ fn scope_label(scope: Option<&str>) -> String {
 
 fn stdout_to_string(out: Option<Vec<u8>>) -> Option<String> {
     out.and_then(|bytes| String::from_utf8(bytes).ok())
+}
+
+/// Query jj for its own editor setting. jj resolves `$JJ_EDITOR` (above the
+/// config value) and `$VISUAL`/`$EDITOR` (below it) into `ui.editor` itself,
+/// so the captured value already carries jj's full editor precedence.
+fn jj_ui_editor_provider() -> UiEditorProvider {
+    let out = crate::proc::capture_sync(&["jj", "config", "list", UI_EDITOR_KEY]);
+    UiEditorProvider {
+        contents: stdout_to_string(out),
+    }
+}
+
+/// Figment provider mapping jj's `ui.editor` onto the jj-gh `editor` key.
+/// Merged below the jj-gh config layers in [`load_figment`], so an explicit
+/// jj-gh `editor` (and the `--editor` flag above it) still wins. Contributes
+/// nothing when the jj command fails, the key is unset, or the value is
+/// malformed.
+struct UiEditorProvider {
+    /// Captured `jj config list ui.editor` stdout (dotted-key TOML). `None`
+    /// when the command failed or the key is unset.
+    contents: Option<String>,
+}
+
+impl Provider for UiEditorProvider {
+    fn metadata(&self) -> Metadata {
+        Metadata::named("jj config (ui.editor)").source(format!("<jj config list {UI_EDITOR_KEY}>"))
+    }
+
+    fn data(&self) -> Result<Map<Profile, Dict>, figment::Error> {
+        let Some(argv) = self.contents.as_deref().and_then(ui_editor_argv) else {
+            return Ok(Map::new());
+        };
+        let mut table = toml::Table::new();
+        table.insert(
+            "editor".into(),
+            toml::Value::Array(argv.into_iter().map(toml::Value::String).collect()),
+        );
+        Serialized::defaults(table).data()
+    }
+}
+
+/// Parse `jj config list ui.editor` output into an editor argv. Handles the
+/// three shapes jj accepts for `ui.editor`: a string (shell-split), an array
+/// of strings, and the structured `{ command = ..., env = ... }` form (the
+/// `env` map is ignored with a warning). Malformed values are logged and
+/// skipped so a broken `ui.editor` never aborts jj-gh.
+fn ui_editor_argv(contents: &str) -> Option<Vec<String>> {
+    let parsed = toml::from_str::<toml::Value>(contents)
+        .inspect_err(|e| log::warn!("ignoring jj {UI_EDITOR_KEY}: unparseable TOML: {e}"))
+        .ok()?;
+    let value = parsed.get("ui").and_then(|ui| ui.get("editor"))?;
+    ui_editor_value_argv(value)
+}
+
+fn ui_editor_value_argv(value: &toml::Value) -> Option<Vec<String>> {
+    match value {
+        toml::Value::String(raw) => match shell_words::split(raw) {
+            Ok(parts) if !parts.is_empty() => Some(parts),
+            Ok(_) => None,
+            Err(e) => {
+                log::warn!("ignoring jj {UI_EDITOR_KEY}: could not shell-split: {e}");
+                None
+            }
+        },
+        toml::Value::Array(items) => {
+            let parts = items
+                .iter()
+                .map(|item| item.as_str().map(ToString::to_string))
+                .collect::<Option<Vec<String>>>();
+            match parts {
+                Some(parts) if !parts.is_empty() => Some(parts),
+                Some(_) => None,
+                None => {
+                    log::warn!("ignoring jj {UI_EDITOR_KEY}: array must contain only strings");
+                    None
+                }
+            }
+        }
+        toml::Value::Table(table) => {
+            if table.contains_key("env") {
+                log::warn!("jj {UI_EDITOR_KEY} `env` map is not supported by jj-gh; ignoring it");
+            }
+            table.get("command").and_then(ui_editor_value_argv)
+        }
+        _ => {
+            log::warn!("ignoring jj {UI_EDITOR_KEY}: expected a string, array, or command table");
+            None
+        }
+    }
 }
 
 /// Source for a [`JjToolsProvider`].
@@ -550,6 +646,86 @@ mod tests {
             config.pr_fetch_bookmark_template.as_deref(),
             Some(r#""pr-" ++ pr_number"#)
         );
+    }
+
+    fn ui_editor(contents: &str) -> UiEditorProvider {
+        UiEditorProvider {
+            contents: Some(contents.to_string()),
+        }
+    }
+
+    #[test]
+    fn ui_editor_string_is_shell_split() {
+        assert_eq!(
+            ui_editor_argv(r#"ui.editor = "nvim +7""#),
+            Some(vec!["nvim".to_string(), "+7".to_string()])
+        );
+    }
+
+    #[test]
+    fn ui_editor_array_passes_through() {
+        assert_eq!(
+            ui_editor_argv(r#"ui.editor = ["code", "--wait"]"#),
+            Some(vec!["code".to_string(), "--wait".to_string()])
+        );
+    }
+
+    #[test]
+    fn ui_editor_structured_uses_command() {
+        assert_eq!(
+            ui_editor_argv(r#"ui.editor = { command = ["emacsclient", "-t"], env = { K = "v" } }"#),
+            Some(vec!["emacsclient".to_string(), "-t".to_string()])
+        );
+    }
+
+    #[test]
+    fn ui_editor_malformed_values_are_skipped() {
+        assert_eq!(ui_editor_argv(""), None);
+        assert_eq!(ui_editor_argv("not toml at all ==="), None);
+        assert_eq!(ui_editor_argv(r#"ui.editor = """#), None);
+        assert_eq!(ui_editor_argv(r#"ui.editor = "nvim '""#), None);
+        assert_eq!(ui_editor_argv("ui.editor = []"), None);
+        assert_eq!(ui_editor_argv("ui.editor = [1, 2]"), None);
+        assert_eq!(ui_editor_argv("ui.editor = 42"), None);
+        assert_eq!(ui_editor_argv(r#"other.key = "x""#), None);
+    }
+
+    #[test]
+    fn ui_editor_fills_editor_when_jj_gh_editor_unset() {
+        let fig = defaults_figment().merge(ui_editor(r#"ui.editor = "nvim""#));
+        let config = extract(&fig).unwrap();
+        assert_eq!(
+            config.editor,
+            Some(crate::util::ShellCommand(vec!["nvim".to_string()]))
+        );
+    }
+
+    #[test]
+    fn jj_gh_editor_outranks_ui_editor() {
+        let fig = defaults_figment()
+            .merge(ui_editor(r#"ui.editor = "nvim""#))
+            .merge(JjConfProvider::from_memory(
+                "cfg",
+                r#"
+                [jj-gh]
+                editor = ["code", "--wait"]
+                "#,
+            ));
+        let config = extract(&fig).unwrap();
+        assert_eq!(
+            config.editor,
+            Some(crate::util::ShellCommand(vec![
+                "code".to_string(),
+                "--wait".to_string()
+            ]))
+        );
+    }
+
+    #[test]
+    fn absent_ui_editor_contributes_nothing() {
+        let fig = defaults_figment().merge(UiEditorProvider { contents: None });
+        let config = extract(&fig).unwrap();
+        assert_eq!(config.editor, None);
     }
 
     #[test]

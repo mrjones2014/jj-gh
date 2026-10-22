@@ -129,7 +129,8 @@ subcommand_args! {
         pub default_title_source: crate::config::DefaultTitleSource,
 
         /// Editor command, e.g. `--editor "nvim +7"`. Precedence: this flag,
-        /// then `editor` in config, then `$VISUAL`, then `$EDITOR`.
+        /// then `editor` in config, then jj's `ui.editor` (which jj itself
+        /// resolves from `$JJ_EDITOR`, `$VISUAL`, and `$EDITOR`).
         #[arg(short = 'e', long, value_name = "CMD", value_parser = crate::util::parse_shell_command)]
         #[config]
         pub editor: Option<crate::util::ShellCommand>,
@@ -186,7 +187,6 @@ subcommand_args! {
 pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
     let jj = model.jj();
     let gh = model.gh().await?;
-    let env = model.env();
     let editor = model.editor();
     let args @ CreateArgs {
         globals:
@@ -241,7 +241,6 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
         let created = create_single_pr(
             jj,
             gh,
-            env,
             editor,
             args,
             rev,
@@ -489,7 +488,6 @@ fn private_commits_error(listing: &str) -> String {
 async fn create_single_pr(
     jj: &impl Jj,
     gh: &impl Gh,
-    env: &impl crate::auth::EnvReader,
     editor: &impl crate::editor::Editor,
     args: &CreateArgs,
     rev: &str,
@@ -636,7 +634,7 @@ async fn create_single_pr(
     let (final_fm, body) = if *no_edit {
         (initial_fm, raw_template.unwrap_or_default())
     } else {
-        let editor_argv = editor::resolve_editor(editor_argv, env)?;
+        let editor_argv = editor::resolve_editor(editor_argv)?;
         let diff_preview = if *show_diffs {
             jj.diff(&title_revset)
                 .await

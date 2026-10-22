@@ -136,7 +136,7 @@ Opens your editor to a markdown file where you can write the PR description, and
   - `head`:
     Use the newest commit in the PR (the head/top of the stack)
 
-- `-e`, `--editor <CMD>` — Editor command, e.g. `--editor "nvim +7"`. Precedence: this flag, then `editor` in config, then `$VISUAL`, then `$EDITOR`
+- `-e`, `--editor <CMD>` — Editor command, e.g. `--editor "nvim +7"`. Precedence: this flag, then `editor` in config, then jj's `ui.editor` (which jj itself resolves from `$JJ_EDITOR`, `$VISUAL`, and `$EDITOR`)
 - `--no-edit` — Create the PR without opening an editor. Useful when combined with `--draft`
 - `--diffs <SHOW_DIFFS>` — Show a preview of the PR diffs while creating the PR body. Overrides `pr_create_show_diffs` configuration. Use `--no-diffs` to disable
 - `--no-diffs` — Hide the PR diff preview while creating the PR body. Overrides config
@@ -161,7 +161,7 @@ Resolves the PR from a revision (via its local bookmark) or a PR number, fetches
 ###### **Options:**
 
 - `-f`, `--force` — Edit even if the PR body is empty. By default, `jj-gh` refuses to edit an empty body to avoid clobbering one that exists but failed to load
-- `-e`, `--editor <CMD>` — Editor command, e.g. `--editor "nvim +7"`. Precedence: this flag, then `editor` in config, then `$VISUAL`, then `$EDITOR`
+- `-e`, `--editor <CMD>` — Editor command, e.g. `--editor "nvim +7"`. Precedence: this flag, then `editor` in config, then jj's `ui.editor` (which jj itself resolves from `$JJ_EDITOR`, `$VISUAL`, and `$EDITOR`)
 - `--diffs <SHOW_DIFFS>` — Show a preview of the PR diffs while editing the PR. Overrides `pr_edit_show_diffs` configuration. Use `--no-diffs` to disable
 - `--no-diffs` — Hide the PR diff preview while editing the PR. Overrides config
 
