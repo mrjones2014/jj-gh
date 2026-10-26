@@ -2,10 +2,17 @@ name: cd
 on:
   release:
     types: [published]
+  # Manual run to (re)cache and pin an existing release without republishing.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to build, push to Cachix, and pin
+        required: true
 permissions:
   contents: read
 jobs:
   upload-binaries:
+    if: ${{ github.event_name == 'release' }}
     strategy:
       fail-fast: false
       matrix:
@@ -46,7 +53,7 @@ jobs:
   # forward. If the release commit is not a descendant of `stable`, the job
   # fails and the branch does not change.
   update-stable-branch:
-    if: ${{ !github.event.release.prerelease }}
+    if: ${{ github.event_name == 'release' && !github.event.release.prerelease }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -62,8 +69,7 @@ jobs:
   # the result. Repinning the same name with --keep-revisions 2 keeps the
   # current and previous release safe from garbage collection.
   cache-nix-packages:
-    needs: [update-stable-branch]
-    if: ${{ !github.event.release.prerelease }}
+    if: ${{ github.event_name == 'workflow_dispatch' || !github.event.release.prerelease }}
     strategy:
       fail-fast: false
       matrix:
@@ -80,7 +86,7 @@ jobs:
         uses: wimpysworld/nothing-but-nix@v10
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
       - uses: cachix/install-nix-action@v31
         with:
           extra_nix_config: |
