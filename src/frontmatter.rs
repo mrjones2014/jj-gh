@@ -1,7 +1,7 @@
 //! YAML frontmatter for the PR editor buffer.
 //!
 //! Layout:
-//! ````text
+//! ```````text
 //! ---
 //! title: ...
 //! base: main
@@ -13,11 +13,11 @@
 //!
 //! # 8< jj-gh: below this line removed on submit >8
 //!
-//! ```diff
+//! `````diff
 //! - line removed
 //! + line added
-//! ```
-//! ````
+//! `````
+//! ```````
 
 use crate::{config::AutoMergeMethod, gh::Reviewer};
 use anyhow::{Context, Result, anyhow};
@@ -29,6 +29,9 @@ use std::ops::Not;
 /// stripped on parse. Whole-line exact match (after trimming trailing
 /// whitespace).
 pub const PREVIEW_MARKER: &str = "8< jj-gh: below this line removed on submit >8";
+
+const DIFF_FENCE_START: &str = "`````diff";
+const DIFF_FENCE_END: &str = "`````";
 
 const TITLE_WARN_LEN: usize = 72;
 
@@ -71,12 +74,12 @@ impl Frontmatter {
         // apply some extra `\n` for comfort in the editor
         if orig_body_empty {
             Ok(format!(
-                "{body}\n\n\n\n# {PREVIEW_MARKER}\n\n```diff\n{diff}\n```\n"
+                "{body}\n\n\n\n# {PREVIEW_MARKER}\n\n{DIFF_FENCE_START}\n{diff}\n{DIFF_FENCE_END}\n"
             ))
         } else {
             let trimmed = body.trim_end();
             Ok(format!(
-                "{trimmed}\n\n\n\n\n# {PREVIEW_MARKER}\n\n```diff\n{diff}\n```\n"
+                "{trimmed}\n\n\n\n\n# {PREVIEW_MARKER}\n\n{DIFF_FENCE_START}\n{diff}\n{DIFF_FENCE_END}\n"
             ))
         }
     }
@@ -245,7 +248,7 @@ mod tests {
     #[test]
     fn parse_strips_preview_marker_and_diff() {
         let buffer = format!(
-            "---\ntitle: hello\nbase: main\n---\n\nuser body\n\n{PREVIEW_MARKER}\n\n```diff\n- a\n+ b\n```\n"
+            "---\ntitle: hello\nbase: main\n---\n\nuser body\n\n{PREVIEW_MARKER}\n\n{DIFF_FENCE_START}\n- a\n+ b\n{DIFF_FENCE_END}\n"
         );
         let (fm, body) = Frontmatter::parse(&buffer).unwrap();
         assert_eq!(fm.title, "hello");
@@ -255,7 +258,7 @@ mod tests {
     #[test]
     fn parse_strips_with_blank_template_skeleton() {
         let buffer = format!(
-            "---\ntitle: hello\nbase: main\n---\n\n\n\n{PREVIEW_MARKER}\n\n```diff\ndiff content\n```\n"
+            "---\ntitle: hello\nbase: main\n---\n\n\n\n{PREVIEW_MARKER}\n\n{DIFF_FENCE_START}\ndiff content\n{DIFF_FENCE_END}\n"
         );
         let (_, body) = Frontmatter::parse(&buffer).unwrap();
         assert_eq!(body, "");
