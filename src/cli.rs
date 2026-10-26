@@ -13,7 +13,6 @@ use clap::{
 };
 use jj_gh_config_derive::subcommand_args;
 use log::LevelFilter;
-use std::io::IsTerminal;
 
 const STYLES: Styles = Styles::styled()
     .header(AnsiColor::Yellow.on_default().bold())
@@ -96,14 +95,8 @@ impl GlobalOptsInput {
             return LevelFilter::Error;
         }
 
-        let base = if std::io::stdout().is_terminal() {
-            LevelFilter::Info
-        } else {
-            LevelFilter::Error
-        };
-
         match self.verbose {
-            0 => base,
+            0 => LevelFilter::Info,
             1 => LevelFilter::Debug,
             _ => LevelFilter::Trace,
         }

@@ -488,6 +488,6 @@ URL=$(jj pr create zxi)
 echo "Opened $URL"
 ```
 
-- TTY on `STDOUT`: default log level is `INFO`.
-- Piped `STDOUT`: default log level drops to `ERROR`, so only failures appear on `STDERR`.
+- Defaults to log level `INFO`.
+- Logs go to `STDERR` so piped `STDOUT` stays clean (e.g. just final PR URLs).
 - Override with `-v` / `-vv`, `-q`, `--log-level <level>`, or `$JJ_GH_LOG`.
