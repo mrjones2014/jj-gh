@@ -97,14 +97,13 @@ jobs:
           name: jj-gh
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
           extraPullNames: nix-community
-      # Skip the build when Cachix already has the path (x86_64-linux is
-      # normally built by CI on master for the same commit). Push explicitly
-      # before pinning: the pin needs the path to already be in the cache,
+      # Always nix build: when Cachix already has the path (x86_64-linux is
+      # normally built by CI on master) this is just a substitution download,
+      # and `cachix pin` needs the path in the local store either way. Push
+      # explicitly before pinning: the pin also needs the path in the cache,
       # and the cachix-action daemon pushes asynchronously.
       - run: |
+          nix build .#packages.${{ matrix.system }}.default --print-build-logs
           out=$(nix eval --raw .#packages.${{ matrix.system }}.default.outPath)
-          if ! nix path-info --store https://jj-gh.cachix.org "$out"; then
-            nix build .#packages.${{ matrix.system }}.default --print-build-logs
-            cachix push jj-gh "$out"
-          fi
+          cachix push jj-gh "$out"
           cachix pin jj-gh jj-gh-${{ matrix.system }} "$out" --keep-revisions 2
