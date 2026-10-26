@@ -675,7 +675,7 @@ async fn apply(model: &impl Model, ctx: Gathered, plan: Plan) -> Result<()> {
         existing_stacks.retain(|stack| !dissolved.contains(&stack.number));
 
         for &number in &unstacked {
-            eprintln!("OK  {} unstacked", links.number(UI, number));
+            log::info!("{} unstacked", links.number(UI, number));
         }
     }
 
@@ -704,8 +704,8 @@ async fn apply(model: &impl Model, ctx: Gathered, plan: Plan) -> Result<()> {
         }
         spinner.stop();
         for base in &plan.bases {
-            eprintln!(
-                "OK  {} base -> {}",
+            log::info!(
+                "{} base -> {}",
                 links.number(UI, base.pr_number),
                 base.proposed_base
             );
@@ -881,8 +881,8 @@ pub(crate) fn print_stack_results(links: &PrLinks, results: &[ChainResult]) {
             log::debug!("retargeted #{number}'s base ref to make {chain} chain");
         }
         match result.outcome {
-            ChainOutcome::Created(number) => eprintln!("OK  stack #{number} created: {chain}"),
-            ChainOutcome::AlreadyExists => eprintln!("OK  stack already exists: {chain}"),
+            ChainOutcome::Created(_) => log::info!("Stack created: {chain}"),
+            ChainOutcome::AlreadyExists => log::info!("Already stacked: {chain}"),
         }
     }
 }
