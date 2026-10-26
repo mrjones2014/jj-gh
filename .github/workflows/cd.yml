@@ -13,6 +13,9 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-22.04
             include: jj-gh.1
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-22.04-arm
+            include: jj-gh.1
           - target: aarch64-apple-darwin
             os: macos-15
             include: jj-gh.1
@@ -55,3 +58,47 @@ jobs:
           ref: ${{ github.event.release.tag_name }}
           fetch-depth: 0
       - run: git push origin HEAD:refs/heads/stable
+  # Build the Nix package for every flake system, push it to Cachix, and pin
+  # the result. Repinning the same name with --keep-revisions 2 keeps the
+  # current and previous release safe from garbage collection.
+  cache-nix-packages:
+    needs: [update-stable-branch]
+    if: ${{ !github.event.release.prerelease }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - system: x86_64-linux
+            os: ubuntu-latest
+          - system: aarch64-linux
+            os: ubuntu-24.04-arm
+          - system: aarch64-darwin
+            os: macos-15
+    runs-on: ${{ matrix.os }}
+    steps:
+      - if: runner.os == 'Linux'
+        uses: wimpysworld/nothing-but-nix@v10
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
+      - uses: cachix/cachix-action@v17
+        with:
+          name: jj-gh
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          extraPullNames: nix-community
+      # Skip the build when Cachix already has the path (x86_64-linux is
+      # normally built by CI on master for the same commit). Push explicitly
+      # before pinning: the pin needs the path to already be in the cache,
+      # and the cachix-action daemon pushes asynchronously.
+      - run: |
+          out=$(nix eval --raw .#packages.${{ matrix.system }}.default.outPath)
+          if ! nix path-info --store https://jj-gh.cachix.org "$out"; then
+            nix build .#packages.${{ matrix.system }}.default --print-build-logs
+            cachix push jj-gh "$out"
+          fi
+          cachix pin jj-gh jj-gh-${{ matrix.system }} "$out" --keep-revisions 2
