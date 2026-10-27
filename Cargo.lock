@@ -2228,7 +2228,6 @@ dependencies = [
  "crossterm",
  "figment",
  "flexi_logger",
- "futures",
  "gix",
  "graphql_client",
  "http",

@@ -183,7 +183,6 @@ subcommand_args! {
 /// # Errors
 ///
 /// Returns an error from any step (rev resolution, GH API, push, editor, etc.).
-#[expect(clippy::too_many_lines)]
 pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
     let jj = model.jj();
     let gh = model.gh().await?;
@@ -278,92 +277,62 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
         return Ok(());
     }
 
-    // For multi-revision: detect chains among just the created PRs
-    if created_prs.len() >= 2 {
-        let numbers = created_prs.iter().map(|pr| pr.number).collect::<Vec<u64>>();
-        let spinner = crate::ui::Spinner::start("Fetching PR details for stack detection");
-        let pr_details = fetch_pr_details(gh, &target, &numbers).await;
-        spinner.stop();
+    // Detect chains among all local PRs, not just the created ones, so new
+    // PRs on top of an existing stack fold into it rather than forming a
+    // separate stack beside it.
+    let spinner = crate::ui::Spinner::start("Fetching PR details for stack detection");
+    let (pr_details, head_to_local) =
+        gather_stack_inputs(jj, gh, &remote, &target, &created_prs).await?;
+    spinner.stop();
 
-        // Build head_ref -> local_commit_id mapping from the revisions we created
-        let commit_infos = revs
-            .iter()
-            .map(|rev| jj.resolve_rev(rev))
-            .collect::<futures::future::JoinAll<_>>()
-            .await
-            .into_iter()
-            .collect::<Result<Vec<_>>>()?;
-        let head_to_local = commit_infos
-            .iter()
-            .filter_map(|info| {
-                info.bookmarks
-                    .first()
-                    .map(|bookmark| (bookmark.clone(), info.commit_id.clone()))
-            })
-            .collect::<HashMap<String, String>>();
-
-        let spinner = crate::ui::Spinner::start("Detecting stack chains");
-        let results = link_stacks(gh, jj, &target, &pr_details, &head_to_local).await?;
-        spinner.stop();
-        crate::commands::pr::stack::print_stack_results(
-            &PrLinks::from_details(&pr_details),
-            &results,
-        );
-    } else if created_prs.len() == 1 {
-        // For single-revision: detect chains among all pushed PRs + the new one
-        let spinner = crate::ui::Spinner::start("Fetching local PRs");
-        let bookmarks = jj.pushed_bookmarks(&remote).await?;
-        let branch_names = bookmarks
-            .iter()
-            .map(|b| b.name.clone())
-            .collect::<Vec<String>>();
-        let all_prs = gh
-            .local_pulls(
-                &target.owner,
-                &target.repo,
-                target.origin_owner(),
-                &branch_names,
-            )
-            .await?;
-        spinner.stop();
-
-        // Build head_to_local_commit mapping from bookmarks
-        let head_to_local = bookmarks
-            .iter()
-            .map(|b| (b.name.clone(), b.local_commit_id.clone()))
-            .collect::<HashMap<String, String>>();
-
-        // Fetch full details for stack detection
-        let spinner = crate::ui::Spinner::start("Fetching PR details for stack detection");
-        let mut pr_details = Vec::with_capacity(all_prs.len());
-        for pr in &all_prs {
-            pr_details.push(
-                gh.get_pr(&target.owner, &target.repo, pr.number)
-                    .await
-                    .context("Failed to fetch PR")?,
-            );
-        }
-
-        // Ensure the newly created PR is included
-        let new_pr_number = created_prs[0].number;
-        let already_included = pr_details.iter().any(|p| p.number == new_pr_number);
-        if !already_included
-            && let Ok(details) = gh.get_pr(&target.owner, &target.repo, new_pr_number).await
-        {
-            pr_details.push(details);
-        }
-        spinner.stop();
-
-        let spinner = crate::ui::Spinner::start("Detecting stack chains");
-        let results = link_stacks(gh, jj, &target, &pr_details, &head_to_local).await?;
-        spinner.stop();
-        crate::commands::pr::stack::print_stack_results(
-            &PrLinks::from_details(&pr_details),
-            &results,
-        );
-    }
+    let spinner = crate::ui::Spinner::start("Detecting stack chains");
+    let results = link_stacks(gh, jj, &target, &pr_details, &head_to_local).await?;
+    spinner.stop();
+    crate::commands::pr::stack::print_stack_results(&PrLinks::from_details(&pr_details), &results);
 
     Ok(())
+}
+
+/// Gather the inputs for post-create stack detection: full details for every
+/// local PR (all pushed bookmarks, plus any just-created PR the listing
+/// hasn't caught up to yet) and a head-branch -> local-commit-id map.
+///
+/// Individual detail fetches that fail are logged and skipped: the PRs are
+/// already created by this point, so stack linking stays best-effort.
+async fn gather_stack_inputs(
+    jj: &impl Jj,
+    gh: &impl Gh,
+    remote: &str,
+    target: &crate::gh::remote::Target,
+    created_prs: &[CreatedPr],
+) -> Result<(Vec<crate::gh::PrDetails>, HashMap<String, String>)> {
+    let bookmarks = jj.pushed_bookmarks(remote).await?;
+    let branch_names = bookmarks
+        .iter()
+        .map(|b| b.name.clone())
+        .collect::<Vec<String>>();
+    let all_prs = gh
+        .local_pulls(
+            &target.owner,
+            &target.repo,
+            target.origin_owner(),
+            &branch_names,
+        )
+        .await?;
+
+    let head_to_local = bookmarks
+        .iter()
+        .map(|b| (b.name.clone(), b.local_commit_id.clone()))
+        .collect::<HashMap<String, String>>();
+
+    let mut numbers = all_prs.iter().map(|pr| pr.number).collect::<Vec<u64>>();
+    for created in created_prs {
+        if !numbers.contains(&created.number) {
+            numbers.push(created.number);
+        }
+    }
+    let pr_details = fetch_pr_details(gh, target, &numbers).await;
+    Ok((pr_details, head_to_local))
 }
 
 /// Fetch full PR details for a list of PR numbers, logging warnings for failures.
@@ -853,6 +822,10 @@ async fn load_template_for(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::gh::{
+        BaseLookup, CiStatus, PrCreated, PrDetails, PrSummary, PrWithCiStatus, PullRequestStack,
+        UpdatePr, WorkflowRun,
+    };
     use crate::jj::{CommitInfo, PushedBookmark};
     use std::path::Path;
     use std::sync::Mutex;
@@ -867,6 +840,7 @@ mod tests {
         private_commits: Option<String>,
         eval_template_return: String,
         eval_template_calls: Mutex<Vec<EvalCall>>,
+        pushed: Vec<PushedBookmark>,
     }
 
     impl FakeJj {
@@ -875,7 +849,13 @@ mod tests {
                 private_commits: private_commits.map(str::to_string),
                 eval_template_return: eval_template_return.into(),
                 eval_template_calls: Mutex::new(Vec::new()),
+                pushed: Vec::new(),
             }
+        }
+
+        fn with_pushed_bookmarks(mut self, pushed: Vec<PushedBookmark>) -> Self {
+            self.pushed = pushed;
+            self
         }
     }
 
@@ -922,8 +902,11 @@ mod tests {
         async fn git_import(&self) -> Result<()> {
             unimplemented!("private-commit check does not call git_import")
         }
-        async fn pushed_bookmarks(&self, _remote: &str) -> Result<Vec<PushedBookmark>> {
-            unimplemented!("private-commit check does not call pushed_bookmarks")
+        fn pushed_bookmarks(
+            &self,
+            _remote: &str,
+        ) -> impl Future<Output = Result<Vec<PushedBookmark>>> {
+            std::future::ready(Ok(self.pushed.clone()))
         }
         fn eval_template(
             &self,
@@ -945,6 +928,261 @@ mod tests {
         async fn pr_diff(&self, _: &str, _: &str) -> Result<String> {
             unimplemented!("private-commit check does not call pr_diff")
         }
+    }
+
+    /// Gh fake for `gather_stack_inputs`: `local_pulls` lists the PRs in
+    /// `pull_numbers` and `get_pr` serves details from a map, erroring for
+    /// numbers absent from it.
+    struct FakeGh {
+        pull_numbers: Vec<u64>,
+        details: HashMap<u64, PrDetails>,
+    }
+
+    impl Gh for FakeGh {
+        async fn find_open_pr(&self, _: &str, _: &str, _: &str) -> Result<Option<PrSummary>> {
+            unimplemented!()
+        }
+        async fn lookup_base(&self, _: &str, _: &str, _: &str) -> Result<BaseLookup> {
+            unimplemented!()
+        }
+        async fn create_pr(&self, _: CreatePrRequest) -> Result<PrCreated> {
+            unimplemented!()
+        }
+        async fn add_reviewers(
+            &self,
+            _: &str,
+            _: &str,
+            _: u64,
+            _: Vec<crate::gh::Reviewer>,
+        ) -> Result<()> {
+            unimplemented!()
+        }
+        async fn remove_reviewers(
+            &self,
+            _: &str,
+            _: &str,
+            _: u64,
+            _: Vec<crate::gh::Reviewer>,
+        ) -> Result<()> {
+            unimplemented!()
+        }
+        async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<()> {
+            unimplemented!()
+        }
+        async fn remove_labels(&self, _: &str, _: &[String]) -> Result<()> {
+            unimplemented!()
+        }
+        async fn update_pr(&self, _: UpdatePr) -> Result<()> {
+            unimplemented!()
+        }
+        async fn set_draft(&self, _: &str, _: bool) -> Result<()> {
+            unimplemented!()
+        }
+        async fn disable_auto_merge(&self, _: &str) -> Result<()> {
+            unimplemented!()
+        }
+        fn get_pr(&self, _: &str, _: &str, number: u64) -> impl Future<Output = Result<PrDetails>> {
+            std::future::ready(
+                self.details
+                    .get(&number)
+                    .cloned()
+                    .ok_or_else(|| anyhow!("no details for PR #{number}")),
+            )
+        }
+        async fn get_pr_diff(&self, _: &str, _: &str, _: u64) -> Result<String> {
+            unimplemented!()
+        }
+        async fn enable_auto_merge(&self, _: &str, _: AutoMergeMethod) -> Result<()> {
+            unimplemented!()
+        }
+        fn local_pulls(
+            &self,
+            _: &str,
+            _: &str,
+            _: &str,
+            _: &[String],
+        ) -> impl Future<Output = Result<Vec<PrWithCiStatus>>> {
+            std::future::ready(Ok(self
+                .pull_numbers
+                .iter()
+                .copied()
+                .map(listed_pr)
+                .collect()))
+        }
+        async fn list_workflow_runs_for_sha(
+            &self,
+            _: &str,
+            _: &str,
+            _: &str,
+        ) -> Result<Vec<WorkflowRun>> {
+            unimplemented!()
+        }
+        async fn list_jobs_for_run(
+            &self,
+            _: &str,
+            _: &str,
+            _: u64,
+        ) -> Result<Vec<crate::gh::WorkflowJob>> {
+            unimplemented!()
+        }
+        async fn cancel_workflow_run(&self, _: &str, _: &str, _: u64) -> Result<()> {
+            unimplemented!()
+        }
+        async fn rerun_workflow_run(&self, _: &str, _: &str, _: u64) -> Result<()> {
+            unimplemented!()
+        }
+        async fn rerun_failed_jobs(&self, _: &str, _: &str, _: u64) -> Result<()> {
+            unimplemented!()
+        }
+        async fn create_stack(&self, _: &str, _: &str, _: &[u64]) -> Result<PullRequestStack> {
+            unimplemented!()
+        }
+        async fn unstack_prs(&self, _: &str, _: &str, _: u64, _: &[u64]) -> Result<()> {
+            unimplemented!()
+        }
+        async fn list_stacks(&self, _: &str, _: &str) -> Result<Vec<PullRequestStack>> {
+            unimplemented!()
+        }
+    }
+
+    fn bookmark(name: &str, local_commit_id: &str) -> PushedBookmark {
+        PushedBookmark {
+            name: name.into(),
+            local_commit_id: local_commit_id.into(),
+        }
+    }
+
+    fn listed_pr(number: u64) -> PrWithCiStatus {
+        PrWithCiStatus {
+            id: format!("node-{number}"),
+            number,
+            url: format!("https://github.com/o/r/pull/{number}"),
+            title: format!("PR {number}"),
+            head_ref_name: format!("branch-{number}"),
+            head_owner: Some("o".into()),
+            head_sha: format!("sha{number}"),
+            base_ref_name: "main".into(),
+            is_draft: false,
+            merged: false,
+            is_in_merge_queue: false,
+            ci_status: CiStatus::None,
+            auto_merge_enabled: false,
+        }
+    }
+
+    fn details(number: u64) -> PrDetails {
+        PrDetails {
+            number,
+            head_ref: format!("branch-{number}"),
+            head_sha: format!("sha{number}"),
+            base_ref: "main".into(),
+            title: format!("PR {number}"),
+            html_url: format!("https://github.com/o/r/pull/{number}"),
+            is_draft: false,
+            auto_merge: false,
+            auto_merge_method: None,
+            base_sha: "base".into(),
+            head_user_login: None,
+            head_repo_name: None,
+            graphql_node_id: format!("node-{number}"),
+            in_merge_queue: false,
+            labels: vec![],
+            reviewers: vec![],
+            body: String::new(),
+            stack_number: None,
+        }
+    }
+
+    fn created(number: u64) -> CreatedPr {
+        CreatedPr {
+            number,
+            html_url: format!("https://github.com/o/r/pull/{number}"),
+        }
+    }
+
+    fn gather_target() -> remote::Target {
+        remote::target("git@github.com:o/r.git", None).unwrap()
+    }
+
+    fn gather_numbers(gathered: &[PrDetails]) -> Vec<u64> {
+        gathered.iter().map(|d| d.number).collect()
+    }
+
+    #[tokio::test]
+    async fn gather_covers_all_local_prs_not_just_created() {
+        // A 5-stack already on GitHub plus 2 freshly created PRs: detection
+        // input must contain all 7 so the new PRs chain onto the old stack
+        // instead of forming a separate one.
+        let jj = FakeJj::new(None, "").with_pushed_bookmarks(
+            (1..=7)
+                .map(|n| bookmark(&format!("branch-{n}"), &format!("local{n}")))
+                .collect(),
+        );
+        let gh = FakeGh {
+            pull_numbers: (1..=7).collect(),
+            details: (1..=7).map(|n| (n, details(n))).collect(),
+        };
+
+        let (gathered, head_to_local) = gather_stack_inputs(
+            &jj,
+            &gh,
+            "origin",
+            &gather_target(),
+            &[created(6), created(7)],
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(gather_numbers(&gathered), (1..=7).collect::<Vec<u64>>());
+        assert_eq!(head_to_local.len(), 7);
+        assert_eq!(head_to_local["branch-3"], "local3");
+    }
+
+    #[tokio::test]
+    async fn gather_adds_created_prs_missing_from_listing() {
+        // The listing can lag right after creation; the created PRs must
+        // still be fetched individually.
+        let jj = FakeJj::new(None, "").with_pushed_bookmarks(
+            (1..=7)
+                .map(|n| bookmark(&format!("branch-{n}"), &format!("local{n}")))
+                .collect(),
+        );
+        let gh = FakeGh {
+            pull_numbers: (1..=5).collect(),
+            details: (1..=7).map(|n| (n, details(n))).collect(),
+        };
+
+        let (gathered, _) = gather_stack_inputs(
+            &jj,
+            &gh,
+            "origin",
+            &gather_target(),
+            &[created(6), created(7)],
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(gather_numbers(&gathered), (1..=7).collect::<Vec<u64>>());
+    }
+
+    #[tokio::test]
+    async fn gather_skips_prs_whose_details_fetch_fails() {
+        let jj = FakeJj::new(None, "").with_pushed_bookmarks(
+            (1..=3)
+                .map(|n| bookmark(&format!("branch-{n}"), &format!("local{n}")))
+                .collect(),
+        );
+        let gh = FakeGh {
+            pull_numbers: (1..=3).collect(),
+            details: [1, 3].into_iter().map(|n| (n, details(n))).collect(),
+        };
+
+        let (gathered, _) =
+            gather_stack_inputs(&jj, &gh, "origin", &gather_target(), &[created(3)])
+                .await
+                .unwrap();
+
+        assert_eq!(gather_numbers(&gathered), vec![1, 3]);
     }
 
     #[tokio::test]
