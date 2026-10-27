@@ -298,6 +298,7 @@ editor = [
 ]
 
 # automatically link stacked PRs into a GitHub stack in `jj pr create`.
+# New PRs created on top of an existing stack are folded into it.
 # The --stack/--no-stack flags override this per-invocation.
 auto_stack = true
 
