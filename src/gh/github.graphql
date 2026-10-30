@@ -4459,9 +4459,11 @@ input FileExtensionRestrictionParametersInput @docsCategory(name: "repos") {
     restrictedFileExtensions: [String!]!
 }
 type FilePathRestrictionParameters @docsCategory(name: "repos") {
+    ignoredFilePaths: [String!]
     restrictedFilePaths: [String!]!
 }
 input FilePathRestrictionParametersInput @docsCategory(name: "repos") {
+    ignoredFilePaths: [String!]
     restrictedFilePaths: [String!]!
 }
 enum FileViewedState @docsCategory(name: "pulls") {
@@ -6138,9 +6140,11 @@ input MaxFilePathLengthParametersInput @docsCategory(name: "repos") {
     maxFilePathLength: Int!
 }
 type MaxFileSizeParameters @docsCategory(name: "repos") {
+    ignoredFilePaths: [String!]
     maxFileSize: Int!
 }
 input MaxFileSizeParametersInput @docsCategory(name: "repos") {
+    ignoredFilePaths: [String!]
     maxFileSize: Int!
 }
 type MemberFeatureRequestNotification implements Node @docsCategory(name: "orgs") {
@@ -12873,6 +12877,7 @@ type PullRequestParameters @docsCategory(name: "pulls") {
     dismissStaleReviewsOnPush: Boolean!
     dismissalRestriction: DismissalRestriction
     requireCodeOwnerReview: Boolean!
+    requireExtraApprovalForUnattributedChanges: Boolean!
     requireLastPushApproval: Boolean!
     requiredApprovingReviewCount: Int!
     requiredReviewThreadResolution: Boolean!
@@ -12883,6 +12888,7 @@ input PullRequestParametersInput @docsCategory(name: "pulls") {
     dismissStaleReviewsOnPush: Boolean!
     dismissalRestriction: DismissalRestrictionInput
     requireCodeOwnerReview: Boolean!
+    requireExtraApprovalForUnattributedChanges: Boolean
     requireLastPushApproval: Boolean!
     requiredApprovingReviewCount: Int!
     requiredReviewThreadResolution: Boolean!
