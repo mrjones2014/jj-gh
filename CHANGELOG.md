@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.6](https://github.com/mrjones2014/jj-gh/compare/jj-gh-v0.3.5...jj-gh-v0.3.6) - 2026-10-30
+
+### Other
+
+- *(deps)* bump noyalib from 0.0.57 to 0.0.58 ([#362](https://github.com/mrjones2014/jj-gh/pull/362))
+- *(deps)* bump the cargo-minor-patch group with 5 updates ([#361](https://github.com/mrjones2014/jj-gh/pull/361))
+- *(deps)* update GitHub GraphQL schema ([#359](https://github.com/mrjones2014/jj-gh/pull/359))
+
 ## [0.3.5](https://github.com/mrjones2014/jj-gh/compare/jj-gh-v0.3.4...jj-gh-v0.3.5) - 2026-10-27
 
 ### Fixed
