@@ -14,7 +14,6 @@ use crate::{
     gh::{CiStatus, PrWithCiStatus},
     jj::inject::{TemplateAliases, escape_jj_string},
     model::Model,
-    ui::Spinner,
 };
 use anyhow::Result;
 use jj_gh_config_derive::subcommand_args;
@@ -122,7 +121,6 @@ pub async fn run(model: &impl Model, args: &PrLogArgs) -> Result<()> {
             },
     } = args;
 
-    let spinner = Spinner::start("Resolving local PRs");
     let upstream_remote = crate::gh::remote::resolved_upstream_remote(upstream_remote);
     let local = model.local_pulls(remote, Some(upstream_remote)).await?;
     let branch_to_local = local
@@ -130,7 +128,6 @@ pub async fn run(model: &impl Model, args: &PrLogArgs) -> Result<()> {
         .iter()
         .map(|b| (b.name.clone(), b.local_commit_id.clone()))
         .collect::<HashMap<String, String>>();
-    spinner.stop();
 
     let aliases = build_aliases(
         &local.prs,

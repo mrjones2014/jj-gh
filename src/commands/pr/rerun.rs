@@ -21,7 +21,6 @@ use crate::{
         remote::Target,
     },
     model::Model,
-    ui::Spinner,
     util::EvalWithCfgFallback,
 };
 use anyhow::{Context, Result, bail};
@@ -244,10 +243,12 @@ async fn rerun_pr(
     poll_interval: Duration,
 ) -> Result<Outcome> {
     let number = pr.number;
+    let status = crate::ui::status::push(format!("Listing workflow runs for PR #{number}"));
     let runs = gh
         .list_workflow_runs_for_sha(owner, repo, &pr.head_sha)
         .await
         .with_context(|| format!("listing workflow runs for PR #{number}"))?;
+    drop(status);
     let (mut completed, in_progress) = split_completed(runs);
     let mut outcome = Outcome::default();
 
@@ -289,23 +290,22 @@ async fn rerun_pr(
     if candidates.is_empty() {
         log::info!("No workflow runs to rerun on PR #{number}");
     } else if mode.all_jobs {
-        let spinner = Spinner::start(format!("restarting {} workflow run(s)", candidates.len()));
-        let result = rerun_each(gh, owner, repo, number, &candidates).await;
-        spinner.stop();
-        result?;
+        let status =
+            crate::ui::status::push(format!("Restarting {} workflow run(s)", candidates.len()));
+        rerun_each(gh, owner, repo, number, &candidates).await?;
+        drop(status);
         outcome.retried += candidates.len();
         log::info!(
             "Restarted {} workflow run(s) for PR #{number}",
             candidates.len()
         );
     } else {
-        let spinner = Spinner::start(format!(
-            "retrying failed jobs on {} workflow run(s)",
+        let status = crate::ui::status::push(format!(
+            "Retrying failed jobs on {} workflow run(s)",
             candidates.len()
         ));
-        let result = retry_each(gh, owner, repo, number, &candidates).await;
-        spinner.stop();
-        result?;
+        retry_each(gh, owner, repo, number, &candidates).await?;
+        drop(status);
         outcome.retried += candidates.len();
         log::info!(
             "Retried failed jobs on {} workflow run(s) for PR #{number}",
@@ -339,13 +339,11 @@ async fn doomed_in_progress<'a>(
     if all_jobs {
         return Ok(in_progress.iter().collect());
     }
-    let spinner = Spinner::start(format!(
-        "checking {} in-progress run(s) for failed jobs",
+    let _status = crate::ui::status::push(format!(
+        "Checking {} in-progress run(s) for failed jobs",
         in_progress.len()
     ));
-    let result = collect_doomed(gh, owner, repo, pr_number, in_progress).await;
-    spinner.stop();
-    result
+    collect_doomed(gh, owner, repo, pr_number, in_progress).await
 }
 
 async fn collect_doomed<'a>(
@@ -409,21 +407,16 @@ async fn cancel_and_settle(
     timeout: Duration,
     poll_interval: Duration,
 ) -> Result<Vec<WorkflowRun>> {
-    let spinner = Spinner::start(format!(
-        "cancelling {} in-progress workflow run(s)",
+    let status = crate::ui::status::push(format!(
+        "Cancelling {} in-progress workflow run(s)",
         doomed.len()
     ));
-    let cancel_result = cancel_each(gh, owner, repo, pr.number, doomed).await;
-    if let Err(e) = cancel_result {
-        spinner.stop();
-        return Err(e);
-    }
+    cancel_each(gh, owner, repo, pr.number, doomed).await?;
     let ids = doomed.iter().map(|r| r.id).collect::<HashSet<u64>>();
-    let poll_result =
-        poll_until_settled(gh, owner, repo, &pr.head_sha, &ids, timeout, poll_interval).await;
-    spinner.stop();
-    poll_result?;
+    status.set_message("Waiting for cancelled runs to settle");
+    poll_until_settled(gh, owner, repo, &pr.head_sha, &ids, timeout, poll_interval).await?;
 
+    status.set_message("Re-listing workflow runs");
     let runs = gh
         .list_workflow_runs_for_sha(owner, repo, &pr.head_sha)
         .await

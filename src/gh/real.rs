@@ -59,6 +59,7 @@ impl Gh for OctocrabGh {
         repo: &str,
         head_spec: &str,
     ) -> Result<Option<PrSummary>> {
+        let _status = crate::ui::status::push("Checking for existing PR");
         let (head_owner, head_branch) = head_spec
             .split_once(':')
             .ok_or_else(|| anyhow!("head_spec `{head_spec}` missing owner:branch"))?;
@@ -100,6 +101,7 @@ impl Gh for OctocrabGh {
     }
 
     async fn lookup_base(&self, owner: &str, repo: &str, branch: &str) -> Result<BaseLookup> {
+        let _status = crate::ui::status::push("Verifying base branch on GitHub");
         let vars = LookupBaseVariables {
             owner: owner.to_string(),
             name: repo.to_string(),
@@ -122,6 +124,7 @@ impl Gh for OctocrabGh {
     }
 
     async fn create_pr(&self, req: CreatePrRequest) -> Result<PrCreated> {
+        let _status = crate::ui::status::push("Creating pull request");
         let vars = CreatePrVariables {
             repo_id: req.repo_node_id,
             title: req.title,
@@ -156,6 +159,7 @@ impl Gh for OctocrabGh {
         pr: u64,
         reviewers: Vec<Reviewer>,
     ) -> Result<()> {
+        let _status = crate::ui::status::push("Adding reviewers");
         if reviewers.is_empty() {
             return Ok(());
         }
@@ -176,6 +180,7 @@ impl Gh for OctocrabGh {
         pr: u64,
         reviewers: Vec<Reviewer>,
     ) -> Result<()> {
+        let _status = crate::ui::status::push("Removing reviewers");
         if reviewers.is_empty() {
             return Ok(());
         }
@@ -196,6 +201,7 @@ impl Gh for OctocrabGh {
         pr_num: u64,
         labels: &[String],
     ) -> Result<()> {
+        let _status = crate::ui::status::push("Adding labels");
         if labels.is_empty() {
             return Ok(());
         }
@@ -209,6 +215,7 @@ impl Gh for OctocrabGh {
     }
 
     async fn remove_labels(&self, pr_node_id: &str, label_node_ids: &[String]) -> Result<()> {
+        let _status = crate::ui::status::push("Removing labels");
         if label_node_ids.is_empty() {
             return Ok(());
         }
@@ -226,6 +233,7 @@ impl Gh for OctocrabGh {
     }
 
     async fn update_pr(&self, req: UpdatePr) -> Result<()> {
+        let _status = crate::ui::status::push("Updating pull request");
         if req.is_noop() {
             return Ok(());
         }
@@ -251,6 +259,7 @@ impl Gh for OctocrabGh {
     }
 
     async fn set_draft(&self, pr_node_id: &str, draft: bool) -> Result<()> {
+        let _status = crate::ui::status::push("Updating draft state");
         if draft {
             let vars = ConvertToDraftVariables {
                 pr_id: pr_node_id.to_string(),
@@ -276,6 +285,7 @@ impl Gh for OctocrabGh {
     }
 
     async fn disable_auto_merge(&self, pr_node_id: &str) -> Result<()> {
+        let _status = crate::ui::status::push("Disabling auto-merge");
         let vars = DisableAutoMergeVariables {
             pr_id: pr_node_id.to_string(),
         };
@@ -289,6 +299,7 @@ impl Gh for OctocrabGh {
     }
 
     async fn get_pr(&self, owner: &str, repo: &str, number: u64) -> Result<PrDetails> {
+        let _status = crate::ui::status::push(format!("Fetching PR #{number}"));
         let vars = GetPrVariables {
             owner: owner.to_string(),
             name: repo.to_string(),
@@ -389,6 +400,7 @@ impl Gh for OctocrabGh {
     }
 
     async fn get_pr_diff(&self, owner: &str, repo: &str, number: u64) -> Result<String> {
+        let _status = crate::ui::status::push(format!("Fetching diff for PR #{number}"));
         self.octo
             .pulls(owner, repo)
             .get_diff(number)
@@ -398,6 +410,7 @@ impl Gh for OctocrabGh {
     }
 
     async fn enable_auto_merge(&self, pr_node_id: &str, method: AutoMergeMethod) -> Result<()> {
+        let _status = crate::ui::status::push("Enabling auto-merge");
         let vars = EnableAutoMergeVariables {
             pr_id: pr_node_id.to_string(),
             method: to_graphql_method(method),
@@ -417,6 +430,7 @@ impl Gh for OctocrabGh {
         repo: &str,
         sha: &str,
     ) -> Result<Vec<WorkflowRun>> {
+        let _status = crate::ui::status::push("Listing workflow runs");
         let page = self
             .octo
             .workflows(owner, repo)
@@ -436,6 +450,7 @@ impl Gh for OctocrabGh {
         repo: &str,
         run_id: u64,
     ) -> Result<Vec<WorkflowJob>> {
+        let _status = crate::ui::status::push("Listing workflow jobs");
         // Octocrab has a typed jobs API, but its `workflows::Conclusion` enum
         // lacks `stale`/`startup_failure` and has no catch-all, so GitHub
         // responses containing those conclusions fail to deserialize. Use a
@@ -466,6 +481,7 @@ impl Gh for OctocrabGh {
     }
 
     async fn cancel_workflow_run(&self, owner: &str, repo: &str, run_id: u64) -> Result<()> {
+        let _status = crate::ui::status::push("Cancelling workflow run");
         self.octo
             .actions()
             .cancel_workflow_run(owner, repo, run_id.into())
@@ -476,10 +492,12 @@ impl Gh for OctocrabGh {
     }
 
     async fn rerun_workflow_run(&self, owner: &str, repo: &str, run_id: u64) -> Result<()> {
+        let _status = crate::ui::status::push("Restarting workflow run");
         post_action_run(&self.octo, owner, repo, run_id, "rerun").await
     }
 
     async fn rerun_failed_jobs(&self, owner: &str, repo: &str, run_id: u64) -> Result<()> {
+        let _status = crate::ui::status::push("Retrying failed jobs");
         post_action_run(&self.octo, owner, repo, run_id, "rerun-failed-jobs").await
     }
 
@@ -490,6 +508,7 @@ impl Gh for OctocrabGh {
         head_owner: &str,
         branches: &[String],
     ) -> Result<Vec<PrWithCiStatus>> {
+        let _status = crate::ui::status::push("Searching PRs");
         if branches.is_empty() {
             return Ok(Vec::new());
         }
@@ -523,6 +542,7 @@ impl Gh for OctocrabGh {
         repo: &str,
         pr_numbers: &[u64],
     ) -> Result<PullRequestStack> {
+        let _status = crate::ui::status::push("Creating stack");
         let route = format!("/repos/{owner}/{repo}/stacks");
         let body = serde_json::json!({ "pull_requests": pr_numbers });
         self.octo
@@ -539,6 +559,7 @@ impl Gh for OctocrabGh {
         stack_number: u64,
         pr_numbers: &[u64],
     ) -> Result<()> {
+        let _status = crate::ui::status::push("Unstacking PRs");
         let route = format!("/repos/{owner}/{repo}/stacks/{stack_number}/unstack");
         let body = serde_json::json!({ "pull_requests": pr_numbers });
         post_no_content(&self.octo, &route, Some(&body))
@@ -547,6 +568,7 @@ impl Gh for OctocrabGh {
     }
 
     async fn list_stacks(&self, owner: &str, repo: &str) -> Result<Vec<PullRequestStack>> {
+        let _status = crate::ui::status::push("Loading existing stacks");
         let route = format!("/repos/{owner}/{repo}/stacks");
         self.octo
             .get::<Vec<PullRequestStack>, _, _>(&route, None::<&()>)

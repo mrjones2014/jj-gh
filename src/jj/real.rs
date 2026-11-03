@@ -67,6 +67,7 @@ impl Jj for JjCli {
     }
 
     async fn resolve_rev(&self, rev: &str) -> Result<CommitInfo> {
+        let _status = crate::ui::status::push("Resolving revision");
         let template = json_object_template(&[
             ("change_id", "change_id"),
             ("commit_id", "commit_id"),
@@ -89,6 +90,7 @@ impl Jj for JjCli {
     }
 
     async fn resolve_revset(&self, revset: &str) -> Result<Vec<CommitInfo>> {
+        let _status = crate::ui::status::push("Resolving revisions");
         let record = json_object_template(&[
             ("change_id", "change_id"),
             ("commit_id", "commit_id"),
@@ -108,6 +110,7 @@ impl Jj for JjCli {
     }
 
     async fn stacked_ancestor_bookmark(&self, rev: &str) -> Result<Option<String>> {
+        let _status = crate::ui::status::push("Finding stacked ancestor");
         // Ignore bookmarks that are already in trunk. They cannot be the base
         // of an active PR stack.
         let revset = format!("heads(ancestors(({rev})-) & bookmarks() & ~::trunk())");
@@ -131,6 +134,7 @@ impl Jj for JjCli {
     }
 
     async fn first_commit_description(&self, revset: &str) -> Result<String> {
+        let _status = crate::ui::status::push("Reading commit description");
         let stdout = run_jj(&[
             "log",
             "--no-graph",
@@ -171,6 +175,7 @@ impl Jj for JjCli {
     }
 
     async fn private_commits_revset(&self) -> Result<Option<String>> {
+        let _status = crate::ui::status::push("Reading jj config");
         let Ok(stdout) = run_jj(&["config", "get", "git.private-commits"]).await else {
             return Ok(None);
         };
@@ -182,6 +187,7 @@ impl Jj for JjCli {
     }
 
     async fn trunk_branch(&self) -> Result<Option<String>> {
+        let _status = crate::ui::status::push("Finding trunk branch");
         let stdout = run_jj(&[
             "log",
             "--no-graph",
@@ -202,6 +208,7 @@ impl Jj for JjCli {
     }
 
     async fn remote_bookmark_sha(&self, bookmark: &str, remote: &str) -> Result<Option<String>> {
+        let _status = crate::ui::status::push(format!("Checking remote bookmark {bookmark}"));
         let revset = format!("remote_bookmarks(exact:{bookmark:?}, remote=exact:{remote:?})");
         let stdout = run_jj(&[
             "log",
@@ -235,21 +242,25 @@ impl Jj for JjCli {
         reversed: bool,
         color: bool,
     ) -> Result<String> {
+        let _status = crate::ui::status::push("Rendering template");
         let args = eval_template_argv(revset, template, config_file, reversed, color);
         String::from_utf8(run_jj_strs(&args).await?).context("jj log output is not UTF-8")
     }
 
     async fn diff(&self, revset: &str) -> Result<String> {
+        let _status = crate::ui::status::push("Rendering diff");
         let stdout = run_jj(&["diff", "--git", "-r", revset, "--color=never"]).await?;
         String::from_utf8(stdout).context("jj diff output is not UTF-8")
     }
 
     async fn pr_diff(&self, base_oid: &str, head_oid: &str) -> Result<String> {
+        let _status = crate::ui::status::push("Rendering diff");
         let stdout = run_jj_strs(&pr_diff_argv(base_oid, head_oid)).await?;
         String::from_utf8(stdout).context("jj diff output is not UTF-8")
     }
 
     async fn pushed_bookmarks(&self, remote: &str) -> Result<Vec<PushedBookmark>> {
+        let _status = crate::ui::status::push("Reading pushed bookmarks");
         // `jj bookmark list --tracked --remote <remote>` emits one entry per
         // local/remote side of each tracked bookmark; filtering on
         // `if(remote, ...)` keeps only the local-side row, whose

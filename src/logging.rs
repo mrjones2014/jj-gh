@@ -2,7 +2,7 @@
 
 use anstyle::{AnsiColor, Color, Style};
 use flexi_logger::{
-    AdaptiveFormat, DeferredNow, FlexiLoggerError, LogSpecification, Logger, LoggerHandle,
+    DeferredNow, FlexiLoggerError, LogSpecification, Logger, LoggerHandle, writers::LogWriter,
 };
 use log::Record;
 use std::{
@@ -29,23 +29,55 @@ pub struct LogLevels {
 
 /// Print a fatal error directly, bypassing log filters and logger startup.
 pub fn fatal(error: impl Display) {
-    let mut stderr = std::io::stderr().lock();
-    if std::io::stderr().is_terminal() {
+    let line = if std::io::stderr().is_terminal() {
         let message = indent_continuations(&error.to_string(), 8);
         let (tag, color) = level_palette(log::Level::Error);
         let tag_style = Style::new().fg_color(Some(Color::Ansi(color))).bold();
         let msg_style = Style::new().fg_color(Some(Color::Ansi(color)));
-        let _ = writeln!(
-            stderr,
+        format!(
             "{}{tag}{} {}{message}{}",
             tag_style.render(),
             tag_style.render_reset(),
             msg_style.render(),
             msg_style.render_reset(),
-        );
+        )
     } else {
         let message = indent_continuations(&error.to_string(), 6);
-        let _ = writeln!(stderr, "ERROR {message}");
+        format!("ERROR {message}")
+    };
+    crate::ui::status::print_above(&line);
+}
+
+/// Stderr log writer that routes each record through
+/// [`crate::ui::status::print_above`] so log lines scroll above a live
+/// status line instead of colliding with its redraw line.
+struct StatusAwareStderr {
+    /// Whether stderr was a terminal at startup.
+    pretty: bool,
+}
+
+impl StatusAwareStderr {
+    fn new() -> Self {
+        Self {
+            pretty: std::io::stderr().is_terminal(),
+        }
+    }
+}
+
+impl LogWriter for StatusAwareStderr {
+    fn write(&self, now: &mut DeferredNow, record: &Record) -> std::io::Result<()> {
+        let mut buf = Vec::new();
+        if self.pretty {
+            pretty_format(&mut buf, now, record)?;
+        } else {
+            plain_format(&mut buf, now, record)?;
+        }
+        crate::ui::status::print_above(&String::from_utf8_lossy(&buf));
+        Ok(())
+    }
+
+    fn flush(&self) -> std::io::Result<()> {
+        std::io::stderr().flush()
     }
 }
 
@@ -69,8 +101,7 @@ pub fn init(levels: LogLevels) -> Result<LoggerHandle, FlexiLoggerError> {
     };
 
     Logger::with(spec)
-        .log_to_stderr()
-        .adaptive_format_for_stderr(AdaptiveFormat::Custom(plain_format, pretty_format))
+        .log_to_writer(Box::new(StatusAwareStderr::new()))
         .start()
 }
 

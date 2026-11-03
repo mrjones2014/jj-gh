@@ -31,7 +31,7 @@ use crate::{
     },
     jj::{Jj, PushedBookmark},
     model::Model,
-    ui::{PrLinks, Spinner, Stream},
+    ui::{PrLinks, Stream},
 };
 use anyhow::{Context, Result, anyhow, bail};
 use jj_gh_config_derive::subcommand_args;
@@ -172,7 +172,9 @@ async fn reconcile(model: &impl Model, args: &StackArgs) -> Result<()> {
     let Some(ctx) = gather(model, args).await? else {
         return Ok(());
     };
+    let status = crate::ui::status::push("Checking for stale bookmarks");
     let plan = build_plan(model.jj(), args, &ctx).await?;
+    drop(status);
 
     if args.json {
         serde_json::to_writer_pretty(io::stdout().lock(), &plan)?;
@@ -231,7 +233,7 @@ async fn gather(model: &impl Model, args: &StackArgs) -> Result<Option<Gathered>
     let jj = model.jj();
     let gh = model.gh().await?;
 
-    let spinner = Spinner::start("Resolving local PRs");
+    let status = crate::ui::status::push("Resolving local PRs");
     let (remote_name, target) = model.resolve_target(remote, Some(upstream_remote)).await?;
     let bookmarks = jj.pushed_bookmarks(&remote_name).await?;
     let branch_names = bookmarks
@@ -239,7 +241,7 @@ async fn gather(model: &impl Model, args: &StackArgs) -> Result<Option<Gathered>
         .map(|b| b.name.clone())
         .collect::<Vec<String>>();
     if branch_names.is_empty() {
-        spinner.stop();
+        drop(status);
         eprintln!("No bookmarks are tracked on `{remote_name}`");
         return Ok(None);
     }
@@ -253,7 +255,7 @@ async fn gather(model: &impl Model, args: &StackArgs) -> Result<Option<Gathered>
         )
         .await?;
     if prs.is_empty() {
-        spinner.stop();
+        drop(status);
         eprintln!("No local PRs found");
         return Ok(None);
     }
@@ -262,7 +264,7 @@ async fn gather(model: &impl Model, args: &StackArgs) -> Result<Option<Gathered>
     // carries no stack membership. A failure here is fatal rather than
     // skipped, because a missing PR reads as "not in a chain" and would have
     // us dissolve its stack.
-    spinner.set_message("Fetching PR details".into());
+    status.set_message("Fetching PR details");
     let mut pr_details = Vec::with_capacity(prs.len());
     for pr in &prs {
         pr_details.push(
@@ -272,7 +274,7 @@ async fn gather(model: &impl Model, args: &StackArgs) -> Result<Option<Gathered>
         );
     }
 
-    spinner.set_message("Reading the local graph".into());
+    status.set_message("Reading the local graph");
     let branch_to_local = bookmarks
         .iter()
         .map(|b| (b.name.clone(), b.local_commit_id.clone()))
@@ -280,7 +282,6 @@ async fn gather(model: &impl Model, args: &StackArgs) -> Result<Option<Gathered>
     let trunk = jj.trunk_branch().await?;
     let shape = detect(&pr_details, jj, &branch_to_local, trunk.as_deref()).await?;
     let existing_stacks = gh.list_stacks(&target.owner, &target.repo).await?;
-    spinner.stop();
 
     Ok(Some(Gathered {
         target,
@@ -656,9 +657,9 @@ async fn apply(model: &impl Model, ctx: Gathered, plan: Plan) -> Result<()> {
     // Unstack before anything else touches a base ref: GitHub rejects a
     // base-ref change on a PR that is in a stack. The stacks are rebuilt below.
     if !plan.unstack.is_empty() {
-        let spinner = Spinner::start("Unstacking PRs");
+        let status = crate::ui::status::push("Unstacking PRs");
         let unstacked = unstack(gh, &target, &plan.unstack, &pr_details).await?;
-        spinner.stop();
+        drop(status);
 
         // Mirror the unstack locally so the create step neither re-issues an
         // unstack for a PR already removed, nor skips a chain as
@@ -681,7 +682,7 @@ async fn apply(model: &impl Model, ctx: Gathered, plan: Plan) -> Result<()> {
 
     if !plan.bases.is_empty() {
         let total = plan.bases.len();
-        let spinner = Spinner::start(format!("Updating base refs (0/{total})"));
+        let status = crate::ui::status::push(format!("Updating base refs (0/{total})"));
         for (index, base) in plan.bases.iter().enumerate() {
             gh.update_pr(UpdatePr {
                 pr_node_id: base.pr_node_id.clone(),
@@ -700,9 +701,9 @@ async fn apply(model: &impl Model, ctx: Gathered, plan: Plan) -> Result<()> {
             if let Some(pr) = pr_details.iter_mut().find(|p| p.number == base.pr_number) {
                 pr.base_ref.clone_from(&base.proposed_base);
             }
-            spinner.set_message(format!("Updating base refs ({}/{total})", index + 1));
+            status.set_message(format!("Updating base refs ({}/{total})", index + 1));
         }
-        spinner.stop();
+        drop(status);
         for base in &plan.bases {
             log::info!(
                 "{} base -> {}",
@@ -712,8 +713,6 @@ async fn apply(model: &impl Model, ctx: Gathered, plan: Plan) -> Result<()> {
         }
     }
 
-    // No spinner around the pushes: `jj git push` streams its own progress to
-    // the terminal, and a live spinner would fight it for the line.
     for push in &plan.pushes {
         jj.push(
             &push.local_commit_id,
@@ -726,9 +725,9 @@ async fn apply(model: &impl Model, ctx: Gathered, plan: Plan) -> Result<()> {
     }
 
     if !plan.chains.is_empty() {
-        let spinner = Spinner::start("Creating stacks");
+        let status = crate::ui::status::push("Creating stacks");
         let results = create_stacks(gh, &target, &plan.chains, &pr_details, &existing_stacks).await;
-        spinner.stop();
+        drop(status);
         print_stack_results(&links, &results?);
     }
 
@@ -750,7 +749,6 @@ async fn explicit(model: &impl Model, args: &StackArgs) -> Result<()> {
     let jj = model.jj();
     let gh = model.gh().await?;
 
-    let spinner = Spinner::start("Resolving PRs");
     let (remote_name, target) = model.resolve_target(remote, Some(upstream_remote)).await?;
     // Strict matching: this form asserts an exact stack, so a bookmarked
     // commit without an open PR is an error rather than a skip.
@@ -770,7 +768,6 @@ async fn explicit(model: &impl Model, args: &StackArgs) -> Result<()> {
     if stacks.len() > 1 && !args.force {
         let mut numbers = stacks.into_iter().collect::<Vec<u64>>();
         numbers.sort_unstable();
-        spinner.stop();
         return Err(anyhow!(
             "PRs are already in different stacks: {numbers:?}. Use --force to unstack and recreate."
         ));
@@ -778,7 +775,6 @@ async fn explicit(model: &impl Model, args: &StackArgs) -> Result<()> {
 
     let chain = pr_details.iter().map(|pr| pr.number).collect::<Vec<u64>>();
     let links = PrLinks::from_details(&pr_details);
-    spinner.stop();
 
     // Naming the PRs is the confirmation here, so there is no prompt. The
     // preview flags still stop before any write.
@@ -802,15 +798,15 @@ async fn explicit(model: &impl Model, args: &StackArgs) -> Result<()> {
         return Ok(());
     }
 
-    // Pushed outside any spinner: `jj git push` writes its own progress.
     if args.auto_push {
         push_stale(jj, &pr_details, &remote_name).await?;
     }
 
-    let spinner = Spinner::start("Creating stack");
+    let status = crate::ui::status::push("Loading existing stacks");
     let existing_stacks = gh.list_stacks(&target.owner, &target.repo).await?;
+    status.set_message("Creating stack");
     let results = create_stacks(gh, &target, &[chain], &pr_details, &existing_stacks).await;
-    spinner.stop();
+    drop(status);
     print_stack_results(&links, &results?);
 
     Ok(())

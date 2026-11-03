@@ -198,6 +198,7 @@ impl Model for ModelImpl<'_> {
     async fn gh(&self) -> Result<&Self::Gh> {
         self.gh
             .get_or_try_init(|| async {
+                let _status = crate::ui::status::push("Authenticating with GitHub");
                 let token =
                     auth::resolve_token(self.globals.gh_askpass.as_deref(), self.config).await?;
                 OctocrabGh::new(&token)
