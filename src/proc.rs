@@ -14,6 +14,9 @@
 //! - [`capture_sync`] is the synchronous variant for pre-runtime config
 //!   assembly, before the async runtime exists.
 //!
+//! [`stream`], [`stream_to_stderr`], and [`interactive`] hand the terminal to
+//! the child, so they suspend the ambient status line for its lifetime.
+//!
 //! Token resolution needs the raw [`SpawnOutcome`] (timeout plus a fallback
 //! chain) and a test fake, so it goes through the [`ProcessRunner`] trait.
 
@@ -91,6 +94,7 @@ pub async fn capture(argv: &[&str]) -> Result<Vec<u8>> {
 /// color/tty. The child prints its own stderr, so a non-zero exit only needs a
 /// generic message. For display, progress, and interactive commands.
 pub async fn stream(argv: &[&str]) -> Result<()> {
+    let _suspended = crate::ui::status::suspend();
     let (prog, rest) = split(argv)?;
     let status = Command::new(prog)
         .args(rest)
@@ -111,6 +115,7 @@ pub async fn stream(argv: &[&str]) -> Result<()> {
 /// capturing keeps the child looking at a terminal, so it still colors its
 /// output.
 pub async fn stream_to_stderr(argv: &[&str]) -> Result<()> {
+    let _suspended = crate::ui::status::suspend();
     let (prog, rest) = split(argv)?;
     let status = Command::new(prog)
         .args(rest)
@@ -148,6 +153,7 @@ fn duplicate_stderr() -> Result<std::process::Stdio> {
 /// If no controlling terminal or console is available, falls back to inheriting
 /// the parent's stdio.
 pub async fn interactive(argv: &[&str]) -> Result<()> {
+    let _suspended = crate::ui::status::suspend();
     let (prog, rest) = split(argv)?;
     let mut command = Command::new(prog);
     command.args(rest);

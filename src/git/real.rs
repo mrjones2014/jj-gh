@@ -40,6 +40,7 @@ impl GitOps for RealGit {
     }
 
     fn fetch_pr(&self, remote: &str, pr: u64, bookmark: &str, force: bool) -> Result<()> {
+        let _status = crate::ui::status::push(format!("Fetching PR #{pr} from {remote}"));
         let prefix = if force { "+" } else { "" };
         let refspec = format!("{prefix}refs/pull/{pr}/head:refs/heads/{bookmark}");
         let remote = self

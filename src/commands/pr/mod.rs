@@ -17,7 +17,6 @@ use crate::{
     commands::pr::url::{PrUrlArgs, PrUrlArgsInput},
     config,
     model::ModelImpl,
-    ui::Spinner,
 };
 use anyhow::Result;
 use clap::Subcommand;
@@ -157,7 +156,7 @@ pub enum PrAction {
 /// calls, the editor round-trip, or any sub-handler (`create`, `fetch`,
 /// `auto-merge`).
 pub async fn dispatch(global: GlobalOptsInput, action: PrAction) -> Result<()> {
-    let startup = Spinner::start("Resolving workspace");
+    let startup = crate::ui::status::push("Resolving workspace");
 
     let config = config::resolve(&ConfigOverrides {
         global: &global,
@@ -165,7 +164,7 @@ pub async fn dispatch(global: GlobalOptsInput, action: PrAction) -> Result<()> {
     })?;
     let globals = GlobalOpts::resolve(global, &config);
     let model = ModelImpl::new(&config, &globals).await?;
-    startup.stop();
+    drop(startup);
     match action {
         PrAction::AutoMerge(input) => {
             let args = AutoMergeArgs::resolve(input, &config, &globals);

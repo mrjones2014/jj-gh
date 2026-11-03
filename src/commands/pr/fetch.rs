@@ -18,7 +18,6 @@ use crate::{
         remote_resolution_error,
     },
     model::Model,
-    ui::Spinner,
     util::EvalWithCfgFallback,
 };
 use anyhow::{Context, Result, anyhow};
@@ -160,7 +159,7 @@ pub async fn run(model: &impl Model, args: &FetchArgs) -> Result<()> {
             },
     } = args;
 
-    let spinner = Spinner::start("Resolving PR");
+    let status = crate::ui::status::push("Resolving PR");
 
     // `refs/pull/N/head` lives on the repo that hosts the PR (the upstream in a
     // fork workflow), so fetch resolves the host remote rather than the push
@@ -179,6 +178,7 @@ pub async fn run(model: &impl Model, args: &FetchArgs) -> Result<()> {
     let tmpl = template.as_deref().unwrap_or(DEFAULT_FETCH_TEMPLATE);
     let aliases = build_fetch_aliases(&pr);
     let tmp = aliases.write_temp_config()?;
+    status.set_message("Rendering bookmark name");
     let bookmark = jj
         .eval_template("root()", tmpl, Some(tmp.path()), false, false)
         .await
@@ -198,9 +198,10 @@ pub async fn run(model: &impl Model, args: &FetchArgs) -> Result<()> {
         ));
     }
 
+    status.set_message(format!("Fetching PR #{pr_num} from {remote}"));
     model.git().fetch_pr(&remote, *pr_num, &bookmark, *force)?;
+    drop(status);
     jj.git_import().await?;
-    spinner.stop();
 
     log::info!("PR #{}: {}", pr.number, pr.title);
     log::info!("head: {} ({})", pr.head_sha, pr.html_url);

@@ -90,6 +90,7 @@ async fn enable_auto_merge(
         );
     }
 
+    let _status = crate::ui::status::push(format!("Enabling auto-merge on #{}", pr.number));
     gh.enable_auto_merge(&pr.graphql_node_id, auto_merge_method)
         .await
         .with_context(|| format!("enabling auto-merge on #{}", pr.number))?;

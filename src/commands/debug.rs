@@ -7,7 +7,6 @@ use crate::{
     gh::{Gh, pr_lookup, real::OctocrabGh},
     git::url::parse_owner_repo,
     jj::{self, CommitInfo, Jj, JjExt, real::JjCli},
-    ui::Spinner,
 };
 use anyhow::Result;
 
@@ -56,8 +55,6 @@ async fn print_rev(globals: &GlobalOpts, _config: &Config, rev: &str) -> Result<
     let remote = jj.resolve_default_remote(remote).await?;
     let upstream_remote = crate::gh::remote::resolved_upstream_remote(upstream_remote);
 
-    let spinner = Spinner::start("Resolving revision metadata");
-
     let CommitInfo {
         change_id,
         commit_id,
@@ -75,8 +72,6 @@ async fn print_rev(globals: &GlobalOpts, _config: &Config, rev: &str) -> Result<
         Some(branch) => jj.remote_bookmark_sha(branch, &remote).await?,
         None => None,
     };
-
-    spinner.stop();
 
     println!("rev: {rev}");
     println!("change_id: {change_id}");
@@ -109,7 +104,6 @@ async fn print_pr_lookup(globals: &GlobalOpts, config: &Config, rev: &str) -> Re
         gh_askpass: _,
         askpass_timeout_secs: _,
     } = globals;
-    let spinner = Spinner::start("Resolving PR");
     let jj = JjCli::new().await?;
     let remote = jj.resolve_default_remote(remote).await?;
     let upstream_remote = crate::gh::remote::resolved_upstream_remote(upstream_remote);
@@ -124,8 +118,6 @@ async fn print_pr_lookup(globals: &GlobalOpts, config: &Config, rev: &str) -> Re
             &lookup.default_base,
         )
         .await?;
-
-    spinner.stop();
 
     println!("rev: {rev}");
     println!("branch: {}", lookup.branch);

@@ -280,14 +280,11 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
     // Detect chains among all local PRs, not just the created ones, so new
     // PRs on top of an existing stack fold into it rather than forming a
     // separate stack beside it.
-    let spinner = crate::ui::Spinner::start("Fetching PR details for stack detection");
+    let status = crate::ui::status::push("Detecting stack chains");
     let (pr_details, head_to_local) =
         gather_stack_inputs(jj, gh, &remote, &target, &created_prs).await?;
-    spinner.stop();
-
-    let spinner = crate::ui::Spinner::start("Detecting stack chains");
     let results = link_stacks(gh, jj, &target, &pr_details, &head_to_local).await?;
-    spinner.stop();
+    drop(status);
     crate::commands::pr::stack::print_stack_results(&PrLinks::from_details(&pr_details), &results);
 
     Ok(())
@@ -367,8 +364,7 @@ async fn fetch_pr_details(
 /// is `jj-gh pr stack`'s job, not something `pr create` should do behind the
 /// user's back.
 ///
-/// Returns what happened so the caller can stop its spinner before printing;
-/// writing to stdout under a live spinner leaves the glyph on the line.
+/// Returns what happened so the caller decides how to print it.
 async fn link_stacks(
     gh: &impl Gh,
     jj: &impl Jj,
@@ -400,13 +396,12 @@ async fn ensure_no_private_commits(jj: &impl Jj, revs: &[String], remote: &str) 
     let Some(private_commits) = jj.private_commits_revset().await? else {
         return Ok(());
     };
-    let spinner = crate::ui::Spinner::start("Checking for private commits");
+    let _status = crate::ui::status::push("Checking for private commits");
     let revset = private_check_revset(revs, remote, &private_commits);
     let listing = jj
         .eval_template(&revset, PRIVATE_LISTING_TEMPLATE, None, false, false)
         .await
         .context("checking for private commits")?;
-    spinner.stop();
     if listing.trim().is_empty() {
         return Ok(());
     }
@@ -477,20 +472,20 @@ async fn create_single_pr(
         crate::ui::tui::require_tty("--pick-title")?;
     }
 
-    let spinner = crate::ui::Spinner::start("Resolving revision");
+    let status = crate::ui::status::push("Resolving revision");
     let info = jj.resolve_rev(rev).await?;
     let existing_branch = info.bookmarks.first().cloned();
 
     // Pre-flight only when we already have a bookmark; an unpushed rev can't have
     // a matching open PR.
     if let Some(branch) = &existing_branch {
-        spinner.set_message("Checking for existing PR".into());
+        status.set_message("Checking for existing PR");
         let head_spec = target.head_spec(branch);
         let existing = gh
             .find_open_pr(&target.owner, &target.repo, &head_spec)
             .await?;
         if let Some(existing) = existing {
-            spinner.stop();
+            drop(status);
             log::info!(
                 "PR #{} is already {} for `{}`: {}",
                 existing.number,
@@ -509,7 +504,7 @@ async fn create_single_pr(
     // Jujutsu gives us the revision for an automatic base. For an explicit or
     // configured base, find the revision on the target remote. A local bookmark
     // with the same name can point to a different revision.
-    spinner.set_message("Detecting base branch".into());
+    status.set_message("Detecting base branch");
     let (base_branch, local_base_rev) = if let Some(branch) = base.cli() {
         (branch.clone(), None)
     } else if let Some(ancestor) = jj.stacked_ancestor_bookmark(rev).await? {
@@ -525,7 +520,6 @@ async fn create_single_pr(
     } else if let Some(branch) = base.fallback() {
         (branch.clone(), None)
     } else {
-        spinner.stop();
         bail!(
             "could not detect base branch: `--base` not passed, no ancestor \
              bookmark on the stack, jj `trunk()` resolves to nothing, and \
@@ -533,7 +527,7 @@ async fn create_single_pr(
         );
     };
 
-    spinner.set_message("Verifying base branch on GitHub".into());
+    status.set_message("Verifying base branch on GitHub");
     let base_lookup = gh
         .lookup_base(&target.owner, &target.repo, &base_branch)
         .await?;
@@ -549,7 +543,7 @@ async fn create_single_pr(
     let base_rev = if let Some(base_rev) = local_base_rev {
         base_rev
     } else {
-        spinner.set_message("Resolving base revision".into());
+        status.set_message("Resolving base revision");
         jj.remote_bookmark_sha(&base_branch, remote)
             .await?
             .with_context(|| {
@@ -560,9 +554,9 @@ async fn create_single_pr(
             })?
     };
     let title_revset = jj::title_base_revset(rev, &base_rev);
-    spinner.set_message("Generating title candidates".into());
+    status.set_message("Generating title candidates");
     let candidates = resolve_title_candidates(jj, &title_revset, title_template).await?;
-    spinner.stop();
+    drop(status);
     let default_title = if *pick_title {
         title_picker::pick(&candidates)?
     } else {
@@ -581,7 +575,7 @@ async fn create_single_pr(
             .to_string()
     };
 
-    let spinner = crate::ui::Spinner::start("Loading PR template");
+    let status = crate::ui::status::push("Loading PR template");
     let raw_template = load_template_for(
         args,
         jj,
@@ -601,10 +595,12 @@ async fn create_single_pr(
         auto_merge_method: *auto_merge_method,
     };
     let (final_fm, body) = if *no_edit {
+        drop(status);
         (initial_fm, raw_template.unwrap_or_default())
     } else {
         let editor_argv = editor::resolve_editor(editor_argv)?;
         let diff_preview = if *show_diffs {
+            status.set_message("Rendering diff preview");
             jj.diff(&title_revset)
                 .await
                 .inspect_err(|e| log::debug!("could not render diff preview: {e:#}"))
@@ -616,7 +612,7 @@ async fn create_single_pr(
             .as_deref()
             .map(str::trim)
             .filter(|s| !s.is_empty());
-        spinner.stop();
+        drop(status);
         editor::round_trip(
             editor,
             &editor_argv,
@@ -631,11 +627,9 @@ async fn create_single_pr(
     let final_base_lookup = if final_base_branch == base_branch {
         base_lookup
     } else {
-        let spinner = crate::ui::spinner::Spinner::start("Verifying updated base branch");
         let lookup = gh
             .lookup_base(&target.owner, &target.repo, &final_base_branch)
             .await?;
-        spinner.stop();
         if !lookup.branch_exists {
             return Err(anyhow!(
                 "base branch `{final_base_branch}` does not exist on {}/{}",
@@ -654,6 +648,11 @@ async fn create_single_pr(
     )
     .await?;
 
+    let status = crate::ui::status::push(if existing_branch.is_some() {
+        "Creating pull request"
+    } else {
+        "Verifying commit on remote"
+    });
     let branch = if let Some(b) = existing_branch {
         b
     } else {
@@ -666,7 +665,7 @@ async fn create_single_pr(
     };
     let head_spec = target.head_spec(&branch);
 
-    let spinner = crate::ui::spinner::Spinner::start("Creating pull request");
+    status.set_message("Creating pull request");
     let created = gh
         .create_pr(CreatePrRequest {
             title: final_fm.title.clone(),
@@ -698,7 +697,7 @@ async fn create_single_pr(
         has_merge_queue: created.has_merge_queue,
         before_label_ids: HashMap::new(),
     };
-    spinner.set_message("Applying PR metadata".into());
+    status.set_message("Applying PR metadata");
     editor::apply_frontmatter_diff(gh, &ctx, &before_fm, &body, &final_fm, &body)
         .await
         .with_context(|| {
@@ -707,7 +706,7 @@ async fn create_single_pr(
                 created.html_url
             )
         })?;
-    spinner.stop();
+    drop(status);
 
     crate::ui::print_url(&created.html_url);
     Ok(CreatedPr {

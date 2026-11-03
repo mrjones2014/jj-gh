@@ -1,13 +1,12 @@
-//! Terminal UI helpers (spinners, hyperlinks etc.). Everything here writes to,
-//! or decorates output bound for, a terminal; anything that has to survive a
-//! pipe belongs on stdout as plain text.
+//! Terminal UI helpers (status line, hyperlinks etc.). Everything here writes
+//! to, or decorates output bound for, a terminal; anything that has to survive
+//! a pipe belongs on stdout as plain text.
 
 mod links;
-pub mod spinner;
+pub mod status;
 pub mod tui;
 
 pub use links::PrLinks;
-pub use spinner::Spinner;
 
 use std::io::IsTerminal;
 
@@ -88,7 +87,7 @@ impl<T: AsRef<str>> Hyperlink for T {
 #[inline]
 pub fn print_url(url: &str) {
     let url = url.trim();
-    println!("{}", url.hyperlink(Stream::Stdout, url));
+    status::println_stdout(&url.hyperlink(Stream::Stdout, url));
 }
 
 fn render_hyperlink(text: &str, url: &str, supported: bool) -> String {

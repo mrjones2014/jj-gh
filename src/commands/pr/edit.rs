@@ -5,7 +5,6 @@ use crate::{
     gh::{Gh, PrDetails},
     jj::Jj,
     model::Model,
-    ui::Spinner,
 };
 use anyhow::{Context, Result, bail};
 use jj_gh_config_derive::subcommand_args;
@@ -54,7 +53,6 @@ subcommand_args! {
 /// # Errors
 ///
 /// Returns an error from any step (rev resolution, GH API, editor, etc.).
-#[expect(clippy::too_many_lines)]
 pub async fn run(model: &impl Model, args: &EditArgs) -> Result<()> {
     let gh = model.gh().await?;
     let editor = model.editor();
@@ -76,7 +74,6 @@ pub async fn run(model: &impl Model, args: &EditArgs) -> Result<()> {
             },
     } = args;
     let editor_argv = editor::resolve_editor(editor_cfg.as_ref())?;
-    let spinner = Spinner::start("Resolving PR");
 
     let upstream_remote = crate::gh::remote::resolved_upstream_remote(upstream_remote);
     let (target, pr_number) = model
@@ -96,7 +93,6 @@ pub async fn run(model: &impl Model, args: &EditArgs) -> Result<()> {
             Ok(diff) => Some(diff),
             Err(e) => {
                 log::debug!("could not render PR diff from local commits: {e:#}");
-                spinner.set_message("Loading diffs from GitHub".to_string());
                 gh.get_pr_diff(&target.owner, &target.repo, details.number)
                     .await
                     .inspect_err(|e| log::warn!("Could not load PR diff preview: {e:#}"))
@@ -106,7 +102,6 @@ pub async fn run(model: &impl Model, args: &EditArgs) -> Result<()> {
     } else {
         None
     };
-    spinner.stop();
 
     let PrDetails {
         number,

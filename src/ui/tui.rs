@@ -19,14 +19,17 @@ pub fn require_tty(feature: &str) -> Result<()> {
     Ok(())
 }
 
-/// Raw-mode inline terminal region restored automatically on drop.
+/// Raw-mode inline terminal region restored automatically on drop. Holds the
+/// ambient status line suspended while raw mode owns the terminal.
 pub struct InlineSession {
     rows: u16,
     frame_started: bool,
+    _suspended: crate::ui::status::SuspendGuard,
 }
 
 impl InlineSession {
     pub fn enter(requested_rows: usize) -> Result<Self> {
+        let suspended = crate::ui::status::suspend();
         let terminal_rows = terminal::size().context("reading terminal size")?.1;
         let rows = u16::try_from(requested_rows).unwrap_or(u16::MAX).max(1);
         if rows > terminal_rows {
@@ -46,6 +49,7 @@ impl InlineSession {
         Ok(Self {
             rows,
             frame_started: false,
+            _suspended: suspended,
         })
     }
 
