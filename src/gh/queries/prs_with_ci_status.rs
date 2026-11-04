@@ -28,28 +28,81 @@ pub enum CiStatus {
     None,
 }
 
-impl From<Option<prs_with_ci_status_internal::PrsWithCiStatusInternalSearchNodesOnPullRequestStatusCheckRollup>>
-    for CiStatus
-{
-    fn from(
-        value: Option<prs_with_ci_status_internal::PrsWithCiStatusInternalSearchNodesOnPullRequestStatusCheckRollup>,
-    ) -> Self {
-        use prs_with_ci_status_internal::StatusState;
-        match value {
-            None => Self::None,
-            Some(rollup) => match rollup.state {
-                StatusState::ERROR | StatusState::FAILURE => Self::Failed,
-                StatusState::EXPECTED | StatusState::PENDING => Self::Pending,
-                StatusState::SUCCESS => Self::Success,
-                StatusState::Other(_) => Self::None,
-            },
+/// Per-PR check tallies from the rollup, bucketed the way the UI reports
+/// them. Check runs and plain commit statuses both count.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CheckCounts {
+    /// Queued, waiting, or currently running.
+    pub in_progress: u32,
+    /// Succeeded (including neutral and skipped conclusions).
+    pub passed: u32,
+    /// Failed, timed out, cancelled, or otherwise needing attention.
+    pub failed: u32,
+}
+
+/// Collapse a PR's `statusCheckRollup` into the overall [`CiStatus`] plus
+/// [`CheckCounts`].
+fn rollup_summary(
+    rollup: Option<
+        prs_with_ci_status_internal::PrsWithCiStatusInternalSearchNodesOnPullRequestStatusCheckRollup,
+    >,
+) -> (CiStatus, CheckCounts) {
+    use prs_with_ci_status_internal::{CheckRunState, StatusState};
+    let Some(rollup) = rollup else {
+        return (CiStatus::None, CheckCounts::default());
+    };
+    let status = match rollup.state {
+        StatusState::ERROR | StatusState::FAILURE => CiStatus::Failed,
+        StatusState::EXPECTED | StatusState::PENDING => CiStatus::Pending,
+        StatusState::SUCCESS => CiStatus::Success,
+        StatusState::Other(_) => CiStatus::None,
+    };
+    let mut counts = CheckCounts::default();
+    let count = |value: i64| u32::try_from(value).unwrap_or(0);
+    for entry in rollup
+        .contexts
+        .check_run_counts_by_state
+        .unwrap_or_default()
+    {
+        match entry.state {
+            CheckRunState::IN_PROGRESS
+            | CheckRunState::PENDING
+            | CheckRunState::QUEUED
+            | CheckRunState::WAITING => counts.in_progress += count(entry.count),
+            // COMPLETED is "finished without a more specific conclusion".
+            CheckRunState::SUCCESS
+            | CheckRunState::NEUTRAL
+            | CheckRunState::SKIPPED
+            | CheckRunState::COMPLETED => counts.passed += count(entry.count),
+            CheckRunState::FAILURE
+            | CheckRunState::TIMED_OUT
+            | CheckRunState::CANCELLED
+            | CheckRunState::ACTION_REQUIRED
+            | CheckRunState::STARTUP_FAILURE
+            | CheckRunState::STALE => counts.failed += count(entry.count),
+            CheckRunState::Other(_) => {}
         }
     }
+    for entry in rollup
+        .contexts
+        .status_context_counts_by_state
+        .unwrap_or_default()
+    {
+        match entry.state {
+            StatusState::EXPECTED | StatusState::PENDING => {
+                counts.in_progress += count(entry.count);
+            }
+            StatusState::SUCCESS => counts.passed += count(entry.count),
+            StatusState::ERROR | StatusState::FAILURE => counts.failed += count(entry.count),
+            StatusState::Other(_) => {}
+        }
+    }
+    (status, counts)
 }
 
 /// Open PR with CI status and head commit SHA. Used by `jj-gh pr log` to map
 /// jj revisions to their PR metadata.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[expect(clippy::struct_excessive_bools)]
 pub struct PrWithCiStatus {
     /// GraphQL node ID.
@@ -82,6 +135,8 @@ pub struct PrWithCiStatus {
     pub is_in_merge_queue: bool,
     /// Rolled-up CI status across all required checks.
     pub ci_status: CiStatus,
+    /// Check tallies behind `ci_status`, for UIs that show counts.
+    pub check_counts: CheckCounts,
     /// Whether auto-merge enabled for this PR
     pub auto_merge_enabled: bool,
 }
@@ -116,23 +171,28 @@ impl From<prs_with_ci_status_internal::ResponseData> for Vec<PrWithCiStatus> {
                      is_in_merge_queue,
                      status_check_rollup,
                      auto_merge_request,
-                 }| PrWithCiStatus {
-                    id,
-                    // PR numbers will always fit in a u64, this is fine.
-                    number: number
-                        .try_into()
-                        .expect("GitHub PR number should fit in u64"),
-                    url,
-                    title,
-                    merged,
-                    is_draft,
-                    is_in_merge_queue,
-                    head_ref_name,
-                    head_owner: head_repository.map(|repo| repo.owner.login),
-                    head_sha: head_ref_oid,
-                    base_ref_name,
-                    ci_status: status_check_rollup.into(),
-                    auto_merge_enabled: auto_merge_request.is_some_and(|r| r.enabled_at.is_some()),
+                 }| {
+                    let (ci_status, check_counts) = rollup_summary(status_check_rollup);
+                    PrWithCiStatus {
+                        id,
+                        // PR numbers will always fit in a u64, this is fine.
+                        number: number
+                            .try_into()
+                            .expect("GitHub PR number should fit in u64"),
+                        url,
+                        title,
+                        merged,
+                        is_draft,
+                        is_in_merge_queue,
+                        head_ref_name,
+                        head_owner: head_repository.map(|repo| repo.owner.login),
+                        head_sha: head_ref_oid,
+                        base_ref_name,
+                        ci_status,
+                        check_counts,
+                        auto_merge_enabled: auto_merge_request
+                            .is_some_and(|r| r.enabled_at.is_some()),
+                    }
                 },
             )
             .collect()

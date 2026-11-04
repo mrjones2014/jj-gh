@@ -35,7 +35,7 @@ pub use mark_ready_for_review::{
     MarkReadyForReviewInternal, MarkReadyForReviewResponseData, MarkReadyForReviewVariables,
 };
 pub use prs_with_ci_status::{
-    CiStatus, PrWithCiStatus, PrsWithCiStatusInternal, PrsWithCiStatusResponseData,
+    CheckCounts, CiStatus, PrWithCiStatus, PrsWithCiStatusInternal, PrsWithCiStatusResponseData,
     PrsWithCiStatusVariables,
 };
 pub use remove_labels::{RemoveLabelsInternal, RemoveLabelsResponseData, RemoveLabelsVariables};

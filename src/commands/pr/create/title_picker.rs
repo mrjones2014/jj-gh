@@ -1,14 +1,13 @@
 use crate::{
     commands::pr::create::TitleCandidate,
     ui::tui::{
-        HORIZONTAL_SEPARATOR, InlineSession, ListState, VERTICAL_SEPARATOR, bounded_region_rows,
-        print_highlighted_row, truncate,
+        InlineSession, ListFrame, ListNav, ListState, VERTICAL_SEPARATOR, bounded_region_rows,
+        handle_list_nav, render_list_rows, truncate,
     },
 };
 use anyhow::{Result, anyhow};
 use crossterm::{
-    cursor,
-    event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
+    event::{self, Event, KeyCode, KeyEvent, KeyEventKind},
     queue,
     style::{self, Stylize as _},
     terminal,
@@ -55,30 +54,17 @@ fn handle_key(
     visible: usize,
     key: KeyEvent,
 ) -> Outcome {
-    if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
-        return Outcome::Abort;
+    match handle_list_nav(key, state, candidates.len(), visible) {
+        Some(ListNav::Quit) => return Outcome::Abort,
+        Some(ListNav::Moved) => return Outcome::Continue,
+        None => {}
     }
-    match key.code {
-        KeyCode::Char('j') | KeyCode::Down => state.move_by(1, candidates.len(), visible),
-        KeyCode::Char('k') | KeyCode::Up => state.move_by(-1, candidates.len(), visible),
-        KeyCode::Char('g') => state.move_to(0, candidates.len(), visible),
-        KeyCode::Char('G') => {
-            state.move_to(
-                candidates.len().saturating_sub(1),
-                candidates.len(),
-                visible,
-            );
-        }
-        KeyCode::Enter => {
-            if let Some(title) = candidates
-                .get(state.selected)
-                .and_then(TitleCandidate::valid_title)
-            {
-                return Outcome::Select(title.to_string());
-            }
-        }
-        KeyCode::Esc | KeyCode::Char('q') => return Outcome::Abort,
-        _ => {}
+    if key.code == KeyCode::Enter
+        && let Some(title) = candidates
+            .get(state.selected)
+            .and_then(TitleCandidate::valid_title)
+    {
+        return Outcome::Select(title.to_string());
     }
     Outcome::Continue
 }
@@ -93,37 +79,20 @@ fn render(
     candidates: &[TitleCandidate],
     state: &ListState,
 ) -> Result<()> {
-    let cols = terminal::size()?.0;
-    let height = visible_rows(session);
-    session.begin_frame(out)?;
-    let end = (state.scroll_offset + height).min(candidates.len());
-    for (idx, candidate) in candidates[state.scroll_offset..end].iter().enumerate() {
-        let absolute = state.scroll_offset + idx;
-        let line = render_candidate(candidate, usize::from(cols));
-        if absolute == state.selected {
-            print_highlighted_row(out, &line, usize::from(cols))?;
-        } else {
-            queue!(out, style::Print(line))?;
-        }
-        queue!(out, cursor::MoveDown(1), cursor::MoveToColumn(0))?;
-    }
-    let rendered_rows = end.saturating_sub(state.scroll_offset);
-    if rendered_rows < height {
-        queue!(
-            out,
-            cursor::MoveDown(u16::try_from(height - rendered_rows).unwrap_or(u16::MAX)),
-            cursor::MoveToColumn(0),
-        )?;
-    }
-    queue!(
+    let cols = usize::from(terminal::size()?.0);
+    render_list_rows(
         out,
-        style::SetForegroundColor(style::Color::DarkGrey),
-        style::Print(HORIZONTAL_SEPARATOR.repeat(cols.into())),
-        style::ResetColor,
-        cursor::MoveDown(1),
-        cursor::MoveToColumn(0),
-        style::Print(KEYMAP),
+        session,
+        &ListFrame {
+            state,
+            len: candidates.len(),
+            cols,
+            footer_rows: FOOTER_LINES,
+            empty_placeholder: "",
+        },
+        |idx| render_candidate(&candidates[idx], cols),
     )?;
+    queue!(out, style::Print(KEYMAP))?;
     out.flush()?;
     Ok(())
 }
@@ -156,6 +125,7 @@ fn render_candidate(candidate: &TitleCandidate, cols: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crossterm::event::KeyModifiers;
 
     fn candidate(title: &str) -> TitleCandidate {
         TitleCandidate {

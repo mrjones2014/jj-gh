@@ -24,6 +24,18 @@ query PrsWithCiStatusInternal($query: String!) {
         }
         statusCheckRollup {
           state
+          # Count fields only; `first` is required by the connection but no
+          # nodes are selected.
+          contexts(first: 100) {
+            checkRunCountsByState {
+              state
+              count
+            }
+            statusContextCountsByState {
+              state
+              count
+            }
+          }
         }
       }
     }

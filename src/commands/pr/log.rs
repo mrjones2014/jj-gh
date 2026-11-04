@@ -318,6 +318,7 @@ mod tests {
             is_draft: false,
             is_in_merge_queue: false,
             ci_status: status,
+            check_counts: crate::gh::CheckCounts::default(),
             merged: false,
             auto_merge_enabled: false,
         }
@@ -340,6 +341,7 @@ mod tests {
             base_ref_name: "master".into(),
             is_draft: false,
             ci_status: CiStatus::Success,
+            check_counts: crate::gh::CheckCounts::default(),
             auto_merge_enabled,
             is_in_merge_queue,
             merged,

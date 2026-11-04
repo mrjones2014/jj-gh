@@ -1,7 +1,13 @@
 //! Shared crossterm helpers for interactive terminal UIs.
 
 use anyhow::{Context, Result, bail};
-use crossterm::{cursor, execute, queue, terminal};
+use crossterm::{
+    cursor,
+    event::{KeyCode, KeyEvent, KeyModifiers},
+    execute, queue,
+    style::{self, Stylize as _},
+    terminal,
+};
 use std::io::{IsTerminal, Stdout, Write};
 
 pub const HIGHLIGHT_BG: &str = "\x1b[48;5;236m";
@@ -134,6 +140,111 @@ fn calculate_region_rows(
         + footer_rows
 }
 
+/// What a navigation key did to a selectable list. See [`handle_list_nav`].
+pub enum ListNav {
+    /// The selection moved; the caller should redraw.
+    Moved,
+    /// A quit key (`q`, Esc, Ctrl-C) was pressed.
+    Quit,
+}
+
+/// Handle the keys every selectable list shares: `j`/`k`/arrows move, `g`/`G`
+/// jump to first/last, and `q`/Esc/Ctrl-C quit. Returns `None` for keys the
+/// list does not handle so the caller can match its own bindings.
+pub fn handle_list_nav(
+    key: KeyEvent,
+    state: &mut ListState,
+    len: usize,
+    visible_rows: usize,
+) -> Option<ListNav> {
+    if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
+        return Some(ListNav::Quit);
+    }
+    match key.code {
+        KeyCode::Char('j') | KeyCode::Down => state.move_by(1, len, visible_rows),
+        KeyCode::Char('k') | KeyCode::Up => state.move_by(-1, len, visible_rows),
+        KeyCode::Char('g') => state.move_to(0, len, visible_rows),
+        KeyCode::Char('G') => state.move_to(len.saturating_sub(1), len, visible_rows),
+        KeyCode::Esc | KeyCode::Char('q') => return Some(ListNav::Quit),
+        _ => return None,
+    }
+    Some(ListNav::Moved)
+}
+
+/// Layout inputs for [`render_list_rows`], alongside the [`ListState`].
+pub struct ListFrame<'a> {
+    pub state: &'a ListState,
+    /// Total number of rows in the list (not just the visible ones).
+    pub len: usize,
+    /// Terminal width in columns.
+    pub cols: usize,
+    /// Rows reserved below the list (separator + footer text).
+    pub footer_rows: u16,
+    /// Shown dimmed as the only row of an empty list; `""` to show nothing.
+    pub empty_placeholder: &'a str,
+}
+
+/// Render the list part of a frame: the visible slice of rows (the selected
+/// one highlighted), blank filler up to the row area's height, and the
+/// horizontal separator. Leaves the cursor at the start of the footer line;
+/// the caller prints its footer and flushes.
+pub fn render_list_rows<F>(
+    out: &mut Stdout,
+    session: &mut InlineSession,
+    frame: &ListFrame<'_>,
+    render_row: F,
+) -> Result<()>
+where
+    F: Fn(usize) -> String,
+{
+    let ListFrame {
+        state,
+        len,
+        cols,
+        footer_rows,
+        empty_placeholder,
+    } = *frame;
+    session.begin_frame(out)?;
+    let height = usize::from(session.rows().saturating_sub(footer_rows));
+    let end = (state.scroll_offset + height).min(len);
+    let mut rendered = 0usize;
+    if len == 0 && !empty_placeholder.is_empty() {
+        queue!(
+            out,
+            style::Print(empty_placeholder.dark_grey()),
+            cursor::MoveDown(1),
+            cursor::MoveToColumn(0),
+        )?;
+        rendered = 1;
+    }
+    for absolute in state.scroll_offset.min(len)..end {
+        let line = render_row(absolute);
+        if absolute == state.selected {
+            print_highlighted_row(out, &line, cols)?;
+        } else {
+            queue!(out, style::Print(line))?;
+        }
+        queue!(out, cursor::MoveDown(1), cursor::MoveToColumn(0))?;
+        rendered += 1;
+    }
+    if rendered < height {
+        queue!(
+            out,
+            cursor::MoveDown(u16::try_from(height - rendered).unwrap_or(u16::MAX)),
+            cursor::MoveToColumn(0),
+        )?;
+    }
+    queue!(
+        out,
+        style::SetForegroundColor(style::Color::DarkGrey),
+        style::Print(HORIZONTAL_SEPARATOR.repeat(cols)),
+        style::ResetColor,
+        cursor::MoveDown(1),
+        cursor::MoveToColumn(0),
+    )?;
+    Ok(())
+}
+
 /// Cursor and viewport state shared by selectable lists.
 #[derive(Debug, Default)]
 pub struct ListState {
@@ -208,6 +319,20 @@ pub fn apply_bg_highlight(line: &str, bg_code: &str) -> (String, usize) {
                     out.push_str(bg_code);
                 }
             }
+        } else if c == '\x1b' && chars.peek() == Some(&']') {
+            // OSC sequence (e.g. an OSC 8 hyperlink): copy verbatim with zero
+            // display width. Terminated by BEL or ST (ESC \).
+            out.push(c);
+            while let Some(ch) = chars.next() {
+                out.push(ch);
+                if ch == '\x07' {
+                    break;
+                }
+                if ch == '\x1b' && chars.peek() == Some(&'\\') {
+                    out.push(chars.next().expect("peeked terminator"));
+                    break;
+                }
+            }
         } else {
             out.push(c);
             visible += 1;
@@ -252,6 +377,15 @@ mod tests {
         let (painted, visible) = apply_bg_highlight(&input, HIGHLIGHT_BG);
         assert_eq!(visible, 2);
         assert!(painted.matches(HIGHLIGHT_BG).count() >= 2);
+    }
+
+    #[test]
+    fn highlight_counts_osc_hyperlinks_as_zero_width() {
+        // OSC 8 link around "#12": only the label is visible.
+        let input = "\u{1b}]8;;https://x/12\u{1b}\\#12\u{1b}]8;;\u{1b}\\ t";
+        let (painted, visible) = apply_bg_highlight(input, HIGHLIGHT_BG);
+        assert_eq!(visible, 5);
+        assert!(painted.contains("\u{1b}]8;;https://x/12\u{1b}\\"));
     }
 
     #[test]

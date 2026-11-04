@@ -766,6 +766,7 @@ mod tests {
             merged: false,
             is_in_merge_queue: false,
             ci_status: crate::gh::CiStatus::None,
+            check_counts: crate::gh::CheckCounts::default(),
             auto_merge_enabled: false,
         }
     }

@@ -112,9 +112,18 @@ pub enum PrAction {
     ///
     /// When several PRs are targeted, a failure on one PR does not stop the
     /// others; the command reports a summary error at the end instead.
+    ///
+    /// With `--watch`, instead of a one-shot retry the selected PRs are
+    /// polled continuously and retryable failures are retried as they
+    /// happen (optionally capped per run with `--max-retries`), until you
+    /// quit. A bare `--watch` implies `--all` and, unlike one-shot `--all`,
+    /// also watches currently-green PRs since they can go red later. On a
+    /// terminal this shows an inline list with one row per PR (`j`/`k` to
+    /// move, `R` to force a cancel-and-retry of the selected PR, `q` to
+    /// quit); without one it prints plain log lines per event instead.
     #[command(
         alias = "retry-failed",
-        group = clap::ArgGroup::new("retry_target").required(true).multiple(false)
+        group = clap::ArgGroup::new("retry_target").required(true).multiple(true)
     )]
     Rerun(RerunArgsInput),
 
@@ -239,7 +248,7 @@ mod tests {
     #[derive(clap::Parser, Debug)]
     #[command(
         no_binary_name = true,
-        group = clap::ArgGroup::new("retry_target").required(true).multiple(false)
+        group = clap::ArgGroup::new("retry_target").required(true).multiple(true)
     )]
     struct RerunArgsParser {
         #[command(flatten)]
@@ -359,6 +368,56 @@ mod tests {
     fn rerun_cancel_timeout_requires_cancel() {
         RerunArgsParser::try_parse_from(["42", "--cancel-timeout", "10"])
             .expect_err("--cancel-timeout without --cancel should be rejected");
+    }
+
+    #[test]
+    fn rerun_watch_parses_alone_and_with_targets() {
+        let parsed = RerunArgsParser::try_parse_from(["--watch"])
+            .expect("bare --watch should satisfy the target group")
+            .args;
+        assert!(parsed.watch);
+        assert!(!parsed.all);
+        assert_eq!(parsed.revsets, [] as [String; 0]);
+
+        let parsed = RerunArgsParser::try_parse_from(["--watch", "42", "mine()"])
+            .expect("--watch with targets should parse")
+            .args;
+        assert!(parsed.watch);
+        assert_eq!(parsed.revsets, vec!["42", "mine()"]);
+
+        let parsed = RerunArgsParser::try_parse_from(["--watch", "--all"])
+            .expect("--watch --all is redundant but allowed")
+            .args;
+        assert!(parsed.watch);
+        assert!(parsed.all);
+    }
+
+    #[test]
+    fn rerun_all_conflicts_with_positional_targets() {
+        RerunArgsParser::try_parse_from(["--all", "42"])
+            .expect_err("--all with positional targets should be rejected");
+    }
+
+    #[test]
+    fn rerun_watch_flags_require_watch() {
+        RerunArgsParser::try_parse_from(["42", "--poll-interval", "30"])
+            .expect_err("--poll-interval without --watch should be rejected");
+        RerunArgsParser::try_parse_from(["42", "--max-retries", "3"])
+            .expect_err("--max-retries without --watch should be rejected");
+        RerunArgsParser::try_parse_from(["--watch", "--poll-interval", "0"])
+            .expect_err("a zero poll interval should be rejected");
+
+        let parsed = RerunArgsParser::try_parse_from([
+            "--watch",
+            "--poll-interval",
+            "30",
+            "--max-retries",
+            "3",
+        ])
+        .expect("watch flags should parse with --watch")
+        .args;
+        assert_eq!(parsed.poll_interval, 30);
+        assert_eq!(parsed.max_retries, Some(3));
     }
 
     #[test]
