@@ -12,7 +12,9 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 
-const FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+/// Braille spinner frames, shared with other liveness indicators (e.g. the
+/// `pr rerun --watch` footer).
+pub const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const TICK: Duration = Duration::from_millis(100);
 const CLEAR: &str = "\r\x1b[2K";
 
@@ -163,7 +165,7 @@ fn tick_loop() {
         if state.suspended > 0 {
             continue;
         }
-        let glyph = FRAMES[frame % FRAMES.len()];
+        let glyph = SPINNER_FRAMES[frame % SPINNER_FRAMES.len()];
         frame = frame.wrapping_add(1);
         let msg = &state.stack[0].1;
         let line = format!("{dim}{glyph} {msg}{dim:#}");

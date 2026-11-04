@@ -14,7 +14,7 @@ pub mod real;
 pub mod remote;
 pub mod stack_create;
 pub mod stack_detect;
-pub use queries::{CiStatus, PrWithCiStatus};
+pub use queries::{CheckCounts, CiStatus, PrWithCiStatus};
 pub use reviewer::Reviewer;
 
 /// Summary of an existing pull request. Just the fields we render.

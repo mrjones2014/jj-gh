@@ -247,7 +247,9 @@ By default, failed jobs are re-run on each PR's completed workflow runs with a r
 
 When several PRs are targeted, a failure on one PR does not stop the others; the command reports a summary error at the end instead.
 
-**Usage:** `jj-gh pr rerun [OPTIONS] <PR_NUM|REVSET|--all>`
+With `--watch`, instead of a one-shot retry the selected PRs are polled continuously and retryable failures are retried as they happen (optionally capped per run with `--max-retries`), until you quit. A bare `--watch` implies `--all` and, unlike one-shot `--all`, also watches currently-green PRs since they can go red later. On a terminal this shows an inline list with one row per PR (`j`/`k` to move, `R` to force a cancel-and-retry of the selected PR, `q` to quit); without one it prints plain log lines per event instead.
+
+**Usage:** `jj-gh pr rerun [OPTIONS] <PR_NUM|REVSET|--all|--watch>`
 
 ###### **Arguments:**
 
@@ -258,9 +260,16 @@ When several PRs are targeted, a failure on one PR does not stop the others; the
 - `--all` — Rerun CI on all local PRs (the default/--cancel/--all-jobs rules still apply to each PR)
 - `--cancel` — Cancel in-progress runs that already contain at least one failed job, wait for them to finalize, then retry. With --all-jobs, cancels ALL in-progress runs and restarts the entire pipeline
 - `--all-jobs` — Re-run ALL jobs in the targeted workflow runs, even successful ones, instead of only failed jobs. Not to be confused with `--all`, which targets all local PRs rather than all jobs
-- `--cancel-timeout <SECS>` — Seconds to wait for cancelled runs to finalize before re-running. Only meaningful with --cancel
+- `--cancel-timeout <SECS>` — Seconds to wait for cancelled runs to finalize before re-running. Only meaningful with --cancel (ignored in watch mode, which never blocks on a cancelled run)
 
   Default value: `30`
+
+- `--watch` — Keep watching the selected PRs and retry failures as they happen, until you quit. With no other selection, watches every local open PR, including currently-green ones (they can go red later). New PRs matching the selection are picked up while running; merged and closed PRs stay listed with a checkmark
+- `--poll-interval <SECS>` — Seconds between CI status polls in watch mode
+
+  Default value: `15`
+
+- `--max-retries <N>` — Watch mode retry budget per workflow run: a run that keeps failing after this many automatic retries is marked given-up and left alone (press R on the PR to force another retry). Unlimited when not set
 
 ## `jj-gh pr stack`
 

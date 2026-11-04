@@ -10,6 +10,7 @@
 //!   failed job ("doomed" runs), wait for them to finalize, then retry.
 //! - `--cancel --all-jobs`: cancel ALL in-progress runs and restart the
 //!   entire pipeline.
+//! - `--watch`: long-running babysitter mode; see [`watch`].
 //!
 //! Hard errors on one PR do not stop the others; a summary error is returned
 //! at the end if any PR failed.
@@ -28,6 +29,10 @@ use jj_gh_config_derive::subcommand_args;
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
+#[cfg(test)]
+pub(crate) mod test_support;
+mod watch;
+
 subcommand_args! {
     pub struct RerunArgs {
         /// PR numbers and/or jj revsets to look up PRs from. A numeric
@@ -38,7 +43,7 @@ subcommand_args! {
 
         /// Rerun CI on all local PRs (the default/--cancel/--all-jobs rules
         /// still apply to each PR).
-        #[arg(long, group = "retry_target")]
+        #[arg(long, group = "retry_target", conflicts_with = "revsets")]
         pub all: bool,
 
         /// Cancel in-progress runs that already contain at least one failed
@@ -54,9 +59,35 @@ subcommand_args! {
         pub all_jobs: bool,
 
         /// Seconds to wait for cancelled runs to finalize before re-running.
-        /// Only meaningful with --cancel.
+        /// Only meaningful with --cancel (ignored in watch mode, which never
+        /// blocks on a cancelled run).
         #[arg(long, value_name = "SECS", default_value_t = 30, requires = "cancel")]
         pub cancel_timeout: u64,
+
+        /// Keep watching the selected PRs and retry failures as they happen,
+        /// until you quit. With no other selection, watches every local open
+        /// PR, including currently-green ones (they can go red later). New
+        /// PRs matching the selection are picked up while running; merged and
+        /// closed PRs stay listed with a checkmark.
+        #[arg(long, group = "retry_target")]
+        pub watch: bool,
+
+        /// Seconds between CI status polls in watch mode.
+        #[arg(
+            long,
+            value_name = "SECS",
+            default_value_t = 15,
+            requires = "watch",
+            value_parser = clap::value_parser!(u64).range(1..)
+        )]
+        pub poll_interval: u64,
+
+        /// Watch mode retry budget per workflow run: a run that keeps failing
+        /// after this many automatic retries is marked given-up and left
+        /// alone (press R on the PR to force another retry). Unlimited when
+        /// not set.
+        #[arg(long, value_name = "N", requires = "watch")]
+        pub max_retries: Option<u32>,
     }
 }
 
@@ -64,9 +95,9 @@ const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
 /// Describes how/which jobs to rerun
 #[derive(Clone, Copy)]
-struct Mode {
-    cancel: bool,
-    all_jobs: bool,
+pub struct RerunMode {
+    pub cancel: bool,
+    pub all_jobs: bool,
 }
 
 /// One PR to act on (owner/repo come from the shared [`Target`]).
@@ -85,6 +116,9 @@ struct Outcome {
 
 #[inline]
 pub async fn run(model: &impl Model, args: &RerunArgs) -> Result<()> {
+    if args.watch {
+        return watch::run(model, args).await;
+    }
     run_with(model, args, DEFAULT_POLL_INTERVAL).await
 }
 
@@ -96,6 +130,9 @@ async fn run_with(model: &impl Model, args: &RerunArgs, poll_interval: Duration)
         cancel,
         all_jobs,
         cancel_timeout,
+        watch: _,
+        poll_interval: _,
+        max_retries: _,
         globals:
             GlobalOpts {
                 remote,
@@ -108,7 +145,7 @@ async fn run_with(model: &impl Model, args: &RerunArgs, poll_interval: Duration)
             },
     } = args;
     let upstream_remote = crate::gh::remote::resolved_upstream_remote(upstream_remote);
-    let mode = Mode {
+    let mode = RerunMode {
         cancel: *cancel,
         all_jobs: *all_jobs,
     };
@@ -209,7 +246,7 @@ async fn targets_from_all(
     model: &impl Model,
     remote: &EvalWithCfgFallback<String>,
     upstream_remote: &str,
-    mode: Mode,
+    mode: RerunMode,
 ) -> Result<(Target, Vec<RerunTarget>)> {
     let local = model.local_pulls(remote, Some(upstream_remote)).await?;
     let targets = local
@@ -238,7 +275,7 @@ async fn rerun_pr(
     owner: &str,
     repo: &str,
     pr: &RerunTarget,
-    mode: Mode,
+    mode: RerunMode,
     cancel_timeout: u64,
     poll_interval: Duration,
 ) -> Result<Outcome> {
@@ -319,7 +356,7 @@ async fn rerun_pr(
 
 /// Split runs into `(completed, in_progress)`, where "in progress" is any
 /// non-`Completed` status (queued, waiting, etc.).
-fn split_completed(runs: Vec<WorkflowRun>) -> (Vec<WorkflowRun>, Vec<WorkflowRun>) {
+pub(super) fn split_completed(runs: Vec<WorkflowRun>) -> (Vec<WorkflowRun>, Vec<WorkflowRun>) {
     runs.into_iter()
         .partition(|r| r.status == WorkflowRunStatus::Completed)
 }
@@ -376,7 +413,7 @@ async fn collect_doomed<'a>(
     Ok(doomed)
 }
 
-fn first_failed_job(jobs: &[WorkflowJob]) -> Option<&WorkflowJob> {
+pub(super) fn first_failed_job(jobs: &[WorkflowJob]) -> Option<&WorkflowJob> {
     jobs.iter().find(|j| {
         j.conclusion
             .is_some_and(crate::gh::WorkflowRunConclusion::is_retryable_failure)
@@ -512,415 +549,12 @@ async fn poll_until_settled(
 mod tests {
     use super::*;
     use crate::{
-        gh::{
-            BaseLookup, CreatePrRequest, Label, PrCreated, PrDetails, PrSummary, PrWithCiStatus,
-            UpdatePr, WorkflowRun, WorkflowRunConclusion, WorkflowRunStatus,
+        commands::pr::rerun::test_support::{
+            FakeGh, FakeJj, all_args, args, commit, job, local_pr, pr_details, wr,
         },
-        jj::{CommitInfo, PushedBookmark},
+        gh::{WorkflowRunConclusion, WorkflowRunStatus},
         model::TestModel,
     };
-    use std::collections::HashMap;
-    use std::path::Path;
-    use std::sync::Mutex;
-
-    fn pr_details(number: u64, sha: &str) -> PrDetails {
-        PrDetails {
-            is_draft: false,
-            auto_merge: false,
-            auto_merge_method: None,
-            number,
-            title: "t".into(),
-            html_url: format!("https://github.com/o/r/pull/{number}"),
-            head_ref: "feat".into(),
-            base_ref: "main".into(),
-            head_sha: sha.into(),
-            base_sha: "base".into(),
-            head_user_login: Some("o".into()),
-            head_repo_name: Some("r".into()),
-            graphql_node_id: "node".into(),
-            in_merge_queue: false,
-            labels: Vec::<Label>::new(),
-            reviewers: vec![],
-            body: String::new(),
-            stack_number: None,
-        }
-    }
-
-    fn wr(
-        id: u64,
-        status: WorkflowRunStatus,
-        conclusion: Option<WorkflowRunConclusion>,
-    ) -> WorkflowRun {
-        WorkflowRun {
-            id,
-            status,
-            conclusion,
-        }
-    }
-
-    fn job(id: u64, conclusion: Option<WorkflowRunConclusion>) -> WorkflowJob {
-        WorkflowJob { id, conclusion }
-    }
-
-    fn commit(change_id: &str, bookmarks: &[&str]) -> CommitInfo {
-        CommitInfo {
-            change_id: change_id.into(),
-            commit_id: format!("{change_id}-commit"),
-            description: "d".into(),
-            bookmarks: bookmarks.iter().map(|b| (*b).into()).collect(),
-        }
-    }
-
-    #[derive(Default)]
-    struct FakeJj {
-        revset_commits: Vec<CommitInfo>,
-    }
-
-    impl FakeJj {
-        fn with_revset_commits(commits: Vec<CommitInfo>) -> Self {
-            Self {
-                revset_commits: commits,
-            }
-        }
-    }
-
-    impl crate::jj::Jj for FakeJj {
-        fn default_remote(&self) -> Result<Option<String>> {
-            Ok(Some("origin".into()))
-        }
-
-        fn remote_names(&self) -> Result<Vec<String>> {
-            Ok(vec!["origin".into()])
-        }
-
-        async fn resolve_rev(&self, _rev: &str) -> Result<CommitInfo> {
-            unimplemented!("rerun resolves revsets, not single revs")
-        }
-        fn resolve_revset(&self, _revset: &str) -> impl Future<Output = Result<Vec<CommitInfo>>> {
-            std::future::ready(Ok(self.revset_commits.clone()))
-        }
-        async fn stacked_ancestor_bookmark(&self, _rev: &str) -> Result<Option<String>> {
-            unimplemented!()
-        }
-        async fn first_commit_description(&self, _revset: &str) -> Result<String> {
-            unimplemented!()
-        }
-        fn remote_url(&self, name: &str) -> Result<Option<String>> {
-            // resolve_target asks for default + upstream remote URLs.
-            if name == "origin" {
-                Ok(Some("git@github.com:o/r.git".into()))
-            } else {
-                Ok(None)
-            }
-        }
-        async fn remote_bookmark_sha(&self, _: &str, _: &str) -> Result<Option<String>> {
-            unimplemented!()
-        }
-        async fn push(
-            &self,
-            _rev: &str,
-            _bookmark: Option<&str>,
-            _remote: String,
-            _allow_private: bool,
-        ) -> Result<()> {
-            unimplemented!()
-        }
-        async fn private_commits_revset(&self) -> Result<Option<String>> {
-            unimplemented!()
-        }
-        async fn trunk_branch(&self) -> Result<Option<String>> {
-            unimplemented!()
-        }
-        async fn git_import(&self) -> Result<()> {
-            unimplemented!()
-        }
-        fn pushed_bookmarks(
-            &self,
-            _remote: &str,
-        ) -> impl Future<Output = Result<Vec<PushedBookmark>>> {
-            std::future::ready(Ok(vec![PushedBookmark {
-                name: "feat".into(),
-                local_commit_id: "local".into(),
-            }]))
-        }
-        async fn eval_template(
-            &self,
-            _revset: &str,
-            _template: &str,
-            _config_file: Option<&Path>,
-            _reversed: bool,
-            _color: bool,
-        ) -> Result<String> {
-            unimplemented!()
-        }
-        async fn diff(&self, _revset: &str) -> Result<String> {
-            unimplemented!()
-        }
-        async fn pr_diff(&self, _: &str, _: &str) -> Result<String> {
-            unimplemented!()
-        }
-    }
-
-    #[derive(Default)]
-    struct Calls {
-        cancelled: Vec<u64>,
-        rerun: Vec<u64>,
-        rerun_failed: Vec<u64>,
-        list_jobs: Vec<u64>,
-        listed_shas: Vec<String>,
-    }
-
-    struct FakeGh {
-        pr: PrDetails,
-        prs_by_number: HashMap<u64, PrDetails>,
-        /// `head_spec` -> open PR number, for `find_open_pr`.
-        open_prs: HashMap<String, u64>,
-        local_prs: Mutex<Vec<PrWithCiStatus>>,
-        /// Successive responses to `list_workflow_runs_for_sha`. Last entry
-        /// repeats once exhausted.
-        list_responses: Mutex<Vec<Vec<WorkflowRun>>>,
-        /// `list_workflow_runs_for_sha` fails for these head SHAs.
-        fail_list_for_shas: HashSet<String>,
-        jobs_by_run: HashMap<u64, Vec<WorkflowJob>>,
-        calls: Mutex<Calls>,
-    }
-
-    impl FakeGh {
-        fn new(pr: PrDetails, responses: Vec<Vec<WorkflowRun>>) -> Self {
-            Self {
-                pr,
-                prs_by_number: HashMap::new(),
-                open_prs: HashMap::new(),
-                local_prs: Mutex::new(Vec::new()),
-                list_responses: Mutex::new(responses),
-                fail_list_for_shas: HashSet::new(),
-                jobs_by_run: HashMap::new(),
-                calls: Mutex::new(Calls::default()),
-            }
-        }
-
-        fn with_local_prs(self, prs: Vec<PrWithCiStatus>) -> Self {
-            *self.local_prs.lock().unwrap() = prs;
-            self
-        }
-
-        fn with_pr(mut self, pr: PrDetails) -> Self {
-            self.prs_by_number.insert(pr.number, pr);
-            self
-        }
-
-        fn with_open_pr(mut self, head_spec: &str, number: u64) -> Self {
-            self.open_prs.insert(head_spec.into(), number);
-            self
-        }
-
-        fn with_jobs(mut self, run_id: u64, jobs: Vec<WorkflowJob>) -> Self {
-            self.jobs_by_run.insert(run_id, jobs);
-            self
-        }
-
-        fn with_list_failure(mut self, sha: &str) -> Self {
-            self.fail_list_for_shas.insert(sha.into());
-            self
-        }
-    }
-
-    impl Gh for FakeGh {
-        fn find_open_pr(
-            &self,
-            _o: &str,
-            _r: &str,
-            head_spec: &str,
-        ) -> impl Future<Output = Result<Option<PrSummary>>> {
-            std::future::ready(Ok(self.open_prs.get(head_spec).map(|number| PrSummary {
-                number: *number,
-                html_url: format!("https://github.com/o/r/pull/{number}"),
-                title: "t".into(),
-                state: "open".into(),
-            })))
-        }
-        async fn lookup_base(&self, _: &str, _: &str, _: &str) -> Result<BaseLookup> {
-            unimplemented!()
-        }
-        async fn create_pr(&self, _req: CreatePrRequest) -> Result<PrCreated> {
-            unimplemented!()
-        }
-        async fn add_reviewers(
-            &self,
-            _o: &str,
-            _r: &str,
-            _p: u64,
-            _: Vec<crate::gh::Reviewer>,
-        ) -> Result<()> {
-            unimplemented!()
-        }
-        async fn remove_reviewers(
-            &self,
-            _o: &str,
-            _r: &str,
-            _p: u64,
-            _: Vec<crate::gh::Reviewer>,
-        ) -> Result<()> {
-            unimplemented!()
-        }
-        async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<()> {
-            unimplemented!()
-        }
-        async fn remove_labels(&self, _: &str, _: &[String]) -> Result<()> {
-            unimplemented!()
-        }
-        async fn update_pr(&self, _req: UpdatePr) -> Result<()> {
-            unimplemented!()
-        }
-        async fn set_draft(&self, _id: &str, _d: bool) -> Result<()> {
-            unimplemented!()
-        }
-        async fn disable_auto_merge(&self, _id: &str) -> Result<()> {
-            unimplemented!()
-        }
-        fn get_pr(&self, _o: &str, _r: &str, n: u64) -> impl Future<Output = Result<PrDetails>> {
-            std::future::ready(Ok(self
-                .prs_by_number
-                .get(&n)
-                .cloned()
-                .unwrap_or_else(|| self.pr.clone())))
-        }
-        async fn get_pr_diff(&self, _: &str, _: &str, _: u64) -> Result<String> {
-            unimplemented!()
-        }
-        async fn enable_auto_merge(
-            &self,
-            _id: &str,
-            _m: crate::config::AutoMergeMethod,
-        ) -> Result<()> {
-            unimplemented!()
-        }
-        fn local_pulls(
-            &self,
-            _o: &str,
-            _r: &str,
-            _head_owner: &str,
-            _b: &[String],
-        ) -> impl Future<Output = Result<Vec<PrWithCiStatus>>> {
-            std::future::ready(Ok(std::mem::take(&mut *self.local_prs.lock().unwrap())))
-        }
-        fn list_workflow_runs_for_sha(
-            &self,
-            _o: &str,
-            _r: &str,
-            sha: &str,
-        ) -> impl Future<Output = Result<Vec<WorkflowRun>>> {
-            self.calls.lock().unwrap().listed_shas.push(sha.into());
-            if self.fail_list_for_shas.contains(sha) {
-                return std::future::ready(Err(anyhow::anyhow!("boom listing runs for {sha}")));
-            }
-            let mut q = self.list_responses.lock().unwrap();
-            std::future::ready(if q.len() > 1 {
-                Ok(q.remove(0))
-            } else {
-                Ok(q.first().cloned().unwrap_or_default())
-            })
-        }
-        fn list_jobs_for_run(
-            &self,
-            _o: &str,
-            _r: &str,
-            run_id: u64,
-        ) -> impl Future<Output = Result<Vec<WorkflowJob>>> {
-            self.calls.lock().unwrap().list_jobs.push(run_id);
-            std::future::ready(Ok(self
-                .jobs_by_run
-                .get(&run_id)
-                .cloned()
-                .unwrap_or_default()))
-        }
-        fn cancel_workflow_run(
-            &self,
-            _o: &str,
-            _r: &str,
-            id: u64,
-        ) -> impl Future<Output = Result<()>> {
-            self.calls.lock().unwrap().cancelled.push(id);
-            std::future::ready(Ok(()))
-        }
-        fn rerun_workflow_run(
-            &self,
-            _o: &str,
-            _r: &str,
-            id: u64,
-        ) -> impl Future<Output = Result<()>> {
-            self.calls.lock().unwrap().rerun.push(id);
-            std::future::ready(Ok(()))
-        }
-        fn rerun_failed_jobs(
-            &self,
-            _o: &str,
-            _r: &str,
-            id: u64,
-        ) -> impl Future<Output = Result<()>> {
-            self.calls.lock().unwrap().rerun_failed.push(id);
-            std::future::ready(Ok(()))
-        }
-        async fn create_stack(
-            &self,
-            _: &str,
-            _: &str,
-            _: &[u64],
-        ) -> Result<crate::gh::PullRequestStack> {
-            unimplemented!()
-        }
-        async fn unstack_prs(&self, _: &str, _: &str, _: u64, _: &[u64]) -> Result<()> {
-            unimplemented!()
-        }
-        async fn list_stacks(&self, _: &str, _: &str) -> Result<Vec<crate::gh::PullRequestStack>> {
-            unimplemented!()
-        }
-    }
-
-    fn args(targets: &[&str], cancel: bool, timeout: u64) -> RerunArgs {
-        RerunArgs {
-            revsets: targets.iter().map(|t| (*t).into()).collect(),
-            all: false,
-            cancel,
-            all_jobs: false,
-            cancel_timeout: timeout,
-            globals: GlobalOpts {
-                verbose: 0,
-                quiet: false,
-                log_level: None,
-                remote: crate::util::EvalWithCfgFallback::new(Some("origin".into()), None),
-                upstream_remote: crate::util::EvalWithCfgFallback::new(None, None),
-                gh_askpass: None,
-                askpass_timeout_secs: 20,
-            },
-        }
-    }
-
-    fn all_args(cancel: bool, timeout: u64) -> RerunArgs {
-        RerunArgs {
-            all: true,
-            ..args(&[], cancel, timeout)
-        }
-    }
-
-    fn local_pr(number: u64, sha: &str, status: CiStatus) -> PrWithCiStatus {
-        PrWithCiStatus {
-            id: format!("node-{number}"),
-            number,
-            url: format!("https://github.com/o/r/pull/{number}"),
-            title: "t".into(),
-            head_ref_name: "feat".into(),
-            head_owner: Some("o".into()),
-            head_sha: sha.into(),
-            base_ref_name: "main".into(),
-            is_draft: false,
-            merged: false,
-            is_in_merge_queue: false,
-            ci_status: status,
-            auto_merge_enabled: false,
-        }
-    }
-
     #[tokio::test]
     async fn default_retries_only_failed_completed_runs() {
         let pr = pr_details(42, "deadbeef");

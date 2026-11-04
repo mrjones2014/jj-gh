@@ -55,18 +55,81 @@ impl Stream {
 
     /// Whether OSC 8 hyperlinks render on this stream.
     ///
-    /// Narrower than [`Stream::on`]: color support is near-universal, but
-    /// `screen` mangles OSC 8 and `TERM=dumb` shows it verbatim.
-    /// `supports_hyperlinks::on` lets `FORCE_HYPERLINK` override the TTY check,
-    /// which would put escapes into a pipe, so the TTY check is repeated here.
+    /// Emitted by default on a terminal: a VT-conformant emulator that does
+    /// not support OSC 8 consumes the sequence invisibly, so there is no
+    /// allowlist of known-good terminals to maintain. The gate only covers
+    /// the cases where emitting would do real harm, plus honesty for the
+    /// underline cue (see [`Stream::underline`]):
+    ///
+    /// - not a terminal: a pipe must get plain text (`jj-gh pr url 1 |
+    ///   pbcopy`), which is also why `FORCE_HYPERLINK` is honored only on a
+    ///   TTY;
+    /// - `NO_COLOR`: links imply underline decoration;
+    /// - the known-broken environments listed in [`hyperlinks_safe`].
     fn hyperlinks_supported(self) -> bool {
-        self.is_terminal()
-            && std::env::var_os("NO_COLOR").is_none_or(|value| value.is_empty())
-            && supports_hyperlinks::on(match self {
-                Self::Stdout => supports_hyperlinks::Stream::Stdout,
-                Self::Stderr => supports_hyperlinks::Stream::Stderr,
-            })
+        if !self.is_terminal() || std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty()) {
+            return false;
+        }
+        if let Ok(force) = std::env::var("FORCE_HYPERLINK") {
+            return force.trim() != "0";
+        }
+        let var = |name| std::env::var(name).ok();
+        hyperlinks_safe(
+            &var("TERM").unwrap_or_default(),
+            std::env::var_os("TMUX").is_some_and(|value| !value.is_empty()),
+            var("TERM_PROGRAM_VERSION").as_deref(),
+            var("VTE_VERSION").as_deref(),
+        )
     }
+}
+
+/// The blocklist behind [`Stream::hyperlinks_supported`]: environments where
+/// OSC 8 is known to misbehave rather than being invisibly ignored.
+///
+/// - `TERM=dumb` does not parse escapes at all and shows the bytes verbatim;
+/// - tmux consumes OSC 8 itself but only renders it since 3.4, so on older
+///   tmux the underline would promise a link that cannot work (tmux has set
+///   `TERM_PROGRAM_VERSION` since 3.2; absent means older still). Checked
+///   before the `screen` prefix because tmux is often configured with
+///   `TERM=screen-256color`;
+/// - GNU screen mangles OSC 8 rather than ignoring it;
+/// - VTE before 0.50 crashed on OSC 8 (the bug that spawned the various
+///   terminal-detection crates in the first place).
+fn hyperlinks_safe(
+    term: &str,
+    tmux: bool,
+    tmux_version: Option<&str>,
+    vte_version: Option<&str>,
+) -> bool {
+    if term == "dumb" {
+        return false;
+    }
+    if tmux {
+        return tmux_version.is_some_and(tmux_version_has_hyperlinks);
+    }
+    if term.starts_with("screen") {
+        return false;
+    }
+    if let Some(vte) = vte_version {
+        return vte.parse::<u32>().unwrap_or(0) >= 5000;
+    }
+    true
+}
+
+/// Whether a tmux version string ("3.4", "3.5a", "next-3.6") is at least 3.4,
+/// the release that added OSC 8 support.
+fn tmux_version_has_hyperlinks(version: &str) -> bool {
+    let version = version.trim_start_matches("next-");
+    let mut parts = version.split('.');
+    let Some(major) = parts.next().and_then(|s| s.parse::<u32>().ok()) else {
+        return false;
+    };
+    let minor = parts
+        .next()
+        .map(|s| s.trim_end_matches(|c: char| !c.is_ascii_digit()))
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(0);
+    major > 3 || (major == 3 && minor >= 4)
 }
 
 pub trait Hyperlink {
@@ -122,5 +185,40 @@ mod tests {
             render_hyperlink("#12", "https://x/12", true),
             "\u{1b}]8;;https://x/12\u{1b}\\#12\u{1b}]8;;\u{1b}\\"
         );
+    }
+
+    #[test]
+    fn hyperlinks_default_on_with_a_short_blocklist() {
+        // Unknown terminals are fine: unsupported OSC 8 is invisibly ignored.
+        assert!(hyperlinks_safe("xterm-256color", false, None, None));
+        assert!(hyperlinks_safe("made-up-term", false, None, None));
+        // Dumb terminals print the bytes verbatim.
+        assert!(!hyperlinks_safe("dumb", false, None, None));
+        // GNU screen mangles OSC 8.
+        assert!(!hyperlinks_safe("screen-256color", false, None, None));
+        // tmux wins over its legacy screen-flavored TERM, by version.
+        assert!(hyperlinks_safe("screen-256color", true, Some("3.8"), None));
+        assert!(!hyperlinks_safe("tmux-256color", true, Some("3.3a"), None));
+        assert!(!hyperlinks_safe("tmux-256color", true, None, None));
+        // VTE crashed on OSC 8 before 0.50.
+        assert!(!hyperlinks_safe(
+            "xterm-256color",
+            false,
+            None,
+            Some("4903")
+        ));
+        assert!(hyperlinks_safe("xterm-256color", false, None, Some("6003")));
+    }
+
+    #[test]
+    fn tmux_hyperlink_support_starts_at_3_4() {
+        assert!(tmux_version_has_hyperlinks("3.4"));
+        assert!(tmux_version_has_hyperlinks("3.5a"));
+        assert!(tmux_version_has_hyperlinks("3.8"));
+        assert!(tmux_version_has_hyperlinks("next-3.6"));
+        assert!(tmux_version_has_hyperlinks("4.0"));
+        assert!(!tmux_version_has_hyperlinks("3.3a"));
+        assert!(!tmux_version_has_hyperlinks("2.9"));
+        assert!(!tmux_version_has_hyperlinks("garbage"));
     }
 }
