@@ -119,8 +119,9 @@ pub enum PrAction {
     /// quit. A bare `--watch` implies `--all` and, unlike one-shot `--all`,
     /// also watches currently-green PRs since they can go red later. On a
     /// terminal this shows an inline list with one row per PR (`j`/`k` to
-    /// move, `R` to force a cancel-and-retry of the selected PR, `q` to
-    /// quit); without one it prints plain log lines per event instead.
+    /// move, `p` to pause retrying the selected PR, `R` to force a
+    /// cancel-and-retry of it, `q` to quit); without one it prints plain log
+    /// lines per event instead.
     #[command(
         alias = "retry-failed",
         group = clap::ArgGroup::new("retry_target").required(true).multiple(true)

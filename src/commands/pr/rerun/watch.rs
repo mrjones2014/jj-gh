@@ -21,8 +21,10 @@
 //! in-progress run on every tick would kill the very reruns this loop starts.
 //!
 //! On a TTY this renders an inline list (one row per PR) with `j`/`k`/`g`/`G`
-//! to move, `R` to force a retry of the selected PR right now (cancel + rerun,
-//! even mid-run, bypassing the retry budget), and `q`/Esc/Ctrl-C to quit.
+//! to move, `p` to pause/resume retrying the selected PR (watched but left
+//! alone, marked with a pause icon), `R` to force a retry of the selected PR
+//! right now (cancel + rerun, even mid-run, bypassing the retry budget and
+//! any pause), and `q`/Esc/Ctrl-C to quit.
 //! Without a TTY it logs one line per event instead and runs until killed,
 //! with a spinner status line on stderr when that is a terminal.
 
@@ -186,6 +188,9 @@ struct PrState {
     /// `R` was pressed: next tick cancels in-progress runs and retries failed
     /// ones, bypassing the retry budget.
     force: bool,
+    /// `p` was pressed: watching continues (status from the cheap rollup) but
+    /// nothing is cancelled or retried until unpaused. `R` still acts.
+    paused: bool,
     /// Found via the local-PR search. Disappearing from the open set, or
     /// flipping to a direct-lookup candidate (`local: false`), means merged or
     /// closed rather than merely deselected.
@@ -205,6 +210,7 @@ impl PrState {
             status: PrDisplayStatus::Pending,
             retries: 0,
             force: false,
+            paused: false,
             local: candidate.local,
             runs: HashMap::new(),
         }
@@ -488,6 +494,25 @@ impl Watcher {
         let number = self.prs.keys().nth(idx).copied();
         number.is_some_and(|number| self.force_retry(number))
     }
+
+    /// Toggle retry-pausing for a PR by row index in display (number) order.
+    /// Paused PRs stay watched but are left alone until unpaused or forced.
+    fn toggle_pause_at(&mut self, idx: usize) -> bool {
+        let Some(pr) = self
+            .prs
+            .keys()
+            .nth(idx)
+            .copied()
+            .and_then(|number| self.prs.get_mut(&number))
+        else {
+            return false;
+        };
+        if pr.status == PrDisplayStatus::Done {
+            return false;
+        }
+        pr.paused = !pr.paused;
+        true
+    }
 }
 
 /// Whether this tick must fetch the PR's workflow runs. Green and healthy
@@ -512,6 +537,23 @@ async fn process_pr(
 ) -> Result<Vec<WatchEvent>> {
     let mut events = Vec::new();
     let was_green = pr.status == PrDisplayStatus::Green;
+    // A paused PR is still watched, but the cheap rollup is the only source:
+    // no runs are listed, cancelled, or retried. A forced retry (`R`) still
+    // acts, bypassing the pause for that tick.
+    if pr.paused && !pr.force {
+        pr.status = match pr.rollup {
+            Some(CiStatus::Pending) => PrDisplayStatus::Pending,
+            Some(CiStatus::None) => PrDisplayStatus::NoChecks,
+            Some(CiStatus::Failed) => PrDisplayStatus::Failed,
+            Some(CiStatus::Success) => PrDisplayStatus::Green,
+            // Non-local PRs have no rollup; freeze the last status.
+            None => pr.status,
+        };
+        if pr.status == PrDisplayStatus::Green && !was_green {
+            events.push(WatchEvent::Green { number: pr.number });
+        }
+        return Ok(events);
+    }
     if !needs_inspection(pr, opts) {
         pr.status = match pr.rollup {
             Some(CiStatus::Pending) => PrDisplayStatus::Pending,
@@ -632,7 +674,9 @@ async fn retry_failed(
         let forced = pr.force;
         let state = pr.runs.entry(run.id).or_default();
         state.cancel_requested = false;
-        if state.restart_grace > 0 {
+        // The grace window only guards against auto-retrying a stale
+        // snapshot; an explicit `R` means "retry right now" and skips it.
+        if !forced && state.restart_grace > 0 {
             state.restart_grace -= 1;
             continue;
         }
@@ -932,12 +976,15 @@ fn handle_key(watcher: &mut Watcher, ui: &mut Ui, key: KeyEvent) -> KeyOutcome {
     if key.code == KeyCode::Char('R') && watcher.force_retry_at(ui.state.selected) {
         return KeyOutcome::ForceTick;
     }
+    if key.code == KeyCode::Char('p') && watcher.toggle_pause_at(ui.state.selected) {
+        return KeyOutcome::Redraw;
+    }
     KeyOutcome::Ignored
 }
 
 const FOOTER_LINES: u16 = 2;
 const MAX_VISIBLE_ROWS: usize = 15;
-const KEYMAP: &str = "j/k=move  g/G=first/last  R=force retry (cancel + rerun)  q=quit";
+const KEYMAP: &str = "j/k=move  g/G=first/last  p=pause  R=force retry (cancel + rerun)  q=quit";
 const EMPTY_PLACEHOLDER: &str = "(no PRs selected yet; waiting)";
 
 /// What the watch loop is doing right now, for the footer's liveness cue.
@@ -1063,14 +1110,14 @@ impl Ui {
 const STATUS_COL_WIDTH: usize = 10;
 /// Check-count cell width: fits e.g. "● 9 / ✓ 99 / ✗ 9".
 const COUNTS_COL_WIDTH: usize = 16;
-/// Retry cell width: fits "99 retries".
-const RETRY_COL_WIDTH: usize = 10;
+/// Retry cell width: fits "⏸ 99 retries".
+const RETRY_COL_WIDTH: usize = 12;
 /// Joins the check-count buckets: `● 2 / ✓ 10 / ✗ 1`.
 const COUNTS_SEPARATOR: &str = " / ";
 
 fn render_row(pr: &PrState, cols: usize, spinner: usize) -> String {
     let number = format!("#{:<6}", pr.number);
-    let retries = format!("{:<RETRY_COL_WIDTH$}", retry_cell(pr.retries));
+    let retries = format!("{:<RETRY_COL_WIDTH$}", retry_cell(pr.retries, pr.paused));
     let (counts, counts_width) = counts_cell(pr.check_counts);
     let counts_pad = COUNTS_COL_WIDTH.saturating_sub(counts_width);
     // Plain separator width is 3 (" | ") three times, plus the space between
@@ -1087,7 +1134,11 @@ fn render_row(pr: &PrState, cols: usize, spinner: usize) -> String {
         number_cell(pr, &number),
         status_cell(pr.status, spinner),
         "",
-        retries.as_str().dark_grey(),
+        if pr.paused {
+            retries.as_str().dark_yellow()
+        } else {
+            retries.as_str().dark_grey()
+        },
         truncate(&pr.title, available)
     )
 }
@@ -1131,12 +1182,18 @@ fn counts_cell(counts: Option<CheckCounts>) -> (String, usize) {
 }
 
 /// How many automatic retries this head has cost so far; blank until the
-/// first one so healthy rows stay quiet.
-fn retry_cell(retries: u32) -> String {
-    match retries {
+/// first one so healthy rows stay quiet. A paused PR gets the pause icon
+/// (U+23F8, plain Unicode, no special font needed) in front of the count.
+fn retry_cell(retries: u32, paused: bool) -> String {
+    let count = match retries {
         0 => String::new(),
-        1 => "1 retry".into(),
+        1 => "1 retry".to_string(),
         n => format!("{n} retries"),
+    };
+    match (paused, count.is_empty()) {
+        (false, _) => count,
+        (true, true) => "⏸".to_string(),
+        (true, false) => format!("⏸ {count}"),
     }
 }
 
@@ -1747,9 +1804,11 @@ mod tests {
 
     #[test]
     fn status_cells_are_constant_width_and_retry_cell_hides_zero() {
-        assert_eq!(retry_cell(0), "");
-        assert_eq!(retry_cell(1), "1 retry");
-        assert_eq!(retry_cell(3), "3 retries");
+        assert_eq!(retry_cell(0, false), "");
+        assert_eq!(retry_cell(1, false), "1 retry");
+        assert_eq!(retry_cell(3, false), "3 retries");
+        assert_eq!(retry_cell(0, true), "⏸");
+        assert_eq!(retry_cell(3, true), "⏸ 3 retries");
         for status in [
             PrDisplayStatus::Pending,
             PrDisplayStatus::Failed,
@@ -1814,6 +1873,72 @@ mod tests {
                 failed: 0,
             })
         );
+    }
+
+    #[tokio::test]
+    async fn paused_prs_are_watched_but_not_retried_until_unpaused() {
+        let gh = FakeGh::new(pr_details(0, "unused"), vec![])
+            .with_local_prs(vec![local_pr(1, "sha", CiStatus::Failed)])
+            .with_runs_for_sha("sha", vec![failed_run(7)]);
+        let jj = FakeJj::default();
+        let mut watcher = Watcher::new(Selection::All, opts(false, false, None));
+
+        tick(&mut watcher, &jj, &gh).await;
+        assert!(watcher.toggle_pause_at(0), "pause the only row");
+        tick(&mut watcher, &jj, &gh).await;
+
+        {
+            let calls = gh.calls.lock().unwrap();
+            assert_eq!(
+                calls.listed_shas,
+                vec!["sha"],
+                "a paused PR must not even list runs"
+            );
+            assert_eq!(calls.rerun_failed, vec![7], "only the pre-pause retry");
+        }
+        assert_eq!(
+            watcher.prs[&1].status,
+            PrDisplayStatus::Failed,
+            "paused status comes from the rollup"
+        );
+
+        assert!(watcher.toggle_pause_at(0), "unpause");
+        // Unpaused again: the still-failing run is acted on (the stale grace
+        // from the pre-pause retry is consumed first).
+        tick(&mut watcher, &jj, &gh).await;
+        let calls = gh.calls.lock().unwrap();
+        assert_eq!(calls.listed_shas, vec!["sha", "sha"]);
+    }
+
+    #[tokio::test]
+    async fn forced_retry_overrides_a_pause_for_that_tick() {
+        let gh = FakeGh::new(pr_details(0, "unused"), vec![])
+            .with_local_prs(vec![local_pr(1, "sha", CiStatus::Failed)])
+            .with_runs_for_sha("sha", vec![failed_run(7)]);
+        let jj = FakeJj::default();
+        let mut watcher = Watcher::new(Selection::All, opts(false, false, None));
+
+        tick(&mut watcher, &jj, &gh).await;
+        assert!(watcher.toggle_pause_at(0));
+        assert!(watcher.force_retry(1));
+        tick(&mut watcher, &jj, &gh).await;
+
+        let calls = gh.calls.lock().unwrap();
+        assert_eq!(calls.rerun_failed, vec![7, 7], "R acts despite the pause");
+        assert!(watcher.prs[&1].paused, "the pause itself is sticky");
+    }
+
+    #[test]
+    fn p_toggles_pause_on_the_selected_row() {
+        let mut watcher = Watcher::new(Selection::All, opts(false, false, None));
+        let mut ui = Ui::default();
+        let press = |code| KeyEvent::new(code, KeyModifiers::NONE);
+
+        // p on an empty list is a no-op.
+        assert!(matches!(
+            handle_key(&mut watcher, &mut ui, press(KeyCode::Char('p'))),
+            KeyOutcome::Ignored
+        ));
     }
 
     #[test]
