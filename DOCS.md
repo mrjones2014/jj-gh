@@ -247,7 +247,7 @@ By default, failed jobs are re-run on each PR's completed workflow runs with a r
 
 When several PRs are targeted, a failure on one PR does not stop the others; the command reports a summary error at the end instead.
 
-With `--watch`, instead of a one-shot retry the selected PRs are polled continuously and retryable failures are retried as they happen (optionally capped per run with `--max-retries`), until you quit. A bare `--watch` implies `--all` and, unlike one-shot `--all`, also watches currently-green PRs since they can go red later. On a terminal this shows an inline list with one row per PR (`j`/`k` to move, `R` to force a cancel-and-retry of the selected PR, `q` to quit); without one it prints plain log lines per event instead.
+With `--watch`, instead of a one-shot retry the selected PRs are polled continuously and retryable failures are retried as they happen (optionally capped per run with `--max-retries`), until you quit. A bare `--watch` implies `--all` and, unlike one-shot `--all`, also watches currently-green PRs since they can go red later. On a terminal this shows an inline list with one row per PR (`j`/`k` to move, `p` to pause retrying the selected PR, `R` to force a cancel-and-retry of it, `q` to quit); without one it prints plain log lines per event instead.
 
 **Usage:** `jj-gh pr rerun [OPTIONS] <PR_NUM|REVSET|--all|--watch>`
 
