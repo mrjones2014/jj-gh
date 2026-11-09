@@ -26,7 +26,13 @@ let
   commonArgs = {
     inherit src;
     strictDeps = true;
-    buildInputs = lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.openssl ];
+    # aws-lc is required because nixpkgs' cargoSetupHook exports
+    # AWS_LC_SYS_USE_SYSTEM=1, which makes aws-lc-sys refuse to build from
+    # source and demand a system-installed AWS-LC.
+    buildInputs = lib.optionals pkgs.stdenv.hostPlatform.isLinux [
+      pkgs.openssl
+      pkgs.aws-lc
+    ];
     nativeBuildInputs = lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.pkg-config ];
   };
 
