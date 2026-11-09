@@ -26,14 +26,14 @@ let
   commonArgs = {
     inherit src;
     strictDeps = true;
-    # aws-lc is required because nixpkgs' cargoSetupHook exports
-    # AWS_LC_SYS_USE_SYSTEM=1, which makes aws-lc-sys refuse to build from
-    # source and demand a system-installed AWS-LC.
-    buildInputs = lib.optionals pkgs.stdenv.hostPlatform.isLinux [
-      pkgs.openssl
+    # aws-lc is required on every platform because nixpkgs' cargoSetupHook
+    # exports AWS_LC_SYS_USE_SYSTEM=1, which makes aws-lc-sys refuse to build
+    # from source and demand a system-installed AWS-LC (found via pkg-config).
+    buildInputs = [
       pkgs.aws-lc
-    ];
-    nativeBuildInputs = lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.pkg-config ];
+    ]
+    ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.openssl ];
+    nativeBuildInputs = [ pkgs.pkg-config ];
   };
 
   # Explicitly workspace-wide. The root manifest has a `[package]`
