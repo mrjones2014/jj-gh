@@ -58,8 +58,7 @@ subcommand_args! {
         pub remote: Option<String>,
 
         /// Git remote used as the PR target in fork workflows. Precedence: this
-        /// flag, then `upstream_remote` in config, else
-        /// [`crate::gh::remote::DEFAULT_UPSTREAM_REMOTE`].
+        /// flag, then `upstream_remote` in config, else `upstream`.
         #[arg(long, value_name = "NAME", global = true, help_heading = GLOBAL_OPTIONS_HEADING)]
         #[config(fallback = "upstream_remote")]
         pub upstream_remote: Option<String>,

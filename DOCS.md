@@ -44,7 +44,7 @@ Manage GitHub PR Stacks natively with `jj`
 - `-q`, `--quiet` — Drop log level to `ERROR`
 - `--log-level <LEVEL>` — Set log level explicitly, overrides `-v` and `-q`
 - `--remote <NAME>` — Git remote used for the user's own pushes and PR head lookups. Precedence: this flag, then git's auto-detected default push remote, then `default_remote` in config
-- `--upstream-remote <NAME>` — Git remote used as the PR target in fork workflows. Precedence: this flag, then `upstream_remote` in config, else [`crate::gh::remote::DEFAULT_UPSTREAM_REMOTE`]
+- `--upstream-remote <NAME>` — Git remote used as the PR target in fork workflows. Precedence: this flag, then `upstream_remote` in config, else `upstream`
 - `--gh-askpass <CMD>` — Askpass helper command that prints a GitHub token on stdout; e.g. `--gh-askpass "op read op://Vault/gh/token"`. Highest-priority token source; outranks `$GH_ASKPASS`, the token env vars, and `gh_askpass` in config
 - `--askpass-timeout <SECS>` — Timeout in seconds for the askpass helper. Default: 20
 
