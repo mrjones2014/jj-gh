@@ -209,7 +209,7 @@ See: <https://github.com/jj-vcs/jj/issues/4388>
 
 Like `jj log`, but injects PR metadata (e.g. number, CI status, URL).
 
-This works by injecting template aliases keyed by `commit_id` and renders inline PR info in a temporary config file added via `jj`'s `--config-file` argument. Any arguments after `--` are forwarded to the underlying `jj log` invocation, e.g. `jj-gh pr log -- -r 'mine()'`. A default template that mirror's `jj`'s default template is provided, but you may provide your own with the `-T|--template` argument and use the injected template aliases.
+This works by injecting template aliases keyed by `commit_id` and renders inline PR info in a temporary config file added via `jj`'s `--config-file` argument. Any arguments after `--` are forwarded to the underlying `jj log` invocation, e.g. `jj-gh pr log -- -r 'mine()'`. A default template that mirrors `jj`'s default template is provided, but you may provide your own with the `-T|--template` argument and use the injected template aliases.
 
 **Usage:** `jj-gh pr log [OPTIONS] [-- <JJ_LOG_ARGS>...]`
 

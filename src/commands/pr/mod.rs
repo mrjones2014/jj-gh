@@ -88,7 +88,7 @@ pub enum PrAction {
     /// This works by injecting template aliases keyed by `commit_id` and renders inline PR info
     /// in a temporary config file added via `jj`'s `--config-file` argument. Any arguments after
     /// `--` are forwarded to the underlying `jj log` invocation, e.g. `jj-gh pr log -- -r 'mine()'`.
-    /// A default template that mirror's `jj`'s default template is provided, but you may provide
+    /// A default template that mirrors `jj`'s default template is provided, but you may provide
     /// your own with the `-T|--template` argument and use the injected template aliases.
     #[command(visible_alias = "l")]
     Log(PrLogArgsInput),

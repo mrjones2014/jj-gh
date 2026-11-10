@@ -441,6 +441,7 @@ files when contributing to OSS.
 title: "" # required, non-empty
 base: "main" # required; pre-filled with resolved base branch, or "owner:main" for cross-fork PRs
 labels: [] # list of strings, applied via a follow-up API call after creation
+reviewers: [] # list of collaborator @handles or team @org-name/team-name slugs
 draft: false # bool
 auto_merge: false # bool; enable GitHub auto-merge once required checks pass
 # this value is not present by default but may be set here as well
