@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.8](https://github.com/mrjones2014/jj-gh/compare/jj-gh-v0.3.7...jj-gh-v0.3.8) - 2026-11-10
+
+### Fixed
+
+- *(pr-fetch)* Remove errant trailing `"` from help text
+
+### Other
+
+- *(docs)* Show literal default value in helptext instead of Rust path
+- *(docs)* Update docs + fix typos
+
 ## [0.3.7](https://github.com/mrjones2014/jj-gh/compare/jj-gh-v0.3.6...jj-gh-v0.3.7) - 2026-11-09
 
 ### Other
