@@ -183,7 +183,7 @@ See: <https://github.com/jj-vcs/jj/issues/4388>
 
 ###### **Options:**
 
-- `-T`, `--template <TEMPLATE>` — Override the bookmark template. The argument is a jj template string evaluated once against `root()` (no commit context). Default: `pr_fetch_bookmark_template` in config, else `"pr-" ++ pr_number ++ "/" ++ pr_branch"`.
+- `-T`, `--template <TEMPLATE>` — Override the bookmark template. The argument is a jj template string evaluated once against `root()` (no commit context). Default: `pr_fetch_bookmark_template` in config, else `"pr-" ++ pr_number ++ "/" ++ pr_branch`.
 
   All standard jj template builtins are available (`description`, `commit_id`, `author`, etc.). The following template aliases are also injected:
 
