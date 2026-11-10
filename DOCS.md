@@ -44,7 +44,7 @@ Manage GitHub PR Stacks natively with `jj`
 - `-q`, `--quiet` — Drop log level to `ERROR`
 - `--log-level <LEVEL>` — Set log level explicitly, overrides `-v` and `-q`
 - `--remote <NAME>` — Git remote used for the user's own pushes and PR head lookups. Precedence: this flag, then git's auto-detected default push remote, then `default_remote` in config
-- `--upstream-remote <NAME>` — Git remote used as the PR target in fork workflows. Precedence: this flag, then `upstream_remote` in config, else [`crate::gh::remote::DEFAULT_UPSTREAM_REMOTE`]
+- `--upstream-remote <NAME>` — Git remote used as the PR target in fork workflows. Precedence: this flag, then `upstream_remote` in config, else `upstream`
 - `--gh-askpass <CMD>` — Askpass helper command that prints a GitHub token on stdout; e.g. `--gh-askpass "op read op://Vault/gh/token"`. Highest-priority token source; outranks `$GH_ASKPASS`, the token env vars, and `gh_askpass` in config
 - `--askpass-timeout <SECS>` — Timeout in seconds for the askpass helper. Default: 20
 
@@ -183,7 +183,7 @@ See: <https://github.com/jj-vcs/jj/issues/4388>
 
 ###### **Options:**
 
-- `-T`, `--template <TEMPLATE>` — Override the bookmark template. The argument is a jj template string evaluated once against `root()` (no commit context). Default: `pr_fetch_bookmark_template` in config, else `"pr-" ++ pr_number ++ "/" ++ pr_branch"`.
+- `-T`, `--template <TEMPLATE>` — Override the bookmark template. The argument is a jj template string evaluated once against `root()` (no commit context). Default: `pr_fetch_bookmark_template` in config, else `"pr-" ++ pr_number ++ "/" ++ pr_branch`.
 
   All standard jj template builtins are available (`description`, `commit_id`, `author`, etc.). The following template aliases are also injected:
 
@@ -209,7 +209,7 @@ See: <https://github.com/jj-vcs/jj/issues/4388>
 
 Like `jj log`, but injects PR metadata (e.g. number, CI status, URL).
 
-This works by injecting template aliases keyed by `commit_id` and renders inline PR info in a temporary config file added via `jj`'s `--config-file` argument. Any arguments after `--` are forwarded to the underlying `jj log` invocation, e.g. `jj-gh pr log -- -r 'mine()'`. A default template that mirror's `jj`'s default template is provided, but you may provide your own with the `-T|--template` argument and use the injected template aliases.
+This works by injecting template aliases keyed by `commit_id` and renders inline PR info in a temporary config file added via `jj`'s `--config-file` argument. Any arguments after `--` are forwarded to the underlying `jj log` invocation, e.g. `jj-gh pr log -- -r 'mine()'`. A default template that mirrors `jj`'s default template is provided, but you may provide your own with the `-T|--template` argument and use the injected template aliases.
 
 **Usage:** `jj-gh pr log [OPTIONS] [-- <JJ_LOG_ARGS>...]`
 
