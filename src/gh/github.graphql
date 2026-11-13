@@ -1909,6 +1909,18 @@ type ConvertedToDiscussionEvent implements Node @docsCategory(name: "issues") {
     discussion: Discussion
     id: ID!
 }
+enum CopilotCodeReviewEffort @docsCategory(name: "copilot") {
+    AUTO
+    BALANCED
+    LITE
+    MAX
+}
+enum CopilotCodeReviewEffortLevel @docsCategory(name: "copilot") {
+    AUTO
+    BALANCED
+    LITE
+    MAX
+}
 type CopilotCodeReviewParameters @docsCategory(name: "pulls") {
     reviewDraftPullRequests: Boolean!
     reviewOnPush: Boolean!
@@ -1916,6 +1928,37 @@ type CopilotCodeReviewParameters @docsCategory(name: "pulls") {
 input CopilotCodeReviewParametersInput @docsCategory(name: "pulls") {
     reviewDraftPullRequests: Boolean
     reviewOnPush: Boolean
+}
+enum CopilotCodeReviewRequestReason @docsCategory(name: "copilot") {
+    ACTOR_INELIGIBLE
+    APP_NOT_INSTALLED
+    LICENSED_ORGANIZATION_UNAVAILABLE
+    NO_QUOTA_REMAINING
+    REPOSITORY_INELIGIBLE
+    REQUEST_CONFLICT
+}
+enum CopilotCodeReviewRunnerConfiguredBy @docsCategory(name: "copilot") {
+    CODE_REVIEW
+    CODING_AGENT
+}
+enum CopilotCodeReviewRunnerType @docsCategory(name: "copilot") {
+    LABELED
+    STANDARD
+}
+enum CopilotCodeReviewSeverityFilter @docsCategory(name: "copilot") {
+    LOW
+    LOW_AND_MEDIUM
+    NO_FILTER
+}
+type CopilotCodeReviewSource @docsCategory(name: "pulls") {
+    kind: CopilotCodeReviewSourceKind!
+    name: String!
+    path: String
+}
+enum CopilotCodeReviewSourceKind @docsCategory(name: "pulls") {
+    CUSTOM_INSTRUCTIONS
+    MCP
+    SKILL
 }
 type CopilotEndpoints @docsCategory(name: "copilot") {
     api: String!
@@ -3501,6 +3544,7 @@ type Enterprise implements Node @docsCategory(name: "enterprise-admin") {
   ): URI!
     billingEmail: String
     billingInfo: EnterpriseBillingInfo
+    copilotCodeReviewPolicy: EnterpriseCopilotCodeReviewPolicy
     createdAt: DateTime!
     databaseId: Int
     description: String
@@ -3661,6 +3705,14 @@ type EnterpriseConnection {
     nodes: [Enterprise]
     pageInfo: PageInfo!
     totalCount: Int!
+}
+type EnterpriseCopilotCodeReviewPolicy @docsCategory(name: "copilot") {
+    policyState: EnterpriseCopilotCodeReviewPolicyState
+}
+enum EnterpriseCopilotCodeReviewPolicyState @docsCategory(name: "copilot") {
+    CONFIGURED_BY_ORGANIZATION_ADMINS
+    DISABLED_FOR_ALL_ORGANIZATIONS
+    ENABLED_FOR_ALL_ORGANIZATIONS
 }
 enum EnterpriseDefaultRepositoryPermissionSettingValue @docsCategory(name: "enterprise-admin") {
     ADMIN
@@ -7295,6 +7347,9 @@ type Mutation @docsCategory(name: "meta") {
     reprioritizeSubIssue(
         input: ReprioritizeSubIssueInput!
   ): ReprioritizeSubIssuePayload @docsCategory(name: "issues")
+    requestCopilotCodeReview(
+        input: RequestCopilotCodeReviewInput!
+  ): RequestCopilotCodeReviewPayload @docsCategory(name: "pulls")
     requestReviews(
         input: RequestReviewsInput!
   ): RequestReviewsPayload @docsCategory(name: "pulls")
@@ -7431,6 +7486,9 @@ type Mutation @docsCategory(name: "meta") {
     updateEnterpriseAllowPrivateRepositoryForkingSetting(
         input: UpdateEnterpriseAllowPrivateRepositoryForkingSettingInput!
   ): UpdateEnterpriseAllowPrivateRepositoryForkingSettingPayload @docsCategory(name: "enterprise-admin")
+    updateEnterpriseCopilotCodeReviewPolicy(
+        input: UpdateEnterpriseCopilotCodeReviewPolicyInput!
+  ): UpdateEnterpriseCopilotCodeReviewPolicyPayload @docsCategory(name: "copilot")
     updateEnterpriseDefaultRepositoryPermissionSetting(
         input: UpdateEnterpriseDefaultRepositoryPermissionSettingInput!
   ): UpdateEnterpriseDefaultRepositoryPermissionSettingPayload @docsCategory(name: "enterprise-admin")
@@ -7521,6 +7579,15 @@ type Mutation @docsCategory(name: "meta") {
     updateOrganizationAllowPrivateRepositoryForkingSetting(
         input: UpdateOrganizationAllowPrivateRepositoryForkingSettingInput!
   ): UpdateOrganizationAllowPrivateRepositoryForkingSettingPayload @docsCategory(name: "orgs")
+    updateOrganizationCopilotCodeReviewPolicy(
+        input: UpdateOrganizationCopilotCodeReviewPolicyInput!
+  ): UpdateOrganizationCopilotCodeReviewPolicyPayload @docsCategory(name: "copilot")
+    updateOrganizationCopilotCodeReviewRunnerConfiguration(
+        input: UpdateOrganizationCopilotCodeReviewRunnerConfigurationInput!
+  ): UpdateOrganizationCopilotCodeReviewRunnerConfigurationPayload @docsCategory(name: "copilot")
+    updateOrganizationCopilotCodeReviewSettings(
+        input: UpdateOrganizationCopilotCodeReviewSettingsInput!
+  ): UpdateOrganizationCopilotCodeReviewSettingsPayload @docsCategory(name: "copilot")
     updateOrganizationWebCommitSignoffSetting(
         input: UpdateOrganizationWebCommitSignoffSettingInput!
   ): UpdateOrganizationWebCommitSignoffSettingPayload @docsCategory(name: "orgs")
@@ -7593,6 +7660,9 @@ type Mutation @docsCategory(name: "meta") {
     updateRepository(
         input: UpdateRepositoryInput!
   ): UpdateRepositoryPayload @docsCategory(name: "repos")
+    updateRepositoryCopilotCodeReviewSettings(
+        input: UpdateRepositoryCopilotCodeReviewSettingsInput!
+  ): UpdateRepositoryCopilotCodeReviewSettingsPayload @docsCategory(name: "copilot")
     updateRepositoryCustomProperty(
         input: UpdateRepositoryCustomPropertyInput!
   ): UpdateRepositoryCustomPropertyPayload @docsCategory(name: "repos")
@@ -10097,6 +10167,8 @@ type Organization implements Actor &
     avatarUrl(
         size: Int
   ): URI!
+    copilotCodeReviewRunnerConfiguration: OrganizationCopilotCodeReviewRunnerConfiguration
+    copilotCodeReviewSettings: OrganizationCopilotCodeReviewSettings
     createdAt: DateTime!
     databaseId: Int
     description: String
@@ -10200,6 +10272,7 @@ type Organization implements Actor &
     newTeamUrl: URI!
     notificationDeliveryRestrictionEnabledSetting: NotificationRestrictionSettingValue!
     organizationBillingEmail: String
+    organizationCopilotCodeReviewPolicy: OrganizationCopilotCodeReviewPolicy
     packages(
         after: String
         before: String
@@ -10541,6 +10614,51 @@ type OrganizationConnection {
     nodes: [Organization]
     pageInfo: PageInfo!
     totalCount: Int!
+}
+type OrganizationCopilotCodeReviewDefaultEffort @docsCategory(name: "copilot") {
+    configured: CopilotCodeReviewEffortLevel
+    editable: Boolean!
+    effective: CopilotCodeReviewEffortLevel!
+    githubDefault: CopilotCodeReviewEffortLevel!
+    managedBy: OrganizationCopilotCodeReviewPolicyManager!
+}
+enum OrganizationCopilotCodeReviewEffortSetting @docsCategory(name: "copilot") {
+    AUTO
+    BALANCED
+    INHERIT
+    LITE
+    MAX
+}
+type OrganizationCopilotCodeReviewPolicy @docsCategory(name: "copilot") {
+    configuredState: OrganizationCopilotCodeReviewPolicyState
+    editable: Boolean!
+    effectiveState: OrganizationCopilotCodeReviewPolicyState!
+    managedBy: OrganizationCopilotCodeReviewPolicyManager!
+}
+enum OrganizationCopilotCodeReviewPolicyConflict @docsCategory(name: "copilot") {
+    POLICY_MANAGED_BY_ENTERPRISE
+}
+enum OrganizationCopilotCodeReviewPolicyManager @docsCategory(name: "copilot") {
+    ENTERPRISE
+    ORGANIZATION
+}
+enum OrganizationCopilotCodeReviewPolicyState @docsCategory(name: "copilot") {
+    DISABLED
+    ENABLED
+}
+type OrganizationCopilotCodeReviewRunnerConfiguration @docsCategory(name: "copilot") {
+    allowRepositoryCustomization: Boolean!
+    configuredBy: CopilotCodeReviewRunnerConfiguredBy!
+    runnerGroupName: String
+    runnerLabels: [String!]!
+    runnerType: CopilotCodeReviewRunnerType!
+}
+type OrganizationCopilotCodeReviewSettings @docsCategory(name: "copilot") {
+    availableReviewEfforts: [CopilotCodeReviewEffortLevel!]!
+    defaultReviewEffort: OrganizationCopilotCodeReviewDefaultEffort!
+}
+enum OrganizationCopilotCodeReviewSettingsConflict @docsCategory(name: "copilot") {
+    SETTING_NOT_EDITABLE
 }
 type OrganizationEdge {
     cursor: String!
@@ -12915,6 +13033,7 @@ type PullRequestReview implements Comment &
         last: Int
   ): PullRequestReviewCommentConnection!
     commit: Commit
+    copilotCodeReviewEffort: CopilotCodeReviewEffort
     createdAt: DateTime!
     createdViaEmail: Boolean!
     databaseId: Int
@@ -12925,6 +13044,7 @@ type PullRequestReview implements Comment &
     fullDatabaseId: BigInt
     id: ID!
     includesCreatedEdit: Boolean!
+    isCopilotCodeReview: Boolean!
     isMinimized: Boolean!
     lastEditedAt: DateTime
     minimizedReason: String
@@ -12979,6 +13099,7 @@ type PullRequestReviewComment implements Comment &
     bodyHTML: HTML!
     bodyText: String!
     commit: Commit
+    copilotCodeReviewSources: [CopilotCodeReviewSource!]!
     createdAt: DateTime!
     createdViaEmail: Boolean!
     databaseId: Int
@@ -12991,6 +13112,7 @@ type PullRequestReviewComment implements Comment &
     fullDatabaseId: BigInt
     id: ID!
     includesCreatedEdit: Boolean!
+    isCopilotCodeReview: Boolean!
     isMinimized: Boolean!
     lastEditedAt: DateTime
     line: Int
@@ -16108,6 +16230,7 @@ type Repository implements Node &
         last: Int
         orderBy: ReleaseOrder
   ): ReleaseConnection!
+    repositoryCopilotCodeReviewSettings: RepositoryCopilotCodeReviewSettings
     repositoryCustomPropertyValue(
         propertyName: String!
   ): RepositoryCustomPropertyValue
@@ -16266,6 +16389,24 @@ enum RepositoryContributionType @docsCategory(name: "repos") {
     PULL_REQUEST
     PULL_REQUEST_REVIEW
     REPOSITORY
+}
+type RepositoryCopilotCodeReviewEffort @docsCategory(name: "copilot") {
+    configured: CopilotCodeReviewEffortLevel
+    effective: CopilotCodeReviewEffortLevel!
+}
+enum RepositoryCopilotCodeReviewEffortSetting @docsCategory(name: "copilot") {
+    AUTO
+    BALANCED
+    INHERIT
+    LITE
+    MAX
+}
+type RepositoryCopilotCodeReviewSettings @docsCategory(name: "copilot") {
+    availableReviewEfforts: [CopilotCodeReviewEffortLevel!]!
+    customInstructionsEnabled: Boolean!
+    mcpEnabled: Boolean!
+    reviewEffort: RepositoryCopilotCodeReviewEffort!
+    severityFilter: CopilotCodeReviewSeverityFilter!
 }
 type RepositoryCustomProperty implements Node @docsCategory(name: "repos") {
     allowedValues: [String!]
@@ -16525,9 +16666,11 @@ interface RepositoryOwner @docsCategory(name: "repos") {
 enum RepositoryPermission @docsCategory(name: "repos") {
     ADMIN
     MAINTAIN
+    MODERATE
     READ
     TRIAGE
     TRIAGE_PLUS
+    @deprecated(reason: "TRIAGE_PLUS has been renamed to MODERATE. Use MODERATE instead. Removal on 2027-04-01 UTC.")
     WRITE
 }
 type RepositoryPlanFeatures @docsCategory(name: "repos") {
@@ -16943,6 +17086,19 @@ input ReprioritizeSubIssueInput {
 type ReprioritizeSubIssuePayload {
     clientMutationId: String
     issue: Issue
+}
+input RequestCopilotCodeReviewInput {
+    clientMutationId: String
+    pullRequestId: ID! @possibleTypes(concreteTypes: ["PullRequest"])
+    reviewEffort: CopilotCodeReviewEffort
+}
+type RequestCopilotCodeReviewPayload {
+    actor: Actor
+    clientMutationId: String
+    failureReason: CopilotCodeReviewRequestReason
+    pullRequest: PullRequest
+    reviewRequest: ReviewRequest
+    success: Boolean
 }
 input RequestReviewsByLoginInput {
     botLogins: [String!]
@@ -19542,6 +19698,15 @@ type UpdateEnterpriseAllowPrivateRepositoryForkingSettingPayload {
     enterprise: Enterprise
     message: String
 }
+input UpdateEnterpriseCopilotCodeReviewPolicyInput {
+    clientMutationId: String
+    enterpriseId: ID! @possibleTypes(concreteTypes: ["Enterprise"])
+    policyState: EnterpriseCopilotCodeReviewPolicyState!
+}
+type UpdateEnterpriseCopilotCodeReviewPolicyPayload {
+    clientMutationId: String
+    policy: EnterpriseCopilotCodeReviewPolicy
+}
 input UpdateEnterpriseDefaultRepositoryPermissionSettingInput {
     clientMutationId: String
     enterpriseId: ID! @possibleTypes(concreteTypes: ["Enterprise"])
@@ -19877,6 +20042,38 @@ type UpdateOrganizationAllowPrivateRepositoryForkingSettingPayload {
     message: String
     organization: Organization
 }
+input UpdateOrganizationCopilotCodeReviewPolicyInput {
+    clientMutationId: String
+    organizationId: ID! @possibleTypes(concreteTypes: ["Organization"])
+    state: OrganizationCopilotCodeReviewPolicyState!
+}
+type UpdateOrganizationCopilotCodeReviewPolicyPayload {
+    clientMutationId: String
+    conflict: OrganizationCopilotCodeReviewPolicyConflict
+    policy: OrganizationCopilotCodeReviewPolicy
+}
+input UpdateOrganizationCopilotCodeReviewRunnerConfigurationInput {
+    allowRepositoryCustomization: Boolean
+    clientMutationId: String
+    organizationId: ID! @possibleTypes(concreteTypes: ["Organization"])
+    runnerGroupName: String
+    runnerLabels: [String!]
+    runnerType: CopilotCodeReviewRunnerType!
+}
+type UpdateOrganizationCopilotCodeReviewRunnerConfigurationPayload {
+    clientMutationId: String
+    runnerConfiguration: OrganizationCopilotCodeReviewRunnerConfiguration
+}
+input UpdateOrganizationCopilotCodeReviewSettingsInput {
+    clientMutationId: String
+    defaultReviewEffort: OrganizationCopilotCodeReviewEffortSetting
+    organizationId: ID! @possibleTypes(concreteTypes: ["Organization"])
+}
+type UpdateOrganizationCopilotCodeReviewSettingsPayload {
+    clientMutationId: String
+    conflict: OrganizationCopilotCodeReviewSettingsConflict
+    settings: OrganizationCopilotCodeReviewSettings
+}
 input UpdateOrganizationWebCommitSignoffSettingInput {
     clientMutationId: String
     organizationId: ID! @possibleTypes(concreteTypes: ["Organization"])
@@ -20114,6 +20311,18 @@ input UpdateRefsInput {
 }
 type UpdateRefsPayload {
     clientMutationId: String
+}
+input UpdateRepositoryCopilotCodeReviewSettingsInput {
+    clientMutationId: String
+    customInstructionsEnabled: Boolean
+    mcpEnabled: Boolean
+    repositoryId: ID! @possibleTypes(concreteTypes: ["Repository"])
+    reviewEffort: RepositoryCopilotCodeReviewEffortSetting
+    severityFilter: CopilotCodeReviewSeverityFilter
+}
+type UpdateRepositoryCopilotCodeReviewSettingsPayload {
+    clientMutationId: String
+    settings: RepositoryCopilotCodeReviewSettings
 }
 input UpdateRepositoryCustomPropertyInput {
     allowedValues: [String!]
