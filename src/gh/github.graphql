@@ -1910,14 +1910,14 @@ type ConvertedToDiscussionEvent implements Node @docsCategory(name: "issues") {
     id: ID!
 }
 enum CopilotCodeReviewEffort @docsCategory(name: "copilot") {
-    AUTO
     BALANCED
+    DYNAMIC
     LITE
     MAX
 }
 enum CopilotCodeReviewEffortLevel @docsCategory(name: "copilot") {
-    AUTO
     BALANCED
+    DYNAMIC
     LITE
     MAX
 }
@@ -2147,7 +2147,7 @@ input CreateIssueFieldInput {
     description: String
     name: String!
     options: [IssueFieldSingleSelectOptionInput!]
-    ownerId: ID!
+    ownerId: ID! @possibleTypes(concreteTypes: ["Organization", "User"])
     visibility: IssueFieldVisibility
 }
 type CreateIssueFieldPayload {
@@ -2182,6 +2182,7 @@ input CreateIssueInput {
     projectIds: [ID!] @possibleTypes(concreteTypes: ["Project"])
     projectV2Ids: [ID!] @possibleTypes(concreteTypes: ["ProjectV2"])
     repositoryId: ID! @possibleTypes(concreteTypes: ["Repository"])
+    statusId: ID @possibleTypes(concreteTypes: ["PlanningStatus"])
     title: String!
 }
 type CreateIssuePayload {
@@ -2194,7 +2195,7 @@ input CreateIssueTypeInput {
     description: String
     isEnabled: Boolean!
     name: String!
-    ownerId: ID!
+    ownerId: ID! @possibleTypes(concreteTypes: ["Organization", "User"])
 }
 type CreateIssueTypePayload {
     clientMutationId: String
@@ -3169,6 +3170,7 @@ enum DiffSide @docsCategory(name: "pulls") {
 }
 input DisablePullRequestAutoMergeInput {
     clientMutationId: String
+    includeStack: Boolean = false
     pullRequestId: ID! @possibleTypes(concreteTypes: ["PullRequest"])
 }
 type DisablePullRequestAutoMergePayload {
@@ -3519,6 +3521,7 @@ input EnablePullRequestAutoMergeInput {
     commitBody: String
     commitHeadline: String
     expectedHeadOid: GitObjectID
+    includeStack: Boolean = false
     mergeMethod: PullRequestMergeMethod = MERGE
     pullRequestId: ID! @possibleTypes(concreteTypes: ["PullRequest"])
 }
@@ -3691,9 +3694,9 @@ interface EnterpriseAuditEntryData @docsCategory(name: "enterprise-admin") {
 type EnterpriseBillingInfo @docsCategory(name: "enterprise-admin") {
     allLicensableUsersCount: Int!
     assetPacks: Int! @deprecated(reason: "LFS data packs have been removed. Always returns 0.")
-    bandwidthQuota: Float!
-    bandwidthUsage: Float!
-    bandwidthUsagePercentage: Int!
+    bandwidthQuota: Float! @deprecated(reason: "Quotas based on LFS data packs have been removed. May return 0.")
+    bandwidthUsage: Float! @deprecated(reason: "LFS bandwidth usage is now reported through the REST API. May return 0.")
+    bandwidthUsagePercentage: Int! @deprecated(reason: "Quotas based on LFS data packs have been removed. May return 0.")
     storageQuota: Float!
     storageUsage: Float!
     storageUsagePercentage: Int!
@@ -5072,6 +5075,7 @@ type Issue implements Assignable &
     stateReason(
         enableDuplicate: Boolean = false
   ): IssueStateReason
+    status: PlanningStatus
     subIssues(
         after: String
         before: String
@@ -5136,6 +5140,7 @@ type Issue implements Assignable &
     viewerCanReopen: Boolean!
     viewerCanSetFields: Boolean
     viewerCanSetMilestone: Boolean!
+    viewerCanSetStatus: Boolean!
     viewerCanSubscribe: Boolean!
     viewerCanType: Boolean
     viewerCanUpdate: Boolean!
@@ -5497,7 +5502,8 @@ input IssueFieldValueFilter {
 }
 enum IssueFieldVisibility @docsCategory(name: "issues") {
     ALL
-    ORG_ONLY
+    ORG_ONLY @deprecated(reason: "`ORG_ONLY` will be removed. Use `RESTRICTED` instead. Removal on 2027-04-01 UTC.")
+    RESTRICTED
 }
 union IssueFields @docsCategory(name: "issues") =
   | IssueFieldDate
@@ -7383,6 +7389,9 @@ type Mutation @docsCategory(name: "meta") {
     setIssueFieldValue(
         input: SetIssueFieldValueInput!
   ): SetIssueFieldValuePayload @docsCategory(name: "issues")
+    setIssueStatus(
+        input: SetIssueStatusInput!
+  ): SetIssueStatusPayload @docsCategory(name: "issues")
     setOrganizationInteractionLimit(
         input: SetOrganizationInteractionLimitInput!
   ): SetOrganizationInteractionLimitPayload @docsCategory(name: "orgs")
@@ -10301,6 +10310,7 @@ type Organization implements Actor &
         before: String
         first: Int
         last: Int
+        orderBy: PinnedIssueFieldOrder = {field: POSITION, direction: ASC}
   ): IssueFieldsConnection
     pinnedItems(
         after: String
@@ -10310,6 +10320,12 @@ type Organization implements Actor &
         types: [PinnableItemType!]
   ): PinnableItemConnection!
     pinnedItemsRemaining: Int!
+    planningStatuses(
+        after: String
+        before: String
+        first: Int
+        last: Int
+  ): PlanningStatusConnection
     project(
         number: Int!
   ): Project
@@ -10623,8 +10639,8 @@ type OrganizationCopilotCodeReviewDefaultEffort @docsCategory(name: "copilot") {
     managedBy: OrganizationCopilotCodeReviewPolicyManager!
 }
 enum OrganizationCopilotCodeReviewEffortSetting @docsCategory(name: "copilot") {
-    AUTO
     BALANCED
+    DYNAMIC
     INHERIT
     LITE
     MAX
@@ -11219,6 +11235,34 @@ type PinnedIssueConnection {
 type PinnedIssueEdge {
     cursor: String!
     node: PinnedIssue
+}
+input PinnedIssueFieldOrder @docsCategory(name: "issues") {
+    direction: OrderDirection!
+    field: PinnedIssueFieldOrderField!
+}
+enum PinnedIssueFieldOrderField @docsCategory(name: "issues") {
+    POSITION
+}
+type PlanningStatus implements Node @docsCategory(name: "issues") {
+    category: PlanningStatusCategory!
+    id: ID!
+    name: String!
+}
+type PlanningStatusCategory @docsCategory(name: "issues") {
+    key: String!
+    name: String!
+    state: IssueState!
+    stateReason: IssueStateReason
+}
+type PlanningStatusConnection {
+    edges: [PlanningStatusEdge]
+    nodes: [PlanningStatus]
+    pageInfo: PageInfo!
+    totalCount: Int!
+}
+type PlanningStatusEdge {
+    cursor: String!
+    node: PlanningStatus
 }
 scalar PreciseDateTime
 type PrivateRepositoryForkingDisableAuditEntry implements AuditEntry &
@@ -12644,7 +12688,9 @@ type PullRequest implements Assignable &
   ): UserConnection!
     author: Actor
     authorAssociation: CommentAuthorAssociation!
-    autoMergeRequest: AutoMergeRequest
+    autoMergeRequest(
+        includeStack: Boolean = false
+  ): AutoMergeRequest
     baseRef: Ref
     baseRefName: String!
     baseRefOid: GitObjectID!
@@ -12866,9 +12912,13 @@ type PullRequest implements Assignable &
     viewerCanAssign: Boolean!
     viewerCanClose: Boolean!
     viewerCanDeleteHeadRef: Boolean!
-    viewerCanDisableAutoMerge: Boolean!
+    viewerCanDisableAutoMerge(
+        includeStack: Boolean = false
+  ): Boolean!
     viewerCanEditFiles: Boolean!
-    viewerCanEnableAutoMerge: Boolean!
+    viewerCanEnableAutoMerge(
+        includeStack: Boolean = false
+  ): Boolean!
     viewerCanLabel: Boolean!
     viewerCanMergeAsAdmin: Boolean!
     viewerCanReact: Boolean!
@@ -16142,6 +16192,13 @@ type Repository implements Node &
         last: Int
         orderBy: PinnedEnvironmentOrder = {field: POSITION, direction: ASC}
   ): PinnedEnvironmentConnection
+    pinnedIssueFields(
+        after: String
+        before: String
+        first: Int
+        last: Int
+        orderBy: PinnedIssueFieldOrder = {field: POSITION, direction: ASC}
+  ): IssueFieldsConnection
     pinnedIssues(
         after: String
         before: String
@@ -16149,6 +16206,12 @@ type Repository implements Node &
         last: Int
   ): PinnedIssueConnection
     planFeatures: RepositoryPlanFeatures!
+    planningStatuses(
+        after: String
+        before: String
+        first: Int
+        last: Int
+  ): PlanningStatusConnection
     primaryLanguage: Language
     project(
         number: Int!
@@ -16395,8 +16458,8 @@ type RepositoryCopilotCodeReviewEffort @docsCategory(name: "copilot") {
     effective: CopilotCodeReviewEffortLevel!
 }
 enum RepositoryCopilotCodeReviewEffortSetting @docsCategory(name: "copilot") {
-    AUTO
     BALANCED
+    DYNAMIC
     INHERIT
     LITE
     MAX
@@ -17618,6 +17681,16 @@ type SetIssueFieldValuePayload {
     clientMutationId: String
     issue: Issue
     issueFieldValues: [IssueFieldValue!]
+}
+input SetIssueStatusInput {
+    clientMutationId: String
+    duplicateIssueId: ID @possibleTypes(concreteTypes: ["Issue"])
+    issueId: ID! @possibleTypes(concreteTypes: ["Issue"])
+    statusId: ID! @possibleTypes(concreteTypes: ["PlanningStatus"])
+}
+type SetIssueStatusPayload {
+    clientMutationId: String
+    issue: Issue
 }
 input SetOrganizationInteractionLimitInput {
     clientMutationId: String
@@ -19984,6 +20057,7 @@ input UpdateIssueInput {
     projectIds: [ID!]
     state: IssueState
     stateInput: IssueStateUpdateInput
+    statusId: ID @possibleTypes(concreteTypes: ["PlanningStatus"])
     title: String
 }
 input UpdateIssueIssueTypeInput {
@@ -20574,6 +20648,20 @@ type User implements Actor &
         last: Int
         orderBy: IssueCommentOrder
   ): IssueCommentConnection!
+    issueFields(
+        after: String
+        before: String
+        first: Int
+        last: Int
+        orderBy: IssueFieldOrder = {field: CREATED_AT, direction: ASC}
+  ): IssueFieldsConnection
+    issueTypes(
+        after: String
+        before: String
+        first: Int
+        last: Int
+        orderBy: IssueTypeOrder = {field: CREATED_AT, direction: ASC}
+  ): IssueTypeConnection
     issues(
         after: String
         before: String
@@ -20632,6 +20720,13 @@ type User implements Actor &
         last: Int
         types: [PinnableItemType!]
   ): PinnableItemConnection!
+    pinnedIssueFields(
+        after: String
+        before: String
+        first: Int
+        last: Int
+        orderBy: PinnedIssueFieldOrder = {field: POSITION, direction: ASC}
+  ): IssueFieldsConnection
     pinnedItems(
         after: String
         before: String
@@ -20640,6 +20735,12 @@ type User implements Actor &
         types: [PinnableItemType!]
   ): PinnableItemConnection!
     pinnedItemsRemaining: Int!
+    planningStatuses(
+        after: String
+        before: String
+        first: Int
+        last: Int
+  ): PlanningStatusConnection
     project(
         number: Int!
   ): Project
