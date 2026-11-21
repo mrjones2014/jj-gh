@@ -60,7 +60,7 @@ subcommand_args! {
         pub targets: Vec<String>,
 
         /// Apply the plan without prompting. Required to apply anything when
-        /// stdin or stderr is not a terminal, where the default is a dry run.
+        /// `STDIN` or `STDERR` is not a terminal, where the default is a dry run.
         /// Also unstacks PRs that are already in a different stack; answering
         /// the interactive prompt does the same.
         #[arg(long)]

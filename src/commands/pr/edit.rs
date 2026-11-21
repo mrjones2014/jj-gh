@@ -46,9 +46,8 @@ subcommand_args! {
 }
 
 /// Fetch a PR, open the editor with its diff as a read-only preview, and apply
-/// only the metadata changes. Properties the user didn't touch (labels added
-/// by a bot, etc.) keep their current value because the editor buffer is seeded
-/// from the current PR state.
+/// only the metadata changes. Label and reviewer additions and removals are
+/// applied individually, preserving unrelated additions made while editing.
 ///
 /// # Errors
 ///

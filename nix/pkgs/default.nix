@@ -61,9 +61,9 @@ let
   fetch-schema-app = callPackage ./fetch-schema.nix { };
   gen-docs = callPackage ./gen-docs.nix { };
   gen-manpage = callPackage ./gen-manpage.nix { };
+  docs = import ../../docs { inherit pkgs gen-docs; };
   jj-gh = callPackage ./jj-gh.nix { };
   release-app = callPackage ./release.nix { };
-  update-docs = callPackage ./update-docs.nix { inherit gen-docs; };
 in
 {
   inherit
@@ -76,8 +76,8 @@ in
     fetch-schema-app
     gen-docs
     gen-manpage
+    docs
     jj-gh
     release-app
-    update-docs
     ;
 }

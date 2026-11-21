@@ -1,0 +1,13 @@
+:root {
+  --content-max-width: 1000px;
+}
+
+img,
+video {
+  max-width: 100%;
+}
+
+.content img {
+  border: 1px solid var(--theme-popup-border);
+  border-radius: 4px;
+}

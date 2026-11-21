@@ -1,0 +1,18 @@
+# Summary
+
+- [Introduction](./introduction.md)
+  - [Installation](./installation.md)
+  - [Getting started](./getting-started.md)
+  - [Authentication](./authentication.md)
+- [Stacked PRs](./stacked-prs.md)
+  - [Megamerge workflow](./megamerge.md)
+  - [Reconciling stacks](./stack-reconciliation.md)
+- [Everyday workflows](./workflows/overview.md)
+  - [Log](./workflows/log.md)
+  - [Edit](./workflows/edit.md)
+  - [Fetch](./workflows/fetch.md)
+  - [Auto-merge and rerun](./workflows/auto-merge-rerun.md)
+- [Configuration](./configuration.md)
+  - [Templates](./templates.md)
+  - [Shell completion](./completions.md)
+- [CLI reference](./reference/cli.md)
