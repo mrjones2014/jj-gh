@@ -49,5 +49,5 @@ jobs:
         with:
           path: ./result
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
       - run: echo "Deployed documentation from ${{ steps.release.outputs.tag }}" >> "$GITHUB_STEP_SUMMARY"
