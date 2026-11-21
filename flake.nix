@@ -34,10 +34,12 @@
           dev,
           gen-docs,
           gen-manpage,
+          docs,
           ...
         }:
         {
           default = jj-gh;
+          docs = docs.book;
           inherit
             dev
             gen-docs
@@ -49,7 +51,7 @@
       apps = forAllSystems (
         {
           jj-gh,
-          update-docs,
+          docs,
           release-app,
           fetch-schema-app,
           ...
@@ -62,7 +64,7 @@
         in
         {
           default = mkApp jj-gh;
-          docs = mkApp update-docs;
+          docs-serve = mkApp docs.serve;
           release = mkApp release-app;
           fetch-schema = mkApp fetch-schema-app;
         }
@@ -102,7 +104,7 @@
           cargoArtifacts,
           treefmt,
           jj-gh,
-          update-docs,
+          docs,
           ...
         }:
         import ./nix/checks {
@@ -114,7 +116,7 @@
             cargoArtifacts
             treefmt
             jj-gh
-            update-docs
+            docs
             ;
         }
       );

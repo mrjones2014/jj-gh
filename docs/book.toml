@@ -1,0 +1,22 @@
+[book]
+authors = ["Mat Jones"]
+language = "en"
+src = "src"
+title = "jj-gh"
+
+[output.html]
+additional-css = ["./src/custom.css"]
+default-theme = "Ayu"
+edit-url-template = "https://github.com/mrjones2014/jj-gh/edit/master/docs/src/{path}"
+git-repository-url = "https://github.com/mrjones2014/jj-gh"
+preferred-dark-theme = "Ayu"
+site-url = "https://jj-gh.app/"
+
+[output.html.print]
+enable = false
+
+[preprocessor.mermaid]
+command = "mdbook-mermaid"
+
+[preprocessor.jj-gh-reference]
+command = "mdbook-jj-gh-reference"

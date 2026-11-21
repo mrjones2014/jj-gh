@@ -5,8 +5,8 @@
   commonArgs,
   cargoArtifacts,
   treefmt,
-  update-docs,
   jj-gh,
+  docs,
 }:
 let
   callPackage = pkgs.lib.callPackageWith {
@@ -17,8 +17,8 @@ let
       commonArgs
       cargoArtifacts
       treefmt
-      update-docs
       jj-gh
+      docs
       ;
   };
   checkFiles = pkgs.lib.filterAttrs (

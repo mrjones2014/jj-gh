@@ -11,6 +11,7 @@ Using Nix (or [Lix](https://lix.systems/)) is recommended but not required.
     - [Optional configuration](#optional-configuration)
   - [With Rustup](#with-rustup)
   - [Refreshing the GitHub GraphQL schema](#refreshing-the-github-graphql-schema)
+  - [Documentation](#documentation)
   - [Developing](#developing)
   <!--toc:end-->
 
@@ -75,6 +76,24 @@ python3 tools/fetch-schema.py
 
 The script also strips description docstrings so the file stays under jj's 1MiB
 snapshot limit. A weekly workflow does the same and opens a PR on drift.
+
+## Documentation
+
+The mdBook lives in `docs/` and is built by the root flake. From the repository root:
+
+```sh
+nix build .#docs       # build the static site in ./result
+nix run .#docs-serve   # live preview; pass mdbook serve options after --
+```
+
+The CLI reference is generated from the current checkout during the build;
+edit the Clap help in the Rust source rather than `docs/src/reference/cli.md`.
+Restart the preview after changing CLI definitions. Mermaid and the custom Nix
+syntax highlighter are supplied by the flake. The preview creates an ignored
+`docs/book-assets` symlink and `docs/book/` output directory.
+
+PRs build the site without publishing. GitHub Pages deploys the latest stable
+GitHub Release tag, so changes become public when included in a release.
 
 ## Developing
 

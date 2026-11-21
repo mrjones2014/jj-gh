@@ -1,11 +1,11 @@
 //! `jj-gh pr fetch`
 //!
-//! Download a PR's `refs/pull/123/head` into a local bookmark via git, then
+//! Download a PR's `refs/pull/123/head` into a local bookmark via gix, then
 //! import into jj. The bookmark name is rendered by evaluating a jj template
 //! against an injected `--config-file` that defines `pr_*` aliases populated
 //! from the PR's GitHub metadata.
 //!
-//! The special `refs/pull/123/head` ref is fetched via `git` because `jj`
+//! The special `refs/pull/123/head` ref is fetched via gix because `jj`
 //! cannot yet fetch arbitrary refs (only `refs/heads/*`).
 
 use crate::{
