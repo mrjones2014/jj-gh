@@ -10,7 +10,7 @@ GitHub pull request workflows for [Jujutsu (`jj`)](https://github.com/jj-vcs/jj)
 
 Works well with the [`jj` megamerge workflow](https://isaaccorbrey.com/notes/jujutsu-megamerges-for-fun-and-profit); `jj-gh` manages the PRs, not the local megamerge itself.
 
-![PR metadata in the jj log](docs/src/assets/pr-log.png)
+![PR metadata and stack preview](docs/src/assets/stack-preview.gif)
 
 For guides, configuration, and the complete CLI reference, see the **[documentation](https://mrjones2014.github.io/jj-gh/)**. The site describes the latest stable release.
 
