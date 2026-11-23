@@ -22,6 +22,26 @@ invalid:
   - |
     return Err(anyhow!("{}", String::from_utf8_lossy(&output.stderr)));
 ---
+id: no-raw-eprint
+valid:
+  - |
+    logging::ui("Everything already matches the local graph");
+  - |
+    logging::ui(format!("Created {} PRs", count));
+  - |
+    let answer = logging::confirm("Apply this plan? [y/N] ")?;
+  - |
+    println!("result for stdout");
+invalid:
+  - |
+    eprint!("Apply this plan? [y/N] ");
+  - |
+    eprintln!("Aborted");
+  - |
+    eprintln!("Created {} PRs", count);
+  - |
+    std::eprintln!("Aborted");
+---
 id: no-direct-process-spawn
 valid:
   - |

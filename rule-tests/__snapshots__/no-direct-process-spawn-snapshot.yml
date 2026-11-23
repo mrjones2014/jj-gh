@@ -1,21 +1,18 @@
 id: no-direct-process-spawn
 snapshots:
-  ? |
-    let child = cmd.spawn()?;
+  ? "let child = cmd.spawn()?;\n"
   : labels:
       - source: cmd.spawn()
         style: primary
         start: 12
         end: 23
-  ? |
-    let out = cmd.output().await?;
+  ? "let out = cmd.output().await?;\n"
   : labels:
       - source: cmd.output()
         style: primary
         start: 10
         end: 22
-  ? |
-    let status = cmd.status().await?;
+  ? "let status = cmd.status().await?;\n"
   : labels:
       - source: cmd.status()
         style: primary

@@ -1,9 +1,8 @@
 id: no-log-error
 snapshots:
-  ? |
-    log::error!("fatal problem: {error:#}");
+  ? "log::error!(\"fatal problem: {error:#}\");\n"
   : labels:
-      - source: 'log::error!("fatal problem: {error:#}")'
+      - source: "log::error!(\"fatal problem: {error:#}\")"
         style: primary
         start: 0
         end: 39

@@ -1,23 +1,20 @@
 id: prefer-turbofish-over-let-type-ascription
 snapshots:
-  ? |
-    let (left, right): (Vec<String>, Vec<String>) = items.unzip();
+  ? "let (left, right): (Vec<String>, Vec<String>) = items.unzip();\n"
   : labels:
-      - source: 'let (left, right): (Vec<String>, Vec<String>) = items.unzip();'
+      - source: "let (left, right): (Vec<String>, Vec<String>) = items.unzip();"
         style: primary
         start: 0
         end: 62
-  ? |
-    let mut values: Vec<String> = Vec::new();
+  ? "let mut values: Vec<String> = Vec::new();\n"
   : labels:
-      - source: 'let mut values: Vec<String> = Vec::new();'
+      - source: "let mut values: Vec<String> = Vec::new();"
         style: primary
         start: 0
         end: 41
-  ? |
-    let values: Vec<String> = items.collect();
+  ? "let values: Vec<String> = items.collect();\n"
   : labels:
-      - source: 'let values: Vec<String> = items.collect();'
+      - source: "let values: Vec<String> = items.collect();"
         style: primary
         start: 0
         end: 42
