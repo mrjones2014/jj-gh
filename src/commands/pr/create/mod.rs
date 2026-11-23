@@ -1,6 +1,7 @@
 use crate::{
     cli::GlobalOpts,
-    config::{self, AutoMergeMethod, DefaultTitleSource},
+    commands::pr::auto_merge::AutoMergeTarget,
+    config::{self, AutoMergeMethod, AutoMergeMode, DefaultTitleSource},
     editor::{self, ApplyChangesCtx},
     frontmatter::Frontmatter,
     fs::RealFs,
@@ -34,7 +35,7 @@ const PRIVATE_LISTING_TEMPLATE: &str =
 subcommand_args! {
     pub struct CreateArgs {
         /// Revision(s) to create PR(s) from. Pass multiple revisions to create a stack.
-        #[arg(value_name = "REV", required = true)]
+        #[arg(value_name = "REV", required = true, value_parser = reject_reserved_rev)]
         pub revs: Vec<String>,
 
         /// Override the base bookmark. Default: closest ancestor bookmark on
@@ -59,17 +60,20 @@ subcommand_args! {
         #[arg(long, conflicts_with = "draft")]
         pub no_draft: bool,
 
-        /// Enable auto-merge on the PR after creation (merges once required checks
-        /// pass). Overrides config (default: `auto_merge = false`). Use
-        /// `--no-auto-merge` to force no auto-merge.
+        /// Enable auto-merge on the PR after creation. Bare flag means
+        /// `infer`: the whole GitHub stack when stacked, otherwise this PR.
+        /// Overrides config (default: `auto_merge = false`). Explicit values
+        /// require `=` (`--auto-merge=all`, `=below`, `=infer`, `=false`).
         #[arg(
             long,
-            num_args = 0,
-            default_missing_value = "true",
+            num_args = 0..=1,
+            require_equals = true,
+            value_enum,
+            default_missing_value = "infer",
             default_value_if("no_auto_merge", "true", Some("false"))
         )]
         #[config]
-        pub auto_merge: bool,
+        pub auto_merge: AutoMergeMode,
 
         /// Disable auto-merge on the created PR. Overrides config.
         #[arg(long, conflicts_with = "auto_merge")]
@@ -175,6 +179,20 @@ subcommand_args! {
         /// `git.private-commits` revset.
         #[arg(long)]
         pub allow_private: bool,
+    }
+}
+
+/// Revisions named like auto-merge values are reserved so that the space form
+/// `--auto-merge all` fails at parse time instead of silently meaning a bare
+/// `--auto-merge` plus a revision called `all`. The explicit form is
+/// `--auto-merge=all`.
+fn reject_reserved_rev(value: &str) -> Result<String, String> {
+    if AutoMergeMode::from_keyword(value).is_some() {
+        Err(format!(
+            "`{value}` is an auto-merge value; use `--auto-merge={value}` to select it"
+        ))
+    } else {
+        Ok(value.to_string())
     }
 }
 
@@ -472,7 +490,7 @@ async fn create_single_pr(
     rev: &str,
     base: &crate::util::EvalWithCfgFallback<String>,
     draft: &bool,
-    auto_merge: &bool,
+    auto_merge: &AutoMergeMode,
     editor_argv: Option<&crate::util::ShellCommand>,
     no_edit: &bool,
     auto_merge_method: &AutoMergeMethod,
@@ -606,8 +624,9 @@ async fn create_single_pr(
         labels: vec![],
         reviewers: vec![],
         draft: *draft,
-        auto_merge: *auto_merge,
+        auto_merge: Some(*auto_merge),
         auto_merge_method: *auto_merge_method,
+        auto_merge_comment: None,
     };
     let (final_fm, body) = if *no_edit {
         drop(status);
@@ -701,16 +720,24 @@ async fn create_single_pr(
         labels: vec![],
         reviewers: vec![],
         draft: final_fm.draft,
-        auto_merge: false,
+        auto_merge: Some(AutoMergeMode::False),
         auto_merge_method: final_fm.auto_merge_method,
+        auto_merge_comment: None,
     };
     let ctx = ApplyChangesCtx {
         owner: &target.owner,
         repo: &target.repo,
         pr_number: created.number,
         pr_node_id: &created.node_id,
-        base_has_merge_queue: created.base_has_merge_queue,
         before_label_ids: HashMap::new(),
+        auto_merge_target: target,
+        auto_merge_pr: AutoMergeTarget::created(
+            created.number,
+            &created.node_id,
+            &created.html_url,
+            created.base_has_merge_queue,
+        ),
+        auto_merge_before: Some(AutoMergeMode::False),
     };
     status.set_message("Applying PR metadata");
     editor::apply_frontmatter_diff(gh, &ctx, &before_fm, &body, &final_fm, &body)

@@ -19,7 +19,10 @@
 //! `````
 //! ```````
 
-use crate::{config::AutoMergeMethod, gh::Reviewer};
+use crate::{
+    config::{AutoMergeMethod, AutoMergeMode},
+    gh::Reviewer,
+};
 use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::ops::Not;
@@ -49,13 +52,55 @@ pub struct Frontmatter {
     pub reviewers: Vec<Reviewer>,
     #[serde(default)]
     pub draft: bool,
-    #[serde(default)]
-    pub auto_merge: bool,
+    /// `None` means the field is intentionally omitted from the editor buffer:
+    /// the PR's current request cannot be represented by one of the four
+    /// values, so submitting it unchanged must not disable anything.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_merge: Option<AutoMergeMode>,
     #[serde(default, skip_serializing_if = "is_default")]
     pub auto_merge_method: AutoMergeMethod,
+    /// Rendered as a YAML comment above `auto_merge` (or where it would be).
+    /// Not parsed back; it only explains a state the enum cannot express.
+    #[serde(skip)]
+    pub auto_merge_comment: Option<String>,
 }
 
 impl Frontmatter {
+    /// Add the auto-merge explanation directly into the YAML block so it is
+    /// visible in the editor. Comments are stripped by the YAML parser, so the
+    /// round-trip is unaffected.
+    fn annotated_yaml(&self, yaml: &str) -> String {
+        let mut notes = vec![
+            "# auto_merge options: false, infer, all, below".to_string(),
+            "#   false = cancel; infer = whole stack if stacked, otherwise this PR".to_string(),
+            "#   all = whole GitHub stack through its top PR; below = this PR and its descendants"
+                .to_string(),
+        ];
+        if let Some(note) = &self.auto_merge_comment {
+            notes.push(format!("# {note}"));
+        }
+        let notes = notes.join("\n");
+
+        let mut out = String::new();
+        let mut inserted = false;
+        for line in yaml.lines() {
+            if !inserted
+                && (line.starts_with("auto_merge:") || line.starts_with("auto_merge_method:"))
+            {
+                out.push_str(&notes);
+                out.push('\n');
+                inserted = true;
+            }
+            out.push_str(line);
+            out.push('\n');
+        }
+        if !inserted {
+            out.push_str(&notes);
+            out.push('\n');
+        }
+        out.trim_end().to_string()
+    }
+
     /// Emit YAML block + blank line + body for the editor buffer.
     ///
     /// # Errors
@@ -63,6 +108,7 @@ impl Frontmatter {
     /// Returns an error if the YAML serializer fails (unlikely for our fields).
     pub fn render(&self, body: &str, preview: Option<&str>) -> Result<String> {
         let yaml = noyalib::to_string(self).context("could not serialize frontmatter")?;
+        let yaml = self.annotated_yaml(&yaml);
         let orig_body_empty = body.trim().is_empty();
         let body = body.trim_start_matches('\n');
         let body = if body.is_empty() { "\n" } else { body };
@@ -164,8 +210,9 @@ mod tests {
             labels: vec!["bug".into(), "p1".into()],
             reviewers: vec![Reviewer::parse("@john-carmack").unwrap()],
             draft: false,
-            auto_merge: false,
+            auto_merge: Some(AutoMergeMode::False),
             auto_merge_method: AutoMergeMethod::Merge,
+            auto_merge_comment: None,
         }
     }
 
@@ -199,7 +246,7 @@ mod tests {
         assert_eq!(fm.base, "main");
         assert_eq!(fm.labels, [] as [String; 0]);
         assert!(!fm.draft);
-        assert!(!fm.auto_merge);
+        assert_eq!(fm.auto_merge, None);
         assert_eq!(fm.auto_merge_method, AutoMergeMethod::Merge);
         assert_eq!(body, "body text");
     }
@@ -212,11 +259,59 @@ mod tests {
     }
 
     #[test]
-    fn parse_reads_auto_merge_fields() {
-        let buffer = "---\ntitle: hello\nbase: main\nauto_merge: true\nauto_merge_method: squash\n---\n\nbody\n";
+    fn parse_reads_auto_merge_values() {
+        for (value, expected) in [
+            ("false", AutoMergeMode::False),
+            ("infer", AutoMergeMode::Infer),
+            ("all", AutoMergeMode::All),
+            ("below", AutoMergeMode::Below),
+        ] {
+            let buffer = format!(
+                "---\ntitle: hello\nbase: main\nauto_merge: {value}\nauto_merge_method: squash\n---\n\nbody\n"
+            );
+            let (fm, _) = Frontmatter::parse(&buffer).unwrap();
+            assert_eq!(fm.auto_merge, Some(expected), "value: {value}");
+            assert_eq!(fm.auto_merge_method, AutoMergeMethod::Squash);
+        }
+    }
+
+    #[test]
+    fn parse_accepts_legacy_true_as_infer() {
+        let buffer = "---\ntitle: hello\nbase: main\nauto_merge: true\n---\n\nbody\n";
         let (fm, _) = Frontmatter::parse(buffer).unwrap();
-        assert!(fm.auto_merge);
-        assert_eq!(fm.auto_merge_method, AutoMergeMethod::Squash);
+        assert_eq!(fm.auto_merge, Some(AutoMergeMode::Infer));
+    }
+
+    #[test]
+    fn parse_rejects_unknown_auto_merge_value() {
+        let buffer = "---\ntitle: hello\nbase: main\nauto_merge: through-2\n---\n\nbody\n";
+        Frontmatter::parse(buffer).expect_err("`through-2` is not a valid auto_merge value");
+    }
+
+    #[test]
+    fn render_emits_explicit_value_with_explanation() {
+        let mut data = fm("t");
+        data.auto_merge = Some(AutoMergeMode::All);
+        let rendered = data.render("body", None).unwrap();
+        assert!(rendered.contains("auto_merge: all"), "{rendered}");
+        assert!(rendered.contains("# auto_merge options:"), "{rendered}");
+        let (parsed, _) = Frontmatter::parse(&rendered).unwrap();
+        assert_eq!(parsed.auto_merge, Some(AutoMergeMode::All));
+    }
+
+    #[test]
+    fn render_omits_auto_merge_and_keeps_endpoint_note_in_comment() {
+        let mut data = fm("t");
+        data.auto_merge = None;
+        data.auto_merge_comment = Some("auto-merge is requested through PR #3".into());
+        let rendered = data.render("body", None).unwrap();
+        assert!(!rendered.contains("auto_merge:"), "{rendered}");
+        assert!(
+            rendered.contains("# auto-merge is requested through PR #3"),
+            "{rendered}"
+        );
+        let (parsed, _) = Frontmatter::parse(&rendered).unwrap();
+        assert_eq!(parsed.auto_merge, None);
     }
 
     #[test]
@@ -313,8 +408,9 @@ mod tests {
             labels: vec![],
             reviewers: vec![],
             draft: false,
-            auto_merge: false,
+            auto_merge: Some(AutoMergeMode::False),
             auto_merge_method: AutoMergeMethod::Merge,
+            auto_merge_comment: None,
         }
     }
 
@@ -359,8 +455,9 @@ mod tests {
             labels: vec![],
             reviewers: vec![],
             draft: false,
-            auto_merge: false,
+            auto_merge: Some(AutoMergeMode::False),
             auto_merge_method: AutoMergeMethod::Merge,
+            auto_merge_comment: None,
         }
     }
 

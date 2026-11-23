@@ -87,8 +87,11 @@ config_schema! {
     /// Open new PRs as drafts.
     draft: bool = false,
 
-    /// Enable auto-merge on newly created PRs.
-    auto_merge: bool = false,
+    /// Auto-merge scope for newly created PRs: `false`, `infer`, `all`, or
+    /// `below`. `infer` means the whole GitHub stack when the PR is stacked
+    /// and a single-PR request otherwise. The legacy boolean `true` is an
+    /// alias for `infer`.
+    auto_merge: AutoMergeMode = AutoMergeMode::False,
 
     /// Merge method used when auto-merge is enabled.
     auto_merge_method: AutoMergeMethod = AutoMergeMethod::Merge,
@@ -141,6 +144,96 @@ pub enum AutoMergeMethod {
     Merge,
     Squash,
     Rebase,
+}
+
+/// Scope of an auto-merge request, shared by config and the PR editor.
+///
+/// `infer` follows the GitHub stack: whole-stack for a stacked PR, single-PR
+/// otherwise. `all` always requests whole-stack coverage (falling back to a
+/// single PR when there is no stack), `below` requests coverage through this
+/// PR and eligible PRs beneath it, and `false` cancels any covering request.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, clap::ValueEnum, schemars::JsonSchema)]
+#[clap(rename_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
+pub enum AutoMergeMode {
+    #[default]
+    False,
+    Infer,
+    All,
+    Below,
+}
+
+impl AutoMergeMode {
+    /// All accepted editor/config spellings.
+    pub const KEYWORDS: &'static [&'static str] = &["false", "infer", "all", "below"];
+
+    /// Lowercase config/editor spelling.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::False => "false",
+            Self::Infer => "infer",
+            Self::All => "all",
+            Self::Below => "below",
+        }
+    }
+
+    /// Parse one of the documented keywords. Boolean `true` is *not* accepted
+    /// here; it is handled by [`serde::Deserialize`] as a deprecated alias.
+    #[must_use]
+    pub fn from_keyword(value: &str) -> Option<Self> {
+        match value {
+            "false" => Some(Self::False),
+            "infer" => Some(Self::Infer),
+            "all" => Some(Self::All),
+            "below" => Some(Self::Below),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for AutoMergeMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl serde::Serialize for AutoMergeMode {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for AutoMergeMode {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct ModeVisitor;
+
+        impl serde::de::Visitor<'_> for ModeVisitor {
+            type Value = AutoMergeMode;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("`false`, `infer`, `all`, `below`, or the legacy boolean `true`")
+            }
+
+            fn visit_bool<E: serde::de::Error>(self, value: bool) -> Result<Self::Value, E> {
+                if value {
+                    log::info!(
+                        "`auto_merge = true` is deprecated; use `auto_merge = \"infer\"` instead"
+                    );
+                    Ok(AutoMergeMode::Infer)
+                } else {
+                    Ok(AutoMergeMode::False)
+                }
+            }
+
+            fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Self::Value, E> {
+                AutoMergeMode::from_keyword(value)
+                    .ok_or_else(|| E::unknown_variant(value, AutoMergeMode::KEYWORDS))
+            }
+        }
+
+        deserializer.deserialize_any(ModeVisitor)
+    }
 }
 
 /// Which commit to use for the default PR title.

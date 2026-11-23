@@ -1,6 +1,6 @@
 use crate::{
     cli::GlobalOpts,
-    config::AutoMergeMethod,
+    config::{AutoMergeMethod, AutoMergeMode},
     gh::{
         AutoMergeRequest, Gh, PrDetails, pr_lookup::MissingPr, remote::Target,
         stack_create::is_open_unmerged,
@@ -10,6 +10,61 @@ use crate::{
 };
 use anyhow::{Context, Result, bail};
 use jj_gh_config_derive::subcommand_args;
+
+/// The subset of [`PrDetails`] needed to move an auto-merge request. Owned so
+/// the editor flow can build it for a freshly created PR as well as for a PR
+/// fetched from GitHub.
+#[derive(Debug, Clone)]
+pub(crate) struct AutoMergeTarget {
+    pub number: u64,
+    pub graphql_node_id: String,
+    pub html_url: String,
+    pub base_has_merge_queue: bool,
+    pub stack_number: Option<u64>,
+    pub auto_merge_request: Option<AutoMergeRequest>,
+    pub stack_auto_merge_request: Option<AutoMergeRequest>,
+}
+
+impl From<&PrDetails> for AutoMergeTarget {
+    fn from(pr: &PrDetails) -> Self {
+        Self {
+            number: pr.number,
+            graphql_node_id: pr.graphql_node_id.clone(),
+            html_url: pr.html_url.clone(),
+            base_has_merge_queue: pr.base_has_merge_queue,
+            stack_number: pr.stack_number,
+            auto_merge_request: pr.auto_merge_request.clone(),
+            stack_auto_merge_request: pr.stack_auto_merge_request.clone(),
+        }
+    }
+}
+
+impl AutoMergeTarget {
+    /// A newly created PR has no requests and no stack links yet.
+    pub(crate) fn created(
+        number: u64,
+        graphql_node_id: &str,
+        html_url: &str,
+        base_has_merge_queue: bool,
+    ) -> Self {
+        Self {
+            number,
+            graphql_node_id: graphql_node_id.to_string(),
+            html_url: html_url.to_string(),
+            base_has_merge_queue,
+            stack_number: None,
+            auto_merge_request: None,
+            stack_auto_merge_request: None,
+        }
+    }
+}
+
+/// How a PR's current auto-merge state is represented in the editor.
+pub(crate) struct AutoMergeView {
+    pub value: Option<AutoMergeMode>,
+    pub comment: Option<String>,
+    pub method: AutoMergeMethod,
+}
 
 subcommand_args! {
     pub struct AutoMergeArgs {
@@ -81,10 +136,11 @@ pub async fn run(model: &impl Model, args: &AutoMergeArgs) -> Result<()> {
         let multi = prs.len() > 1;
         let mut errors = Vec::<anyhow::Error>::new();
         for pr in &prs {
+            let view = AutoMergeTarget::from(pr);
             let result = if *cancel {
-                cancel_covering(gh, &target, pr).await
+                cancel_covering(gh, &target, &view).await
             } else {
-                enable_stack(gh, &target, pr, &requested_method).await
+                enable_stack(gh, &target, &view, &requested_method).await
             }
             .with_context(|| format!("PR #{}", pr.number));
             let _ = result
@@ -112,7 +168,8 @@ pub async fn run(model: &impl Model, args: &AutoMergeArgs) -> Result<()> {
     let multi = prs.len() > 1;
     let mut errors = Vec::<anyhow::Error>::new();
     for pr in &prs {
-        let result = enable_auto_merge(gh, pr, method)
+        let view = AutoMergeTarget::from(pr);
+        let result = enable_auto_merge(gh, &view, method)
             .await
             .with_context(|| format!("PR #{}", pr.number));
         // Recoverable mid-loop: the remaining PRs are still tried and the
@@ -141,7 +198,7 @@ pub async fn run(model: &impl Model, args: &AutoMergeArgs) -> Result<()> {
 
 async fn enable_auto_merge(
     gh: &impl Gh,
-    pr: &PrDetails,
+    pr: &AutoMergeTarget,
     auto_merge_method: AutoMergeMethod,
 ) -> Result<()> {
     let _status = crate::ui::status::push(format!("Enabling auto-merge on #{}", pr.number));
@@ -168,7 +225,7 @@ fn warn_if_merge_queue(base_has_merge_queue: bool) {
 
 /// The request currently covering `pr`: a stack request takes precedence over
 /// an individual one. The bool is GitHub's `includeStack` flag for that request.
-fn covering_request(pr: &PrDetails) -> Option<(AutoMergeRequest, bool)> {
+pub(crate) fn covering_request(pr: &AutoMergeTarget) -> Option<(AutoMergeRequest, bool)> {
     pr.stack_auto_merge_request
         .clone()
         .map(|request| (request, true))
@@ -196,23 +253,25 @@ fn method_for(
 async fn endpoint_details(
     gh: &impl Gh,
     target: &Target,
-    pr: &PrDetails,
+    pr: &AutoMergeTarget,
     request: &AutoMergeRequest,
-) -> Result<PrDetails> {
+) -> Result<AutoMergeTarget> {
     if request.pr_number == pr.number {
         return Ok(pr.clone());
     }
-    gh.get_pr(&target.owner, &target.repo, request.pr_number)
+    let details = gh
+        .get_pr(&target.owner, &target.repo, request.pr_number)
         .await
         .with_context(|| {
             format!(
                 "fetching PR #{} that owns the auto-merge request",
                 request.pr_number
             )
-        })
+        })?;
+    Ok(AutoMergeTarget::from(&details))
 }
 
-async fn cancel_covering(gh: &impl Gh, target: &Target, pr: &PrDetails) -> Result<()> {
+async fn cancel_covering(gh: &impl Gh, target: &Target, pr: &AutoMergeTarget) -> Result<()> {
     let Some((request, include_stack)) = covering_request(pr) else {
         log::info!("PR #{} has no covering auto-merge request", pr.number);
         return Ok(());
@@ -236,7 +295,7 @@ async fn cancel_covering(gh: &impl Gh, target: &Target, pr: &PrDetails) -> Resul
 async fn enable_stack(
     gh: &impl Gh,
     target: &Target,
-    pr: &PrDetails,
+    pr: &AutoMergeTarget,
     method: &EvalWithCfgFallback<AutoMergeMethod>,
 ) -> Result<()> {
     let Some(stack_number) = pr.stack_number else {
@@ -272,9 +331,11 @@ async fn enable_stack(
     let top_details = if top.number == pr.number {
         pr.clone()
     } else {
-        gh.get_pr(&target.owner, &target.repo, top.number)
+        let details = gh
+            .get_pr(&target.owner, &target.repo, top.number)
             .await
-            .with_context(|| format!("fetching stack tip PR #{}", top.number))?
+            .with_context(|| format!("fetching stack tip PR #{}", top.number))?;
+        AutoMergeTarget::from(&details)
     };
     if let Some((request, include_stack)) = covering.as_ref() {
         let endpoint = endpoint_details(gh, target, pr, request).await?;
@@ -299,6 +360,150 @@ async fn enable_stack(
     );
     crate::ui::print_url(&top_details.html_url);
     Ok(())
+}
+
+/// The topmost open, unmerged member of the PR's GitHub stack, if any.
+pub(crate) async fn stack_tip_number(
+    gh: &impl Gh,
+    target: &Target,
+    pr: &PrDetails,
+) -> Result<Option<u64>> {
+    let Some(stack_number) = pr.stack_number else {
+        return Ok(None);
+    };
+    let stack = gh
+        .get_stack(&target.owner, &target.repo, stack_number)
+        .await
+        .with_context(|| format!("fetching stack #{stack_number}"))?;
+    Ok(stack
+        .pull_requests
+        .iter()
+        .rev()
+        .find(|member| is_open_unmerged(member))
+        .map(|member| member.number))
+}
+
+/// Render a PR's current request as one of the editor's four values. A request
+/// through another PR that is not the stack tip cannot be expressed here; the
+/// returned comment names its endpoint instead.
+pub(crate) fn current_view(pr: &PrDetails, tip_number: Option<u64>) -> AutoMergeView {
+    let Some((request, include_stack)) = covering_request(&AutoMergeTarget::from(pr)) else {
+        return AutoMergeView {
+            value: Some(AutoMergeMode::False),
+            comment: None,
+            method: AutoMergeMethod::default(),
+        };
+    };
+    let method = request.method.unwrap_or_default();
+
+    let whole_stack = include_stack && tip_number.is_some_and(|tip| tip == request.pr_number);
+    let value = if whole_stack {
+        AutoMergeMode::All
+    } else if request.pr_number == pr.number {
+        AutoMergeMode::Below
+    } else {
+        return AutoMergeView {
+            value: None,
+            comment: Some(format!(
+                "auto-merge is requested through PR #{}; edit that PR to change it",
+                request.pr_number
+            )),
+            method,
+        };
+    };
+
+    AutoMergeView {
+        value: Some(value),
+        comment: None,
+        method,
+    }
+}
+
+/// Inputs to [`apply_editor_change`] supplied by the caller.
+pub(crate) struct AutoMergeEditorChange<'a> {
+    pub target: &'a Target,
+    pub pr: AutoMergeTarget,
+    pub before: Option<AutoMergeMode>,
+    pub after: Option<AutoMergeMode>,
+    pub method: AutoMergeMethod,
+    pub method_explicit: bool,
+}
+
+/// Apply the auto-merge portion of an editor frontmatter diff. An unchanged
+/// value (and unchanged method) never touches GitHub, which matters for
+/// whole-stack requests: re-enabling them needlessly would cancel and recreate
+/// the covering request.
+pub(crate) async fn apply_editor_change(
+    gh: &impl Gh,
+    change: AutoMergeEditorChange<'_>,
+) -> Result<()> {
+    let AutoMergeEditorChange {
+        target,
+        pr,
+        before,
+        after,
+        method,
+        method_explicit,
+    } = change;
+
+    if before == after && !method_explicit {
+        return Ok(());
+    }
+    let Some(desired) = after else {
+        log::info!(
+            "PR #{} has an auto-merge request this editor cannot represent; leaving it unchanged",
+            pr.number
+        );
+        return Ok(());
+    };
+
+    let requested = EvalWithCfgFallback::new(method_explicit.then_some(method), Some(method));
+    match desired {
+        AutoMergeMode::False => cancel_covering(gh, target, &pr).await,
+        AutoMergeMode::Below => enable_below(gh, target, &pr, &requested).await,
+        AutoMergeMode::Infer | AutoMergeMode::All => {
+            if pr.stack_number.is_some() {
+                enable_stack(gh, target, &pr, &requested).await
+            } else {
+                log::info!(
+                    "PR #{} is not part of a GitHub stack; enabling a single-PR request",
+                    pr.number
+                );
+                enable_below(gh, target, &pr, &requested).await
+            }
+        }
+    }
+}
+
+async fn enable_below(
+    gh: &impl Gh,
+    target: &Target,
+    pr: &AutoMergeTarget,
+    method: &EvalWithCfgFallback<AutoMergeMethod>,
+) -> Result<()> {
+    let covering = covering_request(pr);
+    let existing_method = covering.as_ref().and_then(|(request, _)| request.method);
+    let explicit_method = method.cli().copied();
+    if covering.as_ref().is_some_and(|(request, include_stack)| {
+        !include_stack
+            && request.pr_number == pr.number
+            && explicit_method.is_none_or(|m| Some(m) == existing_method)
+    }) {
+        log::info!(
+            "PR #{} is already covered by an individual auto-merge request",
+            pr.number
+        );
+        return Ok(());
+    }
+
+    if let Some((request, include_stack)) = covering.as_ref() {
+        let endpoint = endpoint_details(gh, target, pr, request).await?;
+        gh.disable_auto_merge(&endpoint.graphql_node_id, *include_stack)
+            .await
+            .with_context(|| format!("cancelling auto-merge through PR #{}", request.pr_number))?;
+    }
+
+    enable_auto_merge(gh, pr, method_for(existing_method, method)).await
 }
 
 #[cfg(test)]
@@ -1043,5 +1248,220 @@ mod tests {
             *gh.enabled.lock().unwrap(),
             vec![("node-3".into(), AutoMergeMethod::Squash, true)]
         );
+    }
+
+    fn view(pr: &PrDetails, tip: Option<u64>) -> AutoMergeView {
+        current_view(pr, tip)
+    }
+
+    async fn editor_change(
+        gh: &FakeGh,
+        pr: &PrDetails,
+        before: Option<AutoMergeMode>,
+        after: Option<AutoMergeMode>,
+        method: AutoMergeMethod,
+        method_explicit: bool,
+    ) -> Result<()> {
+        apply_editor_change(
+            gh,
+            AutoMergeEditorChange {
+                target: &test_target(),
+                pr: AutoMergeTarget::from(pr),
+                before,
+                after,
+                method,
+                method_explicit,
+            },
+        )
+        .await
+    }
+
+    #[test]
+    fn editor_view_represents_each_request_shape() {
+        assert_eq!(
+            view(&pr_details(1, false), None).value,
+            Some(AutoMergeMode::False)
+        );
+
+        let individual = with_requests(
+            pr_details(1, false),
+            Some(request(1, AutoMergeMethod::Rebase)),
+            None,
+        );
+        let individual_view = view(&individual, None);
+        assert_eq!(individual_view.value, Some(AutoMergeMode::Below));
+        assert_eq!(individual_view.method, AutoMergeMethod::Rebase);
+
+        let whole = with_requests(
+            stacked_pr(1, 7),
+            None,
+            Some(request(3, AutoMergeMethod::Squash)),
+        );
+        assert_eq!(view(&whole, Some(3)).value, Some(AutoMergeMode::All));
+
+        let partial = with_requests(
+            stacked_pr(1, 7),
+            None,
+            Some(request(2, AutoMergeMethod::Squash)),
+        );
+        let partial_view = view(&partial, Some(3));
+        assert_eq!(partial_view.value, None);
+        assert!(
+            partial_view
+                .comment
+                .as_deref()
+                .is_some_and(|c| c.contains("PR #2")),
+            "comment: {:?}",
+            partial_view.comment
+        );
+    }
+
+    #[tokio::test]
+    async fn editor_unchanged_value_does_not_mutate() {
+        let pr = with_requests(
+            stacked_pr(1, 7),
+            None,
+            Some(request(3, AutoMergeMethod::Squash)),
+        );
+        let gh =
+            FakeGh::new(vec![pr.clone(), pr_details(3, false)]).with_stack(stack(7, &[1, 2, 3]));
+
+        editor_change(
+            &gh,
+            &pr,
+            Some(AutoMergeMode::All),
+            Some(AutoMergeMode::All),
+            AutoMergeMethod::Squash,
+            false,
+        )
+        .await
+        .expect("unchanged value should succeed");
+
+        assert!(gh.enabled.lock().unwrap().is_empty());
+        assert!(gh.disabled.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn editor_false_cancels_whole_stack_request_through_owner() {
+        let pr = with_requests(
+            stacked_pr(1, 7),
+            None,
+            Some(request(3, AutoMergeMethod::Squash)),
+        );
+        let gh = FakeGh::new(vec![pr.clone(), pr_details(3, false)]);
+
+        editor_change(
+            &gh,
+            &pr,
+            Some(AutoMergeMode::All),
+            Some(AutoMergeMode::False),
+            AutoMergeMethod::Squash,
+            false,
+        )
+        .await
+        .expect("cancel should succeed");
+
+        assert_eq!(*gh.disabled.lock().unwrap(), vec![("node-3".into(), true)]);
+        assert!(gh.enabled.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn editor_below_replaces_stack_request_and_keeps_method() {
+        let pr = with_requests(
+            stacked_pr(1, 7),
+            None,
+            Some(request(3, AutoMergeMethod::Squash)),
+        );
+        let gh = FakeGh::new(vec![pr.clone(), pr_details(3, false)]);
+
+        editor_change(
+            &gh,
+            &pr,
+            Some(AutoMergeMode::All),
+            Some(AutoMergeMode::Below),
+            AutoMergeMethod::Squash,
+            false,
+        )
+        .await
+        .expect("switch to below should succeed");
+
+        assert_eq!(*gh.disabled.lock().unwrap(), vec![("node-3".into(), true)]);
+        assert_eq!(
+            *gh.enabled.lock().unwrap(),
+            vec![("node-1".into(), AutoMergeMethod::Squash, false)]
+        );
+    }
+
+    #[tokio::test]
+    async fn editor_all_moves_partial_request_to_tip() {
+        let pr = with_requests(
+            stacked_pr(1, 7),
+            None,
+            Some(request(2, AutoMergeMethod::Squash)),
+        );
+        let gh = FakeGh::new(vec![pr.clone(), pr_details(2, false), pr_details(3, false)])
+            .with_stack(stack(7, &[1, 2, 3]));
+
+        editor_change(
+            &gh,
+            &pr,
+            Some(AutoMergeMode::Below),
+            Some(AutoMergeMode::All),
+            AutoMergeMethod::Squash,
+            false,
+        )
+        .await
+        .expect("stack move should succeed");
+
+        assert_eq!(*gh.disabled.lock().unwrap(), vec![("node-2".into(), true)]);
+        assert_eq!(
+            *gh.enabled.lock().unwrap(),
+            vec![("node-3".into(), AutoMergeMethod::Squash, true)]
+        );
+    }
+
+    #[tokio::test]
+    async fn editor_explicit_method_change_is_applied() {
+        let pr = with_requests(
+            stacked_pr(1, 7),
+            None,
+            Some(request(3, AutoMergeMethod::Squash)),
+        );
+        let gh =
+            FakeGh::new(vec![pr.clone(), pr_details(3, false)]).with_stack(stack(7, &[1, 2, 3]));
+
+        editor_change(
+            &gh,
+            &pr,
+            Some(AutoMergeMode::All),
+            Some(AutoMergeMode::All),
+            AutoMergeMethod::Rebase,
+            true,
+        )
+        .await
+        .expect("method change should succeed");
+
+        assert_eq!(*gh.disabled.lock().unwrap(), vec![("node-3".into(), true)]);
+        assert_eq!(
+            *gh.enabled.lock().unwrap(),
+            vec![("node-3".into(), AutoMergeMethod::Rebase, true)]
+        );
+    }
+
+    #[tokio::test]
+    async fn editor_unrepresentable_value_is_left_unchanged() {
+        let pr = with_requests(
+            stacked_pr(1, 7),
+            None,
+            Some(request(2, AutoMergeMethod::Squash)),
+        );
+        let gh = FakeGh::new(vec![pr.clone(), pr_details(2, false)]);
+
+        editor_change(&gh, &pr, None, None, AutoMergeMethod::Squash, false)
+            .await
+            .expect("omitted field should leave the request alone");
+
+        assert!(gh.enabled.lock().unwrap().is_empty());
+        assert!(gh.disabled.lock().unwrap().is_empty());
     }
 }

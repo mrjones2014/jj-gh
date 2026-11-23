@@ -136,7 +136,7 @@ mod tests {
             base: crate::util::EvalWithCfgFallback::new(None, None),
             draft: false,
             no_draft: false,
-            auto_merge: false,
+            auto_merge: crate::config::AutoMergeMode::False,
             no_auto_merge: false,
             auto_merge_method: crate::config::AutoMergeMethod::Merge,
             template: None,

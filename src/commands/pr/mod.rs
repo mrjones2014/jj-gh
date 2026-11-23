@@ -3,7 +3,7 @@
 //! builds the GitHub client lazily. One module per CLI subcommand; PR lookup
 //! helpers live in [`crate::gh::pr_lookup`].
 
-mod auto_merge;
+pub(crate) mod auto_merge;
 mod create;
 mod edit;
 pub mod fetch;
@@ -214,7 +214,7 @@ pub async fn dispatch(global: GlobalOptsInput, action: PrAction) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{AutoMergeMethod, Config};
+    use crate::config::{AutoMergeMethod, AutoMergeMode, Config};
     use clap::Parser;
 
     #[derive(clap::Parser, Debug)]
@@ -508,7 +508,7 @@ mod tests {
             "#,
         );
         assert!(c.draft);
-        assert!(c.auto_merge);
+        assert_eq!(c.auto_merge, AutoMergeMode::Infer);
         assert_eq!(c.auto_merge_method, AutoMergeMethod::Squash);
         assert!(!c.pr_create_show_diffs);
 
@@ -523,7 +523,7 @@ mod tests {
             "#,
         );
         assert!(!c.draft);
-        assert!(!c.auto_merge);
+        assert_eq!(c.auto_merge, AutoMergeMode::False);
         assert_eq!(c.auto_merge_method, AutoMergeMethod::Rebase);
         assert!(c.pr_create_show_diffs);
     }
@@ -548,9 +548,37 @@ mod tests {
             "#,
         );
         assert!(c.draft);
-        assert!(c.auto_merge);
+        assert_eq!(c.auto_merge, AutoMergeMode::Infer);
         assert_eq!(c.auto_merge_method, AutoMergeMethod::Rebase);
         assert!(c.pr_create_show_diffs);
+    }
+
+    #[test]
+    fn create_auto_merge_value_requires_equals() {
+        assert_eq!(
+            parse_create(&["@-", "--auto-merge"]).auto_merge,
+            Some(AutoMergeMode::Infer)
+        );
+        for (value, expected) in [
+            ("false", AutoMergeMode::False),
+            ("infer", AutoMergeMode::Infer),
+            ("all", AutoMergeMode::All),
+            ("below", AutoMergeMode::Below),
+        ] {
+            let flag = format!("--auto-merge={value}");
+            assert_eq!(
+                parse_create(&["@-", &flag]).auto_merge,
+                Some(expected),
+                "flag: {flag}"
+            );
+        }
+    }
+
+    #[test]
+    fn create_auto_merge_space_value_is_rejected() {
+        let err = CreateArgsParser::try_parse_from(["@-", "--auto-merge", "all"])
+            .expect_err("a separate value should be rejected");
+        assert!(err.to_string().contains("--auto-merge=all"), "err: {err}");
     }
 
     #[test]
@@ -577,7 +605,7 @@ mod tests {
             ",
         );
         assert!(!c.draft);
-        assert!(!c.auto_merge);
+        assert_eq!(c.auto_merge, AutoMergeMode::False);
         assert!(!c.pr_create_show_diffs);
     }
 
