@@ -10,6 +10,7 @@ use crate::{
         self, Jj,
         inject::{TemplateAliases, quote_jj},
     },
+    logging,
     model::Model,
     template::{self, TemplateSource},
     ui::{PrLinks, Stream},
@@ -281,16 +282,16 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
         created_prs.push(created);
     }
 
-    // A summary block we format ourselves, so it goes to stderr directly rather
+    // A summary block we format ourselves, so it goes out as plain UI rather
     // than through the logger, which would prefix and recolor every line.
     if created_prs.len() > 1 {
         let links = created_prs
             .iter()
             .map(|pr| (pr.number, pr.html_url.clone()))
             .collect::<PrLinks>();
-        eprintln!("\nCreated {} PRs:", created_prs.len());
+        logging::ui!("\nCreated {} PRs:", created_prs.len());
         for pr in &created_prs {
-            eprintln!("  {}", links.number(Stream::Stderr, pr.number));
+            logging::ui!("  {}", links.number(Stream::Stderr, pr.number));
         }
     }
 

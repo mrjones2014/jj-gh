@@ -31,6 +31,7 @@ use crate::{
         stack_detect::{BasePlan, LocalShape, detect},
     },
     jj::{Jj, PushedBookmark},
+    logging,
     model::Model,
     ui::{PrLinks, Stream},
 };
@@ -38,7 +39,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use jj_gh_config_derive::subcommand_args;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
-use std::io::{self, IsTerminal, Write};
+use std::io::{self, IsTerminal};
 
 /// Everything this command prints is UI: the plan, the prompt, the progress
 /// lines. Only `--json` is a result, and it goes to stdout.
@@ -184,7 +185,7 @@ async fn reconcile(model: &impl Model, args: &StackArgs) -> Result<()> {
     }
 
     if plan.is_empty() {
-        eprintln!("Everything already matches the local graph");
+        logging::ui!("Everything already matches the local graph");
         return Ok(());
     }
 
@@ -197,7 +198,7 @@ async fn reconcile(model: &impl Model, args: &StackArgs) -> Result<()> {
     );
 
     if args.dry_run {
-        eprintln!("\n{}Dry run: nothing was changed{}", on(DIM), on(RESET));
+        logging::ui!("\n{}Dry run: nothing was changed{}", on(DIM), on(RESET));
         return Ok(());
     }
     // Outside a terminal there is nobody to answer the prompt, so the safe
@@ -205,7 +206,7 @@ async fn reconcile(model: &impl Model, args: &StackArgs) -> Result<()> {
     // so that is the stream that has to be a terminal.
     let interactive = io::stdin().is_terminal() && io::stderr().is_terminal();
     if !args.force && !interactive {
-        eprintln!(
+        logging::ui!(
             "\n{}Not a TTY, so nothing was changed. Pass --force to apply.{}",
             on(DIM),
             on(RESET),
@@ -214,8 +215,8 @@ async fn reconcile(model: &impl Model, args: &StackArgs) -> Result<()> {
     }
     // Reaching the apply step means either `--force` or an interactive `y`;
     // both mean "yes, including unstacking whatever is in the way".
-    if !args.force && !confirm()? {
-        eprintln!("Aborted");
+    if !args.force && !logging::confirm!("\nApply this plan? [y/N] ")? {
+        logging::ui!("Aborted");
         return Ok(());
     }
 
@@ -247,7 +248,7 @@ async fn gather(model: &impl Model, args: &StackArgs) -> Result<Option<Gathered>
         .collect::<Vec<String>>();
     if branch_names.is_empty() {
         drop(status);
-        eprintln!("No bookmarks are tracked on `{remote_name}`");
+        logging::ui!("No bookmarks are tracked on `{remote_name}`");
         return Ok(None);
     }
 
@@ -261,7 +262,7 @@ async fn gather(model: &impl Model, args: &StackArgs) -> Result<Option<Gathered>
         .await?;
     if prs.is_empty() {
         drop(status);
-        eprintln!("No local PRs found");
+        logging::ui!("No local PRs found");
         return Ok(None);
     }
 
@@ -559,7 +560,7 @@ fn print_plan(
                 .remote_commit_id
                 .as_deref()
                 .map_or("(not on remote)".to_string(), short_sha);
-            eprintln!(
+            logging::ui!(
                 "  {}{}{}  {} {}->{} {}",
                 on(MAGENTA),
                 push.bookmark,
@@ -597,7 +598,7 @@ fn print_plan(
                 base.proposed_base,
                 on(RESET),
             );
-            eprintln!("  {}", links.link(UI, base.pr_number, &line));
+            logging::ui!("  {}", links.link(UI, base.pr_number, &line));
         }
     }
 
@@ -628,12 +629,12 @@ fn print_plan(
         }
         // Worth spelling out: these are the ones that do not come back, and
         // the reason is local, so the user can tell it from a mistake.
-        eprintln!(
+        logging::ui!(
             "  {}These are no longer part of a local chain, so they leave{}",
             on(DIM),
             on(RESET),
         );
-        eprintln!("  {}their stack for good.{}", on(DIM), on(RESET));
+        logging::ui!("  {}their stack for good.{}", on(DIM), on(RESET));
     }
 }
 
@@ -643,9 +644,9 @@ fn section(first: &mut bool, label: &str, detail: &str) {
     if *first {
         *first = false;
     } else {
-        eprintln!();
+        logging::ui!("");
     }
-    eprintln!("{}{label}{} {detail}:", on(DIM), on(RESET));
+    logging::ui!("{}{label}{} {detail}:", on(DIM), on(RESET));
 }
 
 /// `#123  title`, with the whole row hyperlinked to the PR.
@@ -656,7 +657,7 @@ fn print_pr_line(links: &PrLinks, number: u64, title: &str) {
         links.underlined_number(UI, number),
         on(RESET),
     );
-    eprintln!("  {}", links.link(UI, number, &line));
+    logging::ui!("  {}", links.link(UI, number, &line));
 }
 
 /// Apply the plan. Unstack first so base refs can move, then move them, then
@@ -819,13 +820,13 @@ async fn explicit(model: &impl Model, args: &StackArgs) -> Result<()> {
         return Ok(());
     }
     if args.dry_run {
-        eprintln!(
+        logging::ui!(
             "{}Stack{}: {}",
             on(DIM),
             on(RESET),
             format_chain(&links, &chain)
         );
-        eprintln!("\n{}Dry run: nothing was changed{}", on(DIM), on(RESET));
+        logging::ui!("\n{}Dry run: nothing was changed{}", on(DIM), on(RESET));
         return Ok(());
     }
 
@@ -911,32 +912,11 @@ pub(crate) fn confirm_cancel_auto_merge(
     stacks: &[u64],
     existing_stacks: &[PullRequestStack],
 ) -> Result<bool> {
-    // `pr create` still has its "Detecting stack chains" status line up; hand
-    // the terminal to the warning and prompt until the answer is read.
-    let _suspended = crate::ui::status::suspend();
     warn_auto_merge_cancelled(stacks, existing_stacks);
     if stacks.is_empty() {
         return Ok(true);
     }
-    // The prompt goes to stderr, so that is the stream that has to be a TTY.
-    if !io::stdin().is_terminal() || !io::stderr().is_terminal() {
-        return Ok(false);
-    }
-    eprint!("\nCancel auto-merge and continue linking? [y/N] ");
-    io::stderr().flush()?;
-    let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
-    let response = input.trim().to_lowercase();
-    Ok(response == "y" || response == "yes")
-}
-
-fn confirm() -> Result<bool> {
-    eprint!("\nApply this plan? [y/N] ");
-    io::stderr().flush()?;
-    let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
-    let response = input.trim().to_lowercase();
-    Ok(response == "y" || response == "yes")
+    logging::confirm!("\nCancel auto-merge and continue linking? [y/N] ")
 }
 
 /// Emit the ANSI code only when stderr, where all of this UI goes, is a
