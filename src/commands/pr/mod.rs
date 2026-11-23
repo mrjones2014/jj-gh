@@ -320,6 +320,36 @@ mod tests {
     }
 
     #[test]
+    fn auto_merge_stack_flag_accepts_target_on_either_side() {
+        for argv in [&["42", "--stack"][..], &["--stack", "42"][..]] {
+            let parsed = AutoMergeArgsParser::try_parse_from(argv.iter().copied())
+                .expect("stack mode should accept the positional target on either side")
+                .args;
+            assert_eq!(parsed.revsets, vec!["42"]);
+            assert!(parsed.stack);
+            assert!(!parsed.cancel);
+        }
+    }
+
+    #[test]
+    fn auto_merge_cancel_flag_accepts_target_on_either_side() {
+        for argv in [&["42", "--cancel"][..], &["--cancel", "42"][..]] {
+            let parsed = AutoMergeArgsParser::try_parse_from(argv.iter().copied())
+                .expect("cancel mode should accept the positional target on either side")
+                .args;
+            assert_eq!(parsed.revsets, vec!["42"]);
+            assert!(parsed.cancel);
+            assert!(!parsed.stack);
+        }
+    }
+
+    #[test]
+    fn auto_merge_stack_and_cancel_conflict() {
+        AutoMergeArgsParser::try_parse_from(["42", "--stack", "--cancel"])
+            .expect_err("--stack and --cancel should be mutually exclusive");
+    }
+
+    #[test]
     fn rerun_requires_target_or_all() {
         RerunArgsParser::try_parse_from::<[&str; 0], _>([])
             .expect_err("bare rerun should be rejected");
@@ -777,9 +807,11 @@ mod tests {
     }
 
     #[test]
-    fn auto_merge_args_method_overrides_config_via_rename() {
+    fn auto_merge_args_keep_cli_and_config_methods_separate() {
         let input = AutoMergeArgsInput {
             revsets: vec!["1".into()],
+            stack: false,
+            cancel: false,
             auto_merge_method: Some(AutoMergeMethod::Squash),
         };
         let fig = config::defaults_figment()
@@ -788,8 +820,15 @@ mod tests {
                 AutoMergeMethod::Rebase,
             ))
             .merge(Serialized::defaults(&input));
-        let c = config::extract(&fig).unwrap();
-        assert_eq!(c.auto_merge_method, AutoMergeMethod::Squash);
+        let config = config::extract(&fig).unwrap();
+        assert_eq!(config.auto_merge_method, AutoMergeMethod::Rebase);
+
+        let resolved = AutoMergeArgs::resolve(input, &config, &resolve_globals(&[]));
+        assert_eq!(resolved.auto_merge_method, Some(AutoMergeMethod::Squash));
+        assert_eq!(
+            resolved.configured_auto_merge_method,
+            AutoMergeMethod::Rebase
+        );
     }
 
     /// Build the resolved [`GlobalOpts`] from CLI args plus a config layer that

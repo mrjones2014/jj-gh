@@ -119,7 +119,7 @@ async fn align_chain_bases(
     Ok(retargeted)
 }
 
-fn is_open_unmerged(pr: &StackPullRequest) -> bool {
+pub(crate) fn is_open_unmerged(pr: &StackPullRequest) -> bool {
     pr.merged_at.is_none() && pr.state.eq_ignore_ascii_case("open")
 }
 

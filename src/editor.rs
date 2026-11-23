@@ -8,7 +8,7 @@ use crate::{
     gh::{Gh, Reviewer, UpdatePr, remote},
     util::ShellCommand,
 };
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow};
 use std::collections::HashMap;
 
 pub trait Editor {
@@ -146,18 +146,18 @@ pub async fn apply_frontmatter_diff<G: Gh>(
     // method on an already-enabled PR.
     match (before.auto_merge, after.auto_merge) {
         (false, true) => {
-            ensure_not_merge_queue(ctx)?;
             gh.enable_auto_merge(ctx.pr_node_id, after.auto_merge_method, false)
-                .await?;
+                .await
+                .inspect_err(|_| warn_if_merge_queue(ctx))?;
         }
         (true, false) => {
             gh.disable_auto_merge(ctx.pr_node_id, false).await?;
         }
         (true, true) if before.auto_merge_method != after.auto_merge_method => {
-            ensure_not_merge_queue(ctx)?;
             gh.disable_auto_merge(ctx.pr_node_id, false).await?;
             gh.enable_auto_merge(ctx.pr_node_id, after.auto_merge_method, false)
-                .await?;
+                .await
+                .inspect_err(|_| warn_if_merge_queue(ctx))?;
         }
         _ => {}
     }
@@ -165,13 +165,15 @@ pub async fn apply_frontmatter_diff<G: Gh>(
     Ok(())
 }
 
-fn ensure_not_merge_queue(ctx: &ApplyChangesCtx<'_>) -> Result<()> {
+/// A merge queue on the base branch is a possible cause of a GitHub rejection;
+/// the public API has no equivalent of the web UI's queue auto-merge. Keep the
+/// original error as the failure and add this only as a hint.
+fn warn_if_merge_queue(ctx: &ApplyChangesCtx<'_>) {
     if ctx.base_has_merge_queue {
-        bail!(
-            "auto-merge not supported for repos with merge queues enabled; this is a limitation of the GitHub API. See https://github.com/mrjones2014/jj-gh/issues/103"
+        log::warn!(
+            "the base branch has a merge queue; GitHub's API may reject auto-merge in this configuration (https://github.com/mrjones2014/jj-gh/issues/103)"
         );
     }
-    Ok(())
 }
 
 /// Production [`EditorRoundTrip`]: tempfile + spawn editor + read back.
