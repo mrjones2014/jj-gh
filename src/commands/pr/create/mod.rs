@@ -377,12 +377,27 @@ async fn link_stacks(
         return Ok(Vec::new());
     }
     let existing_stacks = gh.list_stacks(&target.owner, &target.repo).await?;
+
+    // Unlike `pr stack`, creation has no preflight plan to confirm. A reshape
+    // that cancels an existing auto-merge request needs its own consent; a
+    // decline (or no TTY to ask in) leaves the PRs created but unlinked.
+    let blocked = crate::gh::stack_create::stacks_blocked_by_auto_merge(
+        &shape.chains,
+        pr_details,
+        &existing_stacks,
+    );
+    if !crate::commands::pr::stack::confirm_cancel_auto_merge(&blocked, &existing_stacks)? {
+        log::info!("Skipping stack linking; the PRs were still created");
+        return Ok(Vec::new());
+    }
+
     Ok(crate::gh::stack_create::create_stacks(
         gh,
         target,
         &shape.chains,
         pr_details,
         &existing_stacks,
+        true,
     )
     .await
     .inspect_err(|e| log::warn!("Failed to link PR stacks: {e:#}"))

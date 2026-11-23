@@ -26,7 +26,7 @@ use crate::{
         remote,
         stack_create::{
             ChainOutcome, ChainResult, append_candidate, apply_unstack_result, create_stacks,
-            stack_exists, stack_members, unstack,
+            stack_exists, stack_members, stacks_blocked_by_auto_merge, unstack,
         },
         stack_detect::{BasePlan, LocalShape, detect},
     },
@@ -191,6 +191,10 @@ async fn reconcile(model: &impl Model, args: &StackArgs) -> Result<()> {
     let links = PrLinks::from_details(&ctx.pr_details);
     show_graph(args, &ctx).await;
     print_plan(&plan, &ctx.pr_details, &links, &ctx.existing_stacks);
+    warn_auto_merge_cancelled(
+        &stacks_blocked_by_auto_merge(&plan.chains, &ctx.pr_details, &ctx.existing_stacks),
+        &ctx.existing_stacks,
+    );
 
     if args.dry_run {
         eprintln!("\n{}Dry run: nothing was changed{}", on(DIM), on(RESET));
@@ -680,7 +684,17 @@ async fn apply(model: &impl Model, ctx: Gathered, plan: Plan) -> Result<()> {
     // base-ref change on a PR that is in a stack. The stacks are rebuilt below.
     if !plan.unstack.is_empty() {
         let status = crate::ui::status::push("Unstacking PRs");
-        let outcome = unstack(gh, &target, &plan.unstack, &pr_details, &existing_stacks).await?;
+        // The plan was shown and confirmed above, so that consent covers
+        // cancelling any auto-merge request that a reshape tears down.
+        let outcome = unstack(
+            gh,
+            &target,
+            &plan.unstack,
+            &pr_details,
+            &existing_stacks,
+            true,
+        )
+        .await?;
         drop(status);
         apply_unstack_result(&outcome, &mut pr_details, &mut existing_stacks);
 
@@ -735,7 +749,15 @@ async fn apply(model: &impl Model, ctx: Gathered, plan: Plan) -> Result<()> {
 
     if !plan.chains.is_empty() {
         let status = crate::ui::status::push("Creating stacks");
-        let results = create_stacks(gh, &target, &plan.chains, &pr_details, &existing_stacks).await;
+        let results = create_stacks(
+            gh,
+            &target,
+            &plan.chains,
+            &pr_details,
+            &existing_stacks,
+            true,
+        )
+        .await;
         drop(status);
         print_stack_results(&links, &results?);
     }
@@ -813,8 +835,15 @@ async fn explicit(model: &impl Model, args: &StackArgs) -> Result<()> {
 
     let status = crate::ui::status::push("Loading existing stacks");
     let existing_stacks = gh.list_stacks(&target.owner, &target.repo).await?;
-    status.set_message("Creating stack");
-    let results = create_stacks(gh, &target, &[chain], &pr_details, &existing_stacks).await;
+    drop(status);
+    // Naming the PRs is the confirmation here, so a warning is enough; the
+    // same consent lets the reshape cancel an existing auto-merge request.
+    warn_auto_merge_cancelled(
+        &stacks_blocked_by_auto_merge(std::slice::from_ref(&chain), &pr_details, &existing_stacks),
+        &existing_stacks,
+    );
+    let status = crate::ui::status::push("Creating stack");
+    let results = create_stacks(gh, &target, &[chain], &pr_details, &existing_stacks, true).await;
     drop(status);
     print_stack_results(&links, &results?);
 
@@ -848,6 +877,57 @@ async fn push_stale(jj: &impl Jj, pr_details: &[PrDetails], remote_name: &str) -
         .with_context(|| format!("pushing `{}` to `{remote_name}`", pr.head_ref))?;
     }
     Ok(())
+}
+
+/// Warn that reshaping the named stacks will cancel their auto-merge
+/// requests. `pr stack` shows this alongside its normal plan confirmation;
+/// `pr create` shows it before its dedicated prompt.
+pub(crate) fn warn_auto_merge_cancelled(stacks: &[u64], existing_stacks: &[PullRequestStack]) {
+    if stacks.is_empty() {
+        return;
+    }
+    let mut names = Vec::new();
+    for stack in existing_stacks {
+        if stacks.contains(&stack.number) {
+            let prs = stack
+                .pull_requests
+                .iter()
+                .map(|pr| format!("#{}", pr.number))
+                .collect::<Vec<_>>()
+                .join(", ");
+            names.push(format!("stack #{} ({prs})", stack.number));
+        }
+    }
+    log::warn!(
+        "reshaping {} will cancel its auto-merge request",
+        names.join(", ")
+    );
+}
+
+/// For `pr create`: warn and ask before a reshape cancels an existing
+/// auto-merge request. Returns `false` on a negative answer or outside a
+/// terminal, so linking stops while the created PRs stay in place.
+pub(crate) fn confirm_cancel_auto_merge(
+    stacks: &[u64],
+    existing_stacks: &[PullRequestStack],
+) -> Result<bool> {
+    // `pr create` still has its "Detecting stack chains" status line up; hand
+    // the terminal to the warning and prompt until the answer is read.
+    let _suspended = crate::ui::status::suspend();
+    warn_auto_merge_cancelled(stacks, existing_stacks);
+    if stacks.is_empty() {
+        return Ok(true);
+    }
+    // The prompt goes to stderr, so that is the stream that has to be a TTY.
+    if !io::stdin().is_terminal() || !io::stderr().is_terminal() {
+        return Ok(false);
+    }
+    eprint!("\nCancel auto-merge and continue linking? [y/N] ");
+    io::stderr().flush()?;
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    let response = input.trim().to_lowercase();
+    Ok(response == "y" || response == "yes")
 }
 
 fn confirm() -> Result<bool> {

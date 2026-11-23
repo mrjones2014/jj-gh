@@ -509,6 +509,8 @@ impl Gh for OctocrabGh {
             .await
             .map_err(humanize)
             .with_context(|| format!("POST {route}"))?;
+        // `http::Response::status`, not a process spawn.
+        // ast-grep-ignore: no-direct-process-spawn
         if response.status() == http::StatusCode::NO_CONTENT {
             return Ok(None);
         }

@@ -54,7 +54,7 @@ mod tests {
 
     #[test]
     fn reads_individual_and_stack_auto_merge_requests() {
-        let response: GetPrResponseData = serde_json::from_value(serde_json::json!({
+        let response = serde_json::from_value::<GetPrResponseData>(serde_json::json!({
             "repository": {
                 "pullRequest": {
                     "id": "PR_2",
@@ -91,16 +91,14 @@ mod tests {
             .expect("repository")
             .pull_request
             .expect("pull request");
-        let individual: AutoMergeRequest = pr
-            .auto_merge_request
-            .expect("individual request")
-            .try_into()
-            .expect("individual request conversion");
-        let stack: AutoMergeRequest = pr
-            .stack_auto_merge_request
-            .expect("stack request")
-            .try_into()
-            .expect("stack request conversion");
+        let individual = TryInto::<AutoMergeRequest>::try_into(
+            pr.auto_merge_request.expect("individual request"),
+        )
+        .expect("individual request conversion");
+        let stack = TryInto::<AutoMergeRequest>::try_into(
+            pr.stack_auto_merge_request.expect("stack request"),
+        )
+        .expect("stack request conversion");
 
         assert_eq!(
             individual,

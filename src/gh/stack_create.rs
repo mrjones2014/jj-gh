@@ -126,7 +126,11 @@ fn is_open_unmerged(pr: &StackPullRequest) -> bool {
 /// Refuse to reshape a stack we do not fully understand. A member without a
 /// local bookmark would be dropped by a rebuild, and an active auto-merge
 /// request would either be cancelled or leave the PR locked in the old stack.
-fn ensure_safe_to_reshape(stack: &PullRequestStack, prs: &HashMap<u64, &PrDetails>) -> Result<()> {
+fn ensure_safe_to_reshape(
+    stack: &PullRequestStack,
+    prs: &HashMap<u64, &PrDetails>,
+    allow_cancel_auto_merge: bool,
+) -> Result<()> {
     let missing = stack
         .pull_requests
         .iter()
@@ -151,10 +155,10 @@ fn ensure_safe_to_reshape(stack: &PullRequestStack, prs: &HashMap<u64, &PrDetail
         .filter(|pr| pr.auto_merge_request.is_some() || pr.stack_auto_merge_request.is_some())
         .map(|pr| format!("#{}", pr.number))
         .collect::<Vec<_>>();
-    if !auto_merging.is_empty() {
+    if !allow_cancel_auto_merge && !auto_merging.is_empty() {
         bail!(
             "cannot reshape stack #{}: PR {} {} auto-merge enabled; \
-             disable it with `jj-gh pr edit` before reshaping",
+             cancel it with `jj-gh pr auto-merge --cancel <rev|num>` before reshaping",
             stack.number,
             auto_merging.join(", "),
             if auto_merging.len() == 1 {
@@ -167,14 +171,23 @@ fn ensure_safe_to_reshape(stack: &PullRequestStack, prs: &HashMap<u64, &PrDetail
     Ok(())
 }
 
+fn stack_blocks_reshape(stack: &PullRequestStack, prs: &HashMap<u64, &PrDetails>) -> bool {
+    stack.pull_requests.iter().any(|pr| {
+        prs.get(&pr.number).is_some_and(|pr| {
+            pr.auto_merge_request.is_some() || pr.stack_auto_merge_request.is_some()
+        })
+    })
+}
+
 /// Remove `pr_numbers` from whatever stacks they currently belong to, one call
 /// per stack. A stack left with no PRs is dissolved by GitHub.
 ///
 /// Only PRs present in `pr_details` and currently carrying a stack number are
 /// touched. Before each call the whole stack is checked for members we do not
-/// know about and for active auto-merge requests; both make a rebuild unsafe.
-/// Afterward the server's answer is inspected, because GitHub silently leaves
-/// behind PRs it cannot unstack, such as ones queued for merge.
+/// know about. Active auto-merge requests are rejected unless the caller has
+/// already obtained consent via `allow_cancel_auto_merge`. Afterward the
+/// server's answer is inspected, because GitHub silently leaves behind PRs it
+/// cannot unstack, such as ones queued for merge.
 ///
 /// # Errors
 ///
@@ -186,6 +199,7 @@ pub async fn unstack(
     pr_numbers: &[u64],
     pr_details: &[PrDetails],
     existing_stacks: &[PullRequestStack],
+    allow_cancel_auto_merge: bool,
 ) -> Result<UnstackOutcome> {
     let prs = by_number(pr_details);
     let wanted = pr_numbers.iter().copied().collect::<HashSet<u64>>();
@@ -210,7 +224,7 @@ pub async fn unstack(
         let stack = stacks.get(&stack_number).with_context(|| {
             format!("stack #{stack_number} disappeared before it could be unstacked")
         })?;
-        ensure_safe_to_reshape(stack, &prs)?;
+        ensure_safe_to_reshape(stack, &prs, allow_cancel_auto_merge)?;
 
         let remaining = gh
             .unstack_prs(&target.owner, &target.repo, stack_number)
@@ -230,7 +244,8 @@ pub async fn unstack(
                 if !left_behind.is_empty() {
                     bail!(
                         "GitHub left PR {} stacked after unstacking stack #{}; \
-                         disable auto-merge with `jj-gh pr edit` and retry",
+                         it may be queued for merge, or have auto-merge you can cancel with \
+                         `jj-gh pr auto-merge --cancel <rev|num>`. Retry once it settles",
                         left_behind.join(", "),
                         stack_number
                     );
@@ -309,11 +324,35 @@ fn replace_stack(stacks: &mut Vec<PullRequestStack>, updated: PullRequestStack) 
     }
 }
 
-fn stack_has_auto_merge(stack: &PullRequestStack, prs: &HashMap<u64, &PrDetails>) -> bool {
+fn stack_has_stack_auto_merge(stack: &PullRequestStack, prs: &HashMap<u64, &PrDetails>) -> bool {
     stack.pull_requests.iter().any(|pr| {
         prs.get(&pr.number)
             .is_some_and(|pr| pr.stack_auto_merge_request.is_some())
     })
+}
+
+/// Stacks that a reshape would tear down while they still have an auto-merge
+/// request. Verbatim chains and clean top-only extensions are not reshapes, so
+/// they are excluded even when auto-merge is enabled.
+#[must_use]
+pub fn stacks_blocked_by_auto_merge(
+    chains: &[Vec<u64>],
+    pr_details: &[PrDetails],
+    existing_stacks: &[PullRequestStack],
+) -> Vec<u64> {
+    let prs = by_number(pr_details);
+    existing_stacks
+        .iter()
+        .filter(|stack| {
+            let members = stack_members(stack);
+            let unchanged = chains.contains(&members);
+            let append_only = chains
+                .iter()
+                .any(|chain| members.len() < chain.len() && chain.starts_with(&members));
+            !unchanged && !append_only && stack_blocks_reshape(stack, &prs)
+        })
+        .map(|stack| stack.number)
+        .collect()
 }
 
 /// Once a stack with whole-stack auto-merge grows, GitHub does not necessarily
@@ -326,7 +365,7 @@ async fn warn_if_coverage_incomplete(
     chain: &[u64],
     prs: &HashMap<u64, &PrDetails>,
 ) {
-    if !stack_has_auto_merge(before, prs) {
+    if !stack_has_stack_auto_merge(before, prs) {
         return;
     }
     let current = match gh
@@ -383,8 +422,9 @@ async fn warn_if_coverage_incomplete(
 ///
 /// A chain that grows at the top is appended to in place; any other change
 /// reshapes the stack. Reshaping is refused unless every open member of the
-/// existing stack has local details and none has auto-merge enabled, so a
-/// rebuild can never silently drop nonlocal PRs or cancel a merge request.
+/// existing stack has local details. A caller sets `allow_cancel_auto_merge`
+/// only after getting consent, so a rebuild can never silently drop nonlocal
+/// PRs or cancel a merge request.
 ///
 /// Returns one [`ChainResult`] per input chain, in the input order.
 ///
@@ -398,6 +438,7 @@ pub async fn create_stacks(
     chains: &[Vec<u64>],
     pr_details: &[PrDetails],
     existing_stacks: &[PullRequestStack],
+    allow_cancel_auto_merge: bool,
 ) -> Result<Vec<ChainResult>> {
     let mut pr_details = pr_details.to_vec();
     let mut existing_stacks = existing_stacks.to_vec();
@@ -428,7 +469,15 @@ pub async fn create_stacks(
             // was reordered). That membership has to go before the base refs
             // can move, and the base refs have to chain before the new stack
             // can be asserted. See the module docs.
-            let unstacked = unstack(gh, target, chain, &pr_details, &existing_stacks).await?;
+            let unstacked = unstack(
+                gh,
+                target,
+                chain,
+                &pr_details,
+                &existing_stacks,
+                allow_cancel_auto_merge,
+            )
+            .await?;
             apply_unstack_result(&unstacked, &mut pr_details, &mut existing_stacks);
             retargeted = align_chain_bases(gh, chain, &by_number(&pr_details)).await?;
             let stack = gh.create_stack(&target.owner, &target.repo, chain).await?;
@@ -817,7 +866,7 @@ mod tests {
     async fn creates_a_stack_for_a_fresh_chain() {
         let gh = FakeGh::new();
         let prs = aligned_chain(&[1, 2]);
-        let results = create_stacks(&gh, &target(), &[vec![1, 2]], &prs, &[])
+        let results = create_stacks(&gh, &target(), &[vec![1, 2]], &prs, &[], false)
             .await
             .unwrap();
 
@@ -831,9 +880,16 @@ mod tests {
     async fn identical_existing_stack_is_not_recreated() {
         let gh = FakeGh::new();
         let prs = aligned_chain(&[1, 2]);
-        let results = create_stacks(&gh, &target(), &[vec![1, 2]], &prs, &[stack(7, &[1, 2])])
-            .await
-            .unwrap();
+        let results = create_stacks(
+            &gh,
+            &target(),
+            &[vec![1, 2]],
+            &prs,
+            &[stack(7, &[1, 2])],
+            false,
+        )
+        .await
+        .unwrap();
 
         assert_eq!(results[0].outcome, ChainOutcome::AlreadyExists);
         assert_eq!(gh.created(), [] as [Vec<u64>; 0]);
@@ -852,7 +908,7 @@ mod tests {
             pr(2, "branch-1", None),
             pr(3, "branch-2", None),
         ];
-        let results = create_stacks(&gh, &target(), &[vec![1, 4, 2, 3]], &prs, &[])
+        let results = create_stacks(&gh, &target(), &[vec![1, 4, 2, 3]], &prs, &[], false)
             .await
             .unwrap();
 
@@ -869,7 +925,7 @@ mod tests {
     async fn bottom_pr_keeps_its_own_base() {
         let gh = FakeGh::new();
         let prs = vec![pr(1, "release-2.0", None), pr(2, "branch-1", None)];
-        create_stacks(&gh, &target(), &[vec![1, 2]], &prs, &[])
+        create_stacks(&gh, &target(), &[vec![1, 2]], &prs, &[], false)
             .await
             .unwrap();
 
@@ -893,9 +949,16 @@ mod tests {
                 pr
             })
             .collect::<Vec<_>>();
-        let results = create_stacks(&gh, &target(), &[vec![1, 2, 3]], &prs, &[stack(7, &[1, 2])])
-            .await
-            .unwrap();
+        let results = create_stacks(
+            &gh,
+            &target(),
+            &[vec![1, 2, 3]],
+            &prs,
+            &[stack(7, &[1, 2])],
+            false,
+        )
+        .await
+        .unwrap();
 
         assert_eq!(
             results[0].outcome,
@@ -927,6 +990,7 @@ mod tests {
             &[vec![1, 2, 3], vec![5, 6]],
             &prs,
             &existing,
+            false,
         )
         .await
         .unwrap();
@@ -954,7 +1018,7 @@ mod tests {
     async fn missing_chain_member_is_an_error_not_a_bad_stack() {
         let gh = FakeGh::new();
         let prs = vec![pr(1, "main", None)];
-        let err = create_stacks(&gh, &target(), &[vec![1, 2]], &prs, &[])
+        let err = create_stacks(&gh, &target(), &[vec![1, 2]], &prs, &[], false)
             .await
             .expect_err("PR #2 has no details");
 
@@ -984,6 +1048,7 @@ mod tests {
             &[vec![1, 2, 4, 3]],
             &prs,
             &[stack(7, &[1, 2, 3])],
+            false,
         )
         .await
         .unwrap();
@@ -1007,9 +1072,16 @@ mod tests {
         // exists verbatim cannot have drifted; touching it would only fail.
         let gh = FakeGh::new();
         let prs = vec![pr(1, "main", Some(7)), pr(2, "branch-1", Some(7))];
-        create_stacks(&gh, &target(), &[vec![1, 2]], &prs, &[stack(7, &[1, 2])])
-            .await
-            .unwrap();
+        create_stacks(
+            &gh,
+            &target(),
+            &[vec![1, 2]],
+            &prs,
+            &[stack(7, &[1, 2])],
+            false,
+        )
+        .await
+        .unwrap();
 
         assert_eq!(gh.calls(), [] as [Call; 0]);
     }
@@ -1024,9 +1096,16 @@ mod tests {
             pr(2, "branch-1", Some(7)),
             pr(3, "branch-1", None),
         ];
-        let err = create_stacks(&gh, &target(), &[vec![1, 3]], &prs, &[stack(7, &[1, 2, 3])])
-            .await
-            .expect_err("the unstack failed");
+        let err = create_stacks(
+            &gh,
+            &target(),
+            &[vec![1, 3]],
+            &prs,
+            &[stack(7, &[1, 2, 3])],
+            false,
+        )
+        .await
+        .expect_err("the unstack failed");
 
         let msg = format!("{err:#}");
         assert!(msg.contains("stack #7"), "unexpected error: {msg}");
@@ -1047,7 +1126,7 @@ mod tests {
             pr(10, "main", None),
         ];
         let existing = [stack(7, &[1, 2]), stack(11, &[9])];
-        let outcome = unstack(&gh, &target(), &[1, 2, 9, 10], &prs, &existing)
+        let outcome = unstack(&gh, &target(), &[1, 2, 9, 10], &prs, &existing, false)
             .await
             .unwrap();
 
@@ -1067,9 +1146,16 @@ mod tests {
         // to stop rather than silently cancel its membership.
         let gh = FakeGh::new();
         let prs = vec![pr(1, "main", Some(7)), pr(2, "branch-1", Some(7))];
-        let err = unstack(&gh, &target(), &[1, 2], &prs, &[stack(7, &[1, 2, 99])])
-            .await
-            .expect_err("the stack has a nonlocal member");
+        let err = unstack(
+            &gh,
+            &target(),
+            &[1, 2],
+            &prs,
+            &[stack(7, &[1, 2, 99])],
+            false,
+        )
+        .await
+        .expect_err("the stack has a nonlocal member");
 
         let msg = format!("{err:#}");
         assert!(msg.contains("#99"), "unexpected error: {msg}");
@@ -1090,13 +1176,16 @@ mod tests {
             pr_number: 2,
             method: None,
         });
-        let err = unstack(&gh, &target(), &[1], &prs, &[stack(7, &[1, 2])])
+        let err = unstack(&gh, &target(), &[1], &prs, &[stack(7, &[1, 2])], false)
             .await
             .expect_err("the stack has auto-merge enabled");
 
         let msg = format!("{err:#}");
         assert!(msg.contains("auto-merge"), "unexpected error: {msg}");
-        assert!(msg.contains("jj-gh pr edit"), "unexpected error: {msg}");
+        assert!(
+            msg.contains("jj-gh pr auto-merge --cancel"),
+            "unexpected error: {msg}"
+        );
         assert!(
             gh.unstacked().is_empty(),
             "nothing should have been unstacked"
@@ -1111,13 +1200,16 @@ mod tests {
             pr(2, "branch-1", Some(7)),
             pr(3, "branch-2", None),
         ];
-        let err = unstack(&gh, &target(), &[1, 3], &prs, &[stack(7, &[1, 2])])
+        let err = unstack(&gh, &target(), &[1, 3], &prs, &[stack(7, &[1, 2])], false)
             .await
             .expect_err("GitHub left #1 stacked");
 
         let msg = format!("{err:#}");
         assert!(msg.contains("#1"), "unexpected error: {msg}");
-        assert!(msg.contains("jj-gh pr edit"), "unexpected error: {msg}");
+        assert!(
+            msg.contains("jj-gh pr auto-merge --cancel"),
+            "unexpected error: {msg}"
+        );
     }
 
     #[tokio::test]
@@ -1137,9 +1229,16 @@ mod tests {
             method: None,
         });
         let gh = FakeGh::reading_back(stack(7, &[1, 2, 3]), prs.clone());
-        let results = create_stacks(&gh, &target(), &[vec![1, 2, 3]], &prs, &[stack(7, &[1, 2])])
-            .await
-            .unwrap();
+        let results = create_stacks(
+            &gh,
+            &target(),
+            &[vec![1, 2, 3]],
+            &prs,
+            &[stack(7, &[1, 2])],
+            false,
+        )
+        .await
+        .unwrap();
 
         assert_eq!(
             results[0].outcome,
@@ -1149,5 +1248,77 @@ mod tests {
             }
         );
         assert_eq!(gh.appended(), vec![(7, vec![3])]);
+    }
+
+    #[tokio::test]
+    async fn unstack_allows_reshape_once_consent_is_given() {
+        // With consent from the caller, the same stack that was refused above
+        // can be unstacked; GitHub will cancel the request as a side effect.
+        let gh = FakeGh::new();
+        let mut prs = vec![pr(1, "main", Some(7)), pr(2, "branch-1", Some(7))];
+        prs[0].stack_auto_merge_request = Some(AutoMergeRequest {
+            pr_number: 2,
+            method: None,
+        });
+        let outcome = unstack(&gh, &target(), &[1], &prs, &[stack(7, &[1, 2])], true)
+            .await
+            .unwrap();
+
+        assert_eq!(outcome.unstacked, vec![1]);
+        assert_eq!(outcome.dissolved, vec![7]);
+        assert_eq!(gh.unstacked(), vec![7]);
+    }
+
+    #[test]
+    fn stacks_blocked_by_auto_merge_flags_only_real_reshapes() {
+        let mut prs = vec![
+            pr(1, "main", Some(7)),
+            pr(2, "branch-1", Some(7)),
+            pr(3, "branch-2", Some(7)),
+        ];
+        prs[1].stack_auto_merge_request = Some(AutoMergeRequest {
+            pr_number: 2,
+            method: None,
+        });
+        let existing = [stack(7, &[1, 2])];
+
+        // Verbatim and append-only chains keep the request, so they are safe.
+        assert_eq!(
+            stacks_blocked_by_auto_merge(&[vec![1, 2]], &prs, &existing),
+            [] as [u64; 0]
+        );
+        assert_eq!(
+            stacks_blocked_by_auto_merge(&[vec![1, 2, 3]], &prs, &existing),
+            [] as [u64; 0]
+        );
+        // A reordered chain would rebuild the stack and cancel the request.
+        assert_eq!(
+            stacks_blocked_by_auto_merge(&[vec![2, 1]], &prs, &existing),
+            vec![7]
+        );
+    }
+
+    #[test]
+    fn stacks_blocked_by_auto_merge_includes_individual_requests() {
+        let mut prs = vec![pr(1, "main", Some(7)), pr(2, "branch-1", Some(7))];
+        prs[0].auto_merge_request = Some(AutoMergeRequest {
+            pr_number: 1,
+            method: None,
+        });
+
+        assert_eq!(
+            stacks_blocked_by_auto_merge(&[vec![2, 1]], &prs, &[stack(7, &[1, 2])]),
+            vec![7]
+        );
+    }
+
+    #[test]
+    fn stacks_blocked_by_auto_merge_ignores_stacks_without_requests() {
+        let prs = vec![pr(1, "main", Some(7)), pr(2, "branch-1", Some(7))];
+
+        assert_eq!(
+            stacks_blocked_by_auto_merge(&[vec![2, 1]], &prs, &[stack(7, &[1, 2])]),
+            [] as [u64; 0]
+        );
     }
 }
