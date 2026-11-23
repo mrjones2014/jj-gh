@@ -1,6 +1,6 @@
 //! Inspection of jj-gh's own configuration.
 
-use crate::{cli::ConfigAction, config::Config};
+use crate::{cli::ConfigAction, config::Config, frontmatter::Frontmatter};
 use anyhow::{Context, Result};
 
 /// Dispatch a `jj-gh config` invocation.
@@ -15,6 +15,7 @@ use anyhow::{Context, Result};
 pub fn dispatch(action: ConfigAction) -> Result<()> {
     match action {
         ConfigAction::Schema => print_schema(),
+        ConfigAction::FrontmatterSchema => print_frontmatter_schema(),
     }
 }
 
@@ -25,6 +26,16 @@ fn print_schema() -> Result<()> {
     let schema = schemars::schema_for!(Config);
     let rendered =
         serde_json::to_string_pretty(&schema).context("serialize the config JSON schema")?;
+    println!("{rendered}");
+    Ok(())
+}
+
+/// Print the JSON Schema for [`Frontmatter`], used by editors completing or
+/// validating the YAML block at the top of a PR body.
+fn print_frontmatter_schema() -> Result<()> {
+    let schema = schemars::schema_for!(Frontmatter);
+    let rendered =
+        serde_json::to_string_pretty(&schema).context("serialize the frontmatter JSON schema")?;
     println!("{rendered}");
     Ok(())
 }

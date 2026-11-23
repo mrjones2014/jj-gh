@@ -152,9 +152,8 @@ pub enum AutoMergeMethod {
 /// otherwise. `all` always requests whole-stack coverage (falling back to a
 /// single PR when there is no stack), `below` requests coverage through this
 /// PR and eligible PRs beneath it, and `false` cancels any covering request.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, clap::ValueEnum, schemars::JsonSchema)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, clap::ValueEnum)]
 #[clap(rename_all = "lowercase")]
-#[serde(rename_all = "lowercase")]
 pub enum AutoMergeMode {
     #[default]
     False,
@@ -233,6 +232,27 @@ impl<'de> serde::Deserialize<'de> for AutoMergeMode {
         }
 
         deserializer.deserialize_any(ModeVisitor)
+    }
+}
+
+impl schemars::JsonSchema for AutoMergeMode {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "AutoMergeMode".into()
+    }
+
+    fn json_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "description": "Scope of an auto-merge request, shared by config and the PR editor.\n\n`infer` follows the GitHub stack: whole-stack for a stacked PR, single-PR\notherwise. `all` always requests whole-stack coverage (falling back to a\nsingle PR when there is no stack), `below` requests coverage through this\nPR and eligible PRs beneath it, and `false` cancels any covering request.",
+            "anyOf": [
+                {
+                    "type": "string",
+                    "enum": ["false", "infer", "all", "below"]
+                },
+                {
+                    "type": "boolean"
+                }
+            ]
+        })
     }
 }
 

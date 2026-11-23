@@ -157,6 +157,12 @@ pub enum ConfigAction {
     /// Point an editor's JSON-schema support at the output to get completion
     /// and validation for the `[jj-gh]` table in your jj config.
     Schema,
+
+    /// Print the JSON Schema for the PR-editor frontmatter on stdout.
+    ///
+    /// Used by the docs build and CI to publish the editor schema; you can
+    /// also point your editor at the published asset (or this output).
+    FrontmatterSchema,
 }
 
 #[derive(Debug, Subcommand)]

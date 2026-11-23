@@ -24,6 +24,7 @@ use crate::{
     gh::Reviewer,
 };
 use anyhow::{Context, Result, anyhow};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::ops::Not;
 
@@ -38,25 +39,42 @@ const DIFF_FENCE_END: &str = "`````";
 
 const TITLE_WARN_LEN: usize = 72;
 
+/// Editor schema for this version. Release assets keep old schemas accessible
+/// even after the docs site is redeployed for a newer release.
+const SCHEMA_URL: &str = concat!(
+    "https://github.com/mrjones2014/jj-gh/releases/download/jj-gh-v",
+    env!("CARGO_PKG_VERSION"),
+    "/frontmatter.schema.json"
+);
+
 fn is_default<T: Default + PartialEq>(val: &T) -> bool {
     *val == T::default()
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// The YAML frontmatter at the top of a `pr create` / `pr edit` buffer.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[schemars(title = "jj-gh PR frontmatter")]
 pub struct Frontmatter {
+    /// PR title; required and non-empty.
     pub title: String,
+    /// Base branch; use `owner:branch` for cross-fork PRs.
     pub base: String,
+    /// Label names to apply to the PR.
     #[serde(default)]
     pub labels: Vec<String>,
+    /// Reviewers as `@user` or `@org/team` slugs.
     #[serde(default)]
+    #[schemars(with = "Vec<String>")]
     pub reviewers: Vec<Reviewer>,
+    /// Whether the PR is a draft.
     #[serde(default)]
     pub draft: bool,
-    /// `None` means the field is intentionally omitted from the editor buffer:
-    /// the PR's current request cannot be represented by one of the four
-    /// values, so submitting it unchanged must not disable anything.
+    /// Auto-merge scope. Omit this field when the current request cannot be
+    /// represented by one of the four values; submitting it unchanged then
+    /// leaves the request alone.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_merge: Option<AutoMergeMode>,
+    /// Merge method when auto-merge is enabled.
     #[serde(default, skip_serializing_if = "is_default")]
     pub auto_merge_method: AutoMergeMethod,
     /// Rendered as a YAML comment above `auto_merge` (or where it would be).
@@ -112,7 +130,8 @@ impl Frontmatter {
         let orig_body_empty = body.trim().is_empty();
         let body = body.trim_start_matches('\n');
         let body = if body.is_empty() { "\n" } else { body };
-        let body = format!("---\n{yaml}\n---\n\n{body}");
+        let body =
+            format!("---\n# yaml-language-server: $schema={SCHEMA_URL}\n{yaml}\n---\n\n{body}");
         let Some(diff) = preview else {
             return Ok(body);
         };
@@ -228,6 +247,20 @@ mod tests {
         assert_eq!(parsed.labels, original.labels);
         assert!(!parsed.draft);
         assert_eq!(parsed_body.trim(), body.trim());
+    }
+
+    #[test]
+    fn render_includes_schema_directive_for_editors() {
+        let rendered = fm("title").render("body", None).unwrap();
+        assert!(
+            rendered.starts_with(&format!(
+                "---\n# yaml-language-server: $schema={SCHEMA_URL}\n"
+            )),
+            "{rendered}"
+        );
+        assert!(SCHEMA_URL.contains(env!("CARGO_PKG_VERSION")));
+        // The directive must not disturb the frontmatter round trip.
+        Frontmatter::parse(&rendered).unwrap();
     }
 
     #[test]
@@ -482,5 +515,39 @@ mod tests {
     fn validate_long_title_warns_but_passes() {
         let long_title = "x".repeat(TITLE_WARN_LEN + 1);
         fm(&long_title).validate().unwrap();
+    }
+
+    #[test]
+    fn json_schema_describes_the_editor_frontmatter() {
+        let schema = serde_json::to_value(schemars::schema_for!(Frontmatter)).unwrap();
+        let properties = schema["properties"].as_object().unwrap();
+
+        for field in [
+            "title",
+            "base",
+            "labels",
+            "reviewers",
+            "draft",
+            "auto_merge",
+        ] {
+            assert!(
+                properties.contains_key(field),
+                "missing schema field: {field}"
+            );
+        }
+        assert!(!properties.contains_key("auto_merge_comment"));
+        assert_eq!(schema["required"], serde_json::json!(["title", "base"]));
+
+        let mode = &schema["$defs"]["AutoMergeMode"];
+        assert_eq!(
+            mode["anyOf"][0]["enum"],
+            serde_json::json!(["false", "infer", "all", "below"]),
+            "auto_merge values should match the editor keywords"
+        );
+        assert_eq!(
+            mode["anyOf"][1]["type"],
+            serde_json::json!("boolean"),
+            "auto_merge should also accept YAML booleans"
+        );
     }
 }

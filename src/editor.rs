@@ -189,7 +189,10 @@ pub struct TempfileEditor;
 
 impl Editor for TempfileEditor {
     async fn edit(&self, argv: &[String], initial: &str) -> Result<String> {
+        // The recognizable name lets editors associate the published
+        // frontmatter JSON schema with just this buffer.
         let tmp = tempfile::Builder::new()
+            .prefix(".jj-gh-pr-")
             .suffix(".md")
             .tempfile()
             .context("could not create tempfile for editor buffer")?;
