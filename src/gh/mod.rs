@@ -306,12 +306,13 @@ pub trait Gh {
     async fn set_draft(&self, pr_node_id: &str, draft: bool) -> Result<()>;
 
     /// Disable "merge when ready" on a PR. No-op on the server if auto-merge
-    /// was not enabled.
+    /// was not enabled. With `include_stack`, GitHub also cancels the
+    /// whole-stack request covering this PR, not just an individual one.
     ///
     /// # Errors
     ///
     /// Propagates API errors.
-    async fn disable_auto_merge(&self, pr_node_id: &str) -> Result<()>;
+    async fn disable_auto_merge(&self, pr_node_id: &str, include_stack: bool) -> Result<()>;
 
     /// Fetch full metadata for a PR by number.
     ///
@@ -328,18 +329,23 @@ pub trait Gh {
     async fn get_pr_diff(&self, owner: &str, repo: &str, number: u64) -> Result<String>;
 
     /// Enable "merge when ready" on a PR via `enablePullRequestAutoMerge`.
-    /// Callers must check [`PrDetails::base_has_merge_queue`] /
-    /// [`PrCreated::base_has_merge_queue`] beforehand: GitHub's public API has no
-    /// equivalent of the web UI's merge-queue auto-merge, so this call would
-    /// fail on those repos. See
-    /// <https://github.com/mrjones2014/jj-gh/issues/103>.
+    /// With `include_stack`, the request covers this PR and the eligible PRs
+    /// below it in its GitHub stack; a whole-stack merge needs the stack's
+    /// actual top PR here.
     ///
     /// # Errors
     ///
     /// Propagates API errors. Common failures: the repo does not have
     /// auto-merge enabled, required branch protections are missing, or the PR
-    /// is already mergeable.
-    async fn enable_auto_merge(&self, pr_node_id: &str, method: AutoMergeMethod) -> Result<()>;
+    /// is already mergeable. A base branch with a merge queue also fails;
+    /// callers can check [`PrDetails::base_has_merge_queue`] /
+    /// [`PrCreated::base_has_merge_queue`] to add a hint.
+    async fn enable_auto_merge(
+        &self,
+        pr_node_id: &str,
+        method: AutoMergeMethod,
+        include_stack: bool,
+    ) -> Result<()>;
 
     /// Fetch open PRs with head commit SHA and CI status, scoped to the given
     /// `branches` (head ref names) and `head_owner`. Used by `pr log` to build

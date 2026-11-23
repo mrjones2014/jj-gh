@@ -1,5 +1,7 @@
-mutation DisableAutoMergeInternal($prId: ID!) {
-  disablePullRequestAutoMerge(input: { pullRequestId: $prId }) {
+mutation DisableAutoMergeInternal($prId: ID!, $includeStack: Boolean!) {
+  disablePullRequestAutoMerge(
+    input: { pullRequestId: $prId, includeStack: $includeStack }
+  ) {
     pullRequest {
       id
     }

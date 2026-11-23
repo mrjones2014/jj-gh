@@ -402,7 +402,7 @@ mod tests {
         async fn set_draft(&self, _pr_node_id: &str, _draft: bool) -> Result<()> {
             unimplemented!("fetch does not call set_draft")
         }
-        async fn disable_auto_merge(&self, _pr_node_id: &str) -> Result<()> {
+        async fn disable_auto_merge(&self, _pr_node_id: &str, _: bool) -> Result<()> {
             unimplemented!("fetch does not call disable_auto_merge")
         }
         fn get_pr(
@@ -423,6 +423,7 @@ mod tests {
             &self,
             _node_id: &str,
             _method: crate::config::AutoMergeMethod,
+            _: bool,
         ) -> Result<()> {
             unimplemented!("fetch does not call enable_auto_merge")
         }

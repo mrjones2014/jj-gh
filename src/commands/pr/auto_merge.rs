@@ -91,7 +91,7 @@ async fn enable_auto_merge(
     }
 
     let _status = crate::ui::status::push(format!("Enabling auto-merge on #{}", pr.number));
-    gh.enable_auto_merge(&pr.graphql_node_id, auto_merge_method)
+    gh.enable_auto_merge(&pr.graphql_node_id, auto_merge_method, false)
         .await
         .with_context(|| format!("enabling auto-merge on #{}", pr.number))?;
 
@@ -303,7 +303,7 @@ mod tests {
         async fn set_draft(&self, _id: &str, _d: bool) -> Result<()> {
             unimplemented!()
         }
-        async fn disable_auto_merge(&self, _id: &str) -> Result<()> {
+        async fn disable_auto_merge(&self, _id: &str, _: bool) -> Result<()> {
             unimplemented!()
         }
         fn get_pr(&self, _o: &str, _r: &str, n: u64) -> impl Future<Output = Result<PrDetails>> {
@@ -321,6 +321,7 @@ mod tests {
             &self,
             pr_node_id: &str,
             _m: crate::config::AutoMergeMethod,
+            _: bool,
         ) -> impl Future<Output = Result<()>> {
             self.enabled.lock().unwrap().push(pr_node_id.to_string());
             std::future::ready(Ok(()))

@@ -352,7 +352,7 @@ impl Gh for FakeGh {
     async fn set_draft(&self, _id: &str, _d: bool) -> Result<()> {
         unimplemented!()
     }
-    async fn disable_auto_merge(&self, _id: &str) -> Result<()> {
+    async fn disable_auto_merge(&self, _id: &str, _: bool) -> Result<()> {
         unimplemented!()
     }
     fn get_pr(&self, _o: &str, _r: &str, n: u64) -> impl Future<Output = Result<PrDetails>> {
@@ -365,7 +365,12 @@ impl Gh for FakeGh {
     async fn get_pr_diff(&self, _: &str, _: &str, _: u64) -> Result<String> {
         unimplemented!()
     }
-    async fn enable_auto_merge(&self, _id: &str, _m: crate::config::AutoMergeMethod) -> Result<()> {
+    async fn enable_auto_merge(
+        &self,
+        _id: &str,
+        _m: crate::config::AutoMergeMethod,
+        _: bool,
+    ) -> Result<()> {
         unimplemented!()
     }
     fn local_pulls(

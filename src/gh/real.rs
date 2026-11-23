@@ -284,10 +284,11 @@ impl Gh for OctocrabGh {
         Ok(())
     }
 
-    async fn disable_auto_merge(&self, pr_node_id: &str) -> Result<()> {
+    async fn disable_auto_merge(&self, pr_node_id: &str, include_stack: bool) -> Result<()> {
         let _status = crate::ui::status::push("Disabling auto-merge");
         let vars = DisableAutoMergeVariables {
             pr_id: pr_node_id.to_string(),
+            include_stack,
         };
         let body = DisableAutoMergeInternal::build_query(vars);
         self.octo
@@ -329,11 +330,17 @@ impl Gh for OctocrabGh {
             .with_context(|| format!("fetching diff for {owner}/{repo}#{number}"))
     }
 
-    async fn enable_auto_merge(&self, pr_node_id: &str, method: AutoMergeMethod) -> Result<()> {
+    async fn enable_auto_merge(
+        &self,
+        pr_node_id: &str,
+        method: AutoMergeMethod,
+        include_stack: bool,
+    ) -> Result<()> {
         let _status = crate::ui::status::push("Enabling auto-merge");
         let vars = EnableAutoMergeVariables {
             pr_id: pr_node_id.to_string(),
             method: to_graphql_method(method),
+            include_stack,
         };
         let body = EnableAutoMergeInternal::build_query(vars);
         self.octo

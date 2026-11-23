@@ -1,6 +1,14 @@
-mutation EnableAutoMergeInternal($prId: ID!, $method: PullRequestMergeMethod!) {
+mutation EnableAutoMergeInternal(
+  $prId: ID!
+  $method: PullRequestMergeMethod!
+  $includeStack: Boolean!
+) {
   enablePullRequestAutoMerge(
-    input: { pullRequestId: $prId, mergeMethod: $method }
+    input: {
+      pullRequestId: $prId
+      mergeMethod: $method
+      includeStack: $includeStack
+    }
   ) {
     pullRequest {
       id

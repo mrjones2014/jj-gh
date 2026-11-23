@@ -664,7 +664,7 @@ mod tests {
         async fn set_draft(&self, _: &str, _: bool) -> Result<()> {
             unimplemented!()
         }
-        async fn disable_auto_merge(&self, _: &str) -> Result<()> {
+        async fn disable_auto_merge(&self, _: &str, _: bool) -> Result<()> {
             unimplemented!()
         }
         fn get_pr(&self, _: &str, _: &str, number: u64) -> impl Future<Output = Result<PrDetails>> {
@@ -679,7 +679,7 @@ mod tests {
         async fn get_pr_diff(&self, _: &str, _: &str, _: u64) -> Result<String> {
             unimplemented!()
         }
-        async fn enable_auto_merge(&self, _: &str, _: AutoMergeMethod) -> Result<()> {
+        async fn enable_auto_merge(&self, _: &str, _: AutoMergeMethod, _: bool) -> Result<()> {
             unimplemented!()
         }
         async fn local_pulls(
