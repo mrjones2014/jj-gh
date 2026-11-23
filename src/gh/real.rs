@@ -24,7 +24,7 @@ use crate::{
 };
 use anyhow::{Context, Result, anyhow};
 use graphql_client::GraphQLQuery;
-use octocrab::Octocrab;
+use octocrab::{FromResponse, Octocrab};
 use secrecy::{ExposeSecret, SecretString};
 use std::collections::HashSet;
 
@@ -472,19 +472,51 @@ impl Gh for OctocrabGh {
             .with_context(|| format!("creating stack in {owner}/{repo}"))
     }
 
-    async fn unstack_prs(
+    async fn append_to_stack(
         &self,
         owner: &str,
         repo: &str,
         stack_number: u64,
         pr_numbers: &[u64],
-    ) -> Result<()> {
+    ) -> Result<PullRequestStack> {
+        let _status = crate::ui::status::push("Adding PRs to stack");
+        let route = format!("/repos/{owner}/{repo}/stacks/{stack_number}/add");
+        let body = serde_json::json!({ "pull_requests": pr_numbers });
+        self.octo
+            .post::<_, PullRequestStack>(&route, Some(&body))
+            .await
+            .map_err(humanize)
+            .with_context(|| format!("adding PRs to stack #{stack_number} in {owner}/{repo}"))
+    }
+
+    async fn unstack_prs(
+        &self,
+        owner: &str,
+        repo: &str,
+        stack_number: u64,
+    ) -> Result<Option<PullRequestStack>> {
         let _status = crate::ui::status::push("Unstacking PRs");
         let route = format!("/repos/{owner}/{repo}/stacks/{stack_number}/unstack");
-        let body = serde_json::json!({ "pull_requests": pr_numbers });
-        post_no_content(&self.octo, &route, Some(&body))
+        let uri = http::Uri::try_from(route.as_str())
+            .with_context(|| format!("building URI for {route}"))?;
+        let response = self
+            .octo
+            ._post(uri, None::<&()>)
             .await
-            .with_context(|| format!("unstacking PRs from stack {stack_number} in {owner}/{repo}"))
+            .map_err(humanize)
+            .with_context(|| format!("POST {route}"))?;
+        let response = octocrab::map_github_error(response)
+            .await
+            .map_err(humanize)
+            .with_context(|| format!("POST {route}"))?;
+        if response.status() == http::StatusCode::NO_CONTENT {
+            return Ok(None);
+        }
+        let stack = PullRequestStack::from_response(response)
+            .await
+            .map_err(humanize)
+            .with_context(|| format!("reading unstack result for stack #{stack_number}"))?;
+        Ok(Some(stack))
     }
 
     async fn list_stacks(&self, owner: &str, repo: &str) -> Result<Vec<PullRequestStack>> {
@@ -863,7 +895,7 @@ mod tests {
             "pull_requests": []
         });
         let stack = serde_json::from_value::<PullRequestStack>(json).unwrap();
-        assert!(stack.pull_requests.is_empty());
+        assert_eq!(stack.pull_requests, vec![]);
     }
 
     #[test]

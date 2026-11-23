@@ -1,8 +1,9 @@
 //! Turning the detected local shape (see [`crate::gh::stack_detect`]) into
 //! real GitHub PR stacks.
 //!
-//! Two API rules dictate the order of every write in here, and they point in
-//! opposite directions:
+//! GitHub's REST API can append PRs to the top of an existing stack, so a
+//! chain that merely grew at the top is extended in place. Any other change
+//! still has to rebuild the stack, and two API rules dictate that order:
 //!
 //! - `createStack` only accepts PR numbers whose base refs *already* chain
 //!   into each other, so the bases have to move first;
@@ -10,9 +11,9 @@
 //!   stack ("Cannot change the base branch because the pull request is part of
 //!   a stack"), so the stack has to go first.
 //!
-//! The only order satisfying both is **unstack, then retarget, then create**.
-//! Getting it wrong surfaces as `422: Pull requests must form a stack` one way
-//! and the "part of a stack" GraphQL error the other.
+//! The only order satisfying both for a rebuild is **unstack, then retarget,
+//! then create**. Getting it wrong surfaces as `422: Pull requests must form a
+//! stack` one way and the "part of a stack" GraphQL error the other.
 //!
 //! A useful consequence: because GitHub will not let a stacked PR's base move,
 //! a stack that exists verbatim cannot have drifted out of alignment
@@ -24,8 +25,8 @@
 //! This module only talks to the API and reports what it did; rendering the
 //! outcome is the caller's job.
 
-use crate::gh::{Gh, PrDetails, PullRequestStack, UpdatePr, remote::Target};
-use anyhow::{Context, Result};
+use crate::gh::{Gh, PrDetails, PullRequestStack, StackPullRequest, UpdatePr, remote::Target};
+use anyhow::{Context, Result, bail};
 use std::collections::{HashMap, HashSet};
 
 /// What happened to one chain.
@@ -39,12 +40,25 @@ pub struct ChainResult {
 }
 
 /// The fate of one chain's stack on GitHub.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChainOutcome {
     /// A new stack was created, carrying this stack number.
     Created(u64),
+    /// PRs were appended to the top of an existing stack.
+    Appended { stack_number: u64, added: Vec<u64> },
     /// GitHub already has this exact stack, so nothing was created.
     AlreadyExists,
+}
+
+/// What GitHub actually did with the stacks we asked it to unstack.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnstackOutcome {
+    /// PRs confirmed to be out of their stacks.
+    pub unstacked: Vec<u64>,
+    /// Stacks GitHub dissolved (`204`).
+    pub dissolved: Vec<u64>,
+    /// Stacks GitHub left in place (`200`), with their current membership.
+    pub remaining: Vec<PullRequestStack>,
 }
 
 /// Index `pr_details` by PR number for the many by-number lookups below.
@@ -105,29 +119,80 @@ async fn align_chain_bases(
     Ok(retargeted)
 }
 
+fn is_open_unmerged(pr: &StackPullRequest) -> bool {
+    pr.merged_at.is_none() && pr.state.eq_ignore_ascii_case("open")
+}
+
+/// Refuse to reshape a stack we do not fully understand. A member without a
+/// local bookmark would be dropped by a rebuild, and an active auto-merge
+/// request would either be cancelled or leave the PR locked in the old stack.
+fn ensure_safe_to_reshape(stack: &PullRequestStack, prs: &HashMap<u64, &PrDetails>) -> Result<()> {
+    let missing = stack
+        .pull_requests
+        .iter()
+        .filter(|pr| is_open_unmerged(pr))
+        .filter(|pr| !prs.contains_key(&pr.number))
+        .map(|pr| format!("#{}", pr.number))
+        .collect::<Vec<_>>();
+    if !missing.is_empty() {
+        bail!(
+            "cannot reshape stack #{}: PR {} {} not local; \
+             unstacking them would drop nonlocal members from the stack",
+            stack.number,
+            missing.join(", "),
+            if missing.len() == 1 { "is" } else { "are" }
+        );
+    }
+
+    let auto_merging = stack
+        .pull_requests
+        .iter()
+        .filter_map(|pr| prs.get(&pr.number))
+        .filter(|pr| pr.auto_merge_request.is_some() || pr.stack_auto_merge_request.is_some())
+        .map(|pr| format!("#{}", pr.number))
+        .collect::<Vec<_>>();
+    if !auto_merging.is_empty() {
+        bail!(
+            "cannot reshape stack #{}: PR {} {} auto-merge enabled; \
+             disable it with `jj-gh pr edit` before reshaping",
+            stack.number,
+            auto_merging.join(", "),
+            if auto_merging.len() == 1 {
+                "has"
+            } else {
+                "have"
+            }
+        );
+    }
+    Ok(())
+}
+
 /// Remove `pr_numbers` from whatever stacks they currently belong to, one call
 /// per stack. A stack left with no PRs is dissolved by GitHub.
 ///
 /// Only PRs present in `pr_details` and currently carrying a stack number are
-/// touched, so a stack member with no local bookmark keeps its membership
-/// rather than being silently unstacked.
-///
-/// Returns the PRs that were unstacked, sorted.
+/// touched. Before each call the whole stack is checked for members we do not
+/// know about and for active auto-merge requests; both make a rebuild unsafe.
+/// Afterward the server's answer is inspected, because GitHub silently leaves
+/// behind PRs it cannot unstack, such as ones queued for merge.
 ///
 /// # Errors
 ///
-/// Propagates the API error. This used to warn and continue, but a failed
-/// unstack now guarantees the *next* call fails with GitHub's opaque "part of
-/// a stack" message, so the original failure is the one worth surfacing. Note
-/// that a success is not a full guarantee either: GitHub silently leaves
-/// behind PRs it cannot unstack, such as ones queued for merge.
+/// Propagates API errors, and fails if an open PR we tried to unstack remains
+/// in the stack.
 pub async fn unstack(
     gh: &impl Gh,
     target: &Target,
     pr_numbers: &[u64],
     pr_details: &[PrDetails],
-) -> Result<Vec<u64>> {
+    existing_stacks: &[PullRequestStack],
+) -> Result<UnstackOutcome> {
+    let prs = by_number(pr_details);
     let wanted = pr_numbers.iter().copied().collect::<HashSet<u64>>();
+    let stacks = existing_stacks
+        .iter()
+        .map(|stack| (stack.number, stack))
+        .collect::<HashMap<u64, &PullRequestStack>>();
 
     let mut by_stack = HashMap::<u64, Vec<u64>>::new();
     for pr in pr_details.iter().filter(|pr| wanted.contains(&pr.number)) {
@@ -136,33 +201,94 @@ pub async fn unstack(
         }
     }
 
-    let mut unstacked = Vec::new();
+    let mut outcome = UnstackOutcome {
+        unstacked: Vec::new(),
+        dissolved: Vec::new(),
+        remaining: Vec::new(),
+    };
     for (stack_number, members) in by_stack {
-        gh.unstack_prs(&target.owner, &target.repo, stack_number, &members)
+        let stack = stacks.get(&stack_number).with_context(|| {
+            format!("stack #{stack_number} disappeared before it could be unstacked")
+        })?;
+        ensure_safe_to_reshape(stack, &prs)?;
+
+        let remaining = gh
+            .unstack_prs(&target.owner, &target.repo, stack_number)
             .await
-            .with_context(|| {
-                let list = members
+            .with_context(|| format!("unstacking from stack #{stack_number}"))?;
+        match remaining {
+            None => outcome.dissolved.push(stack_number),
+            Some(remaining) => {
+                let left_behind = remaining
+                    .pull_requests
                     .iter()
-                    .map(|n| format!("#{n}"))
-                    .collect::<Vec<String>>()
-                    .join(", ");
-                format!("unstacking {list} from stack #{stack_number}")
-            })?;
-        unstacked.extend(members);
+                    .filter(|pr| is_open_unmerged(pr))
+                    .map(|pr| pr.number)
+                    .filter(|number| members.contains(number))
+                    .map(|number| format!("#{number}"))
+                    .collect::<Vec<_>>();
+                if !left_behind.is_empty() {
+                    bail!(
+                        "GitHub left PR {} stacked after unstacking stack #{}; \
+                         disable auto-merge with `jj-gh pr edit` and retry",
+                        left_behind.join(", "),
+                        stack_number
+                    );
+                }
+                outcome.remaining.push(remaining);
+            }
+        }
+        outcome.unstacked.extend(members);
     }
-    unstacked.sort_unstable();
-    Ok(unstacked)
+    outcome.unstacked.sort_unstable();
+    Ok(outcome)
+}
+
+/// Mirror an [`UnstackOutcome`] into the caller's working copies of the PR and
+/// stack lists, so later chains in the same run neither re-unstack a PR nor
+/// skip rebuilding a stack we just dissolved.
+pub fn apply_unstack_result(
+    outcome: &UnstackOutcome,
+    pr_details: &mut [PrDetails],
+    existing_stacks: &mut Vec<PullRequestStack>,
+) {
+    let done = outcome.unstacked.iter().copied().collect::<HashSet<u64>>();
+    let dissolved = outcome.dissolved.iter().copied().collect::<HashSet<u64>>();
+    for pr in pr_details.iter_mut().filter(|pr| done.contains(&pr.number)) {
+        pr.stack_number = None;
+    }
+    existing_stacks.retain(|stack| !dissolved.contains(&stack.number));
+    for remaining in &outcome.remaining {
+        if let Some(current) = existing_stacks
+            .iter_mut()
+            .find(|stack| stack.number == remaining.number)
+        {
+            *current = remaining.clone();
+        } else {
+            existing_stacks.push(remaining.clone());
+        }
+    }
 }
 
 /// Whether GitHub already has `chain` as a stack, verbatim.
 #[must_use]
 pub fn stack_exists(existing_stacks: &[PullRequestStack], chain: &[u64]) -> bool {
-    existing_stacks.iter().any(|stack| {
-        stack
-            .pull_requests
-            .iter()
-            .map(|pr| pr.number)
-            .eq(chain.iter().copied())
+    existing_stacks
+        .iter()
+        .any(|stack| stack_members(stack) == chain)
+}
+
+/// An existing stack that is exactly the bottom of `chain`, and the PRs that
+/// would need appending to turn it into `chain`.
+#[must_use]
+pub fn append_candidate<'a>(
+    existing_stacks: &'a [PullRequestStack],
+    chain: &[u64],
+) -> Option<(&'a PullRequestStack, Vec<u64>)> {
+    existing_stacks.iter().find_map(|stack| {
+        let members = stack_members(stack);
+        (members.len() < chain.len() && chain.starts_with(&members))
+            .then(|| (stack, chain[members.len()..].to_vec()))
     })
 }
 
@@ -172,20 +298,100 @@ pub fn stack_members(stack: &PullRequestStack) -> Vec<u64> {
     stack.pull_requests.iter().map(|pr| pr.number).collect()
 }
 
-/// Create a GitHub stack for each chain, unstacking and retargeting base refs
-/// as needed to satisfy the API's preconditions.
+fn replace_stack(stacks: &mut Vec<PullRequestStack>, updated: PullRequestStack) {
+    if let Some(current) = stacks
+        .iter_mut()
+        .find(|stack| stack.number == updated.number)
+    {
+        *current = updated;
+    } else {
+        stacks.push(updated);
+    }
+}
+
+fn stack_has_auto_merge(stack: &PullRequestStack, prs: &HashMap<u64, &PrDetails>) -> bool {
+    stack.pull_requests.iter().any(|pr| {
+        prs.get(&pr.number)
+            .is_some_and(|pr| pr.stack_auto_merge_request.is_some())
+    })
+}
+
+/// Once a stack with whole-stack auto-merge grows, GitHub does not necessarily
+/// extend the request to the new top. Re-read the stack and say so rather than
+/// implying the new PR is covered.
+async fn warn_if_coverage_incomplete(
+    gh: &impl Gh,
+    target: &Target,
+    before: &PullRequestStack,
+    chain: &[u64],
+    prs: &HashMap<u64, &PrDetails>,
+) {
+    if !stack_has_auto_merge(before, prs) {
+        return;
+    }
+    let current = match gh
+        .get_stack(&target.owner, &target.repo, before.number)
+        .await
+    {
+        Ok(stack) => stack,
+        Err(e) => {
+            log::warn!(
+                "could not re-read stack #{} after appending: {e:#}",
+                before.number
+            );
+            return;
+        }
+    };
+    if stack_members(&current) != chain {
+        log::warn!(
+            "stack #{} now contains {:?}; expected {:?}",
+            before.number,
+            stack_members(&current),
+            chain
+        );
+    }
+
+    let mut uncovered = Vec::new();
+    for pr in current
+        .pull_requests
+        .iter()
+        .filter(|pr| is_open_unmerged(pr))
+    {
+        match gh.get_pr(&target.owner, &target.repo, pr.number).await {
+            Ok(details) if details.stack_auto_merge_request.is_some() => {}
+            Ok(_) => uncovered.push(pr.number),
+            Err(e) => log::warn!(
+                "could not check auto-merge coverage for PR #{}: {e:#}",
+                pr.number
+            ),
+        }
+    }
+    if !uncovered.is_empty() {
+        log::warn!(
+            "whole-stack auto-merge does not cover PR {}; re-request it with \
+             `jj-gh pr auto-merge --stack <rev|num>`",
+            uncovered
+                .iter()
+                .map(|n| format!("#{n}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+}
+
+/// Create, extend, or rebuild a GitHub stack for each chain.
 ///
-/// `existing_stacks` comes from [`Gh::list_stacks`]; callers fetch it so they
-/// can show which chains are actually new before applying anything. Callers
-/// that unstack ahead of this must drop the stacks they dissolved from it,
-/// otherwise a chain whose stack was just torn down is skipped as
-/// [`ChainOutcome::AlreadyExists`] and never rebuilt.
+/// A chain that grows at the top is appended to in place; any other change
+/// reshapes the stack. Reshaping is refused unless every open member of the
+/// existing stack has local details and none has auto-merge enabled, so a
+/// rebuild can never silently drop nonlocal PRs or cancel a merge request.
 ///
 /// Returns one [`ChainResult`] per input chain, in the input order.
 ///
 /// # Errors
 ///
-/// Returns an error if an unstack, a base-ref update, or a create fails.
+/// Returns an error if an unsafe reshape is detected, or if an unstack,
+/// base-ref update, append, or create fails.
 pub async fn create_stacks(
     gh: &impl Gh,
     target: &Target,
@@ -193,23 +399,40 @@ pub async fn create_stacks(
     pr_details: &[PrDetails],
     existing_stacks: &[PullRequestStack],
 ) -> Result<Vec<ChainResult>> {
-    let prs = by_number(pr_details);
-
+    let mut pr_details = pr_details.to_vec();
+    let mut existing_stacks = existing_stacks.to_vec();
     let mut results = Vec::with_capacity(chains.len());
+
     for chain in chains {
+        let prs = by_number(&pr_details);
         let mut retargeted = Vec::new();
-        let outcome = if stack_exists(existing_stacks, chain) {
+        let outcome = if stack_exists(&existing_stacks, chain) {
             // Nothing to do, and nothing can have drifted: GitHub does not
             // allow a stacked PR's base ref to move in the first place.
             ChainOutcome::AlreadyExists
-        } else {
-            // Members may still belong to a stale stack (the chain grew,
-            // shrank, or was reordered). That membership has to go before the
-            // base refs can move, and the base refs have to chain before the
-            // new stack can be asserted. See the module docs.
-            unstack(gh, target, chain, pr_details).await?;
+        } else if let Some((before, added)) = append_candidate(&existing_stacks, chain) {
+            let before = before.clone();
             retargeted = align_chain_bases(gh, chain, &prs).await?;
+            let updated = gh
+                .append_to_stack(&target.owner, &target.repo, before.number, &added)
+                .await
+                .with_context(|| format!("appending to stack #{}", before.number))?;
+            replace_stack(&mut existing_stacks, updated);
+            warn_if_coverage_incomplete(gh, target, &before, chain, &prs).await;
+            ChainOutcome::Appended {
+                stack_number: before.number,
+                added,
+            }
+        } else {
+            // Members may still belong to a stale stack (the chain shrank or
+            // was reordered). That membership has to go before the base refs
+            // can move, and the base refs have to chain before the new stack
+            // can be asserted. See the module docs.
+            let unstacked = unstack(gh, target, chain, &pr_details, &existing_stacks).await?;
+            apply_unstack_result(&unstacked, &mut pr_details, &mut existing_stacks);
+            retargeted = align_chain_bases(gh, chain, &by_number(&pr_details)).await?;
             let stack = gh.create_stack(&target.owner, &target.repo, chain).await?;
+            existing_stacks.push(stack.clone());
             ChainOutcome::Created(stack.number)
         };
 
@@ -229,8 +452,8 @@ mod tests {
     use crate::{
         config::AutoMergeMethod,
         gh::{
-            BaseLookup, CreatePrRequest, PrCreated, PrSummary, PrWithCiStatus, PullRequestStack,
-            StackPullRequest, WorkflowRun,
+            AutoMergeRequest, BaseLookup, CreatePrRequest, PrCreated, PrSummary, PrWithCiStatus,
+            PullRequestStack, StackPullRequest, WorkflowRun,
         },
     };
     use anyhow::anyhow;
@@ -240,7 +463,8 @@ mod tests {
     /// that broke in #249 was the *order* of these calls, not their contents.
     #[derive(Debug, Clone, PartialEq, Eq)]
     enum Call {
-        Unstacked { stack: u64, prs: Vec<u64> },
+        Unstacked { stack: u64 },
+        Appended { stack: u64, prs: Vec<u64> },
         Retargeted { node_id: String, base: String },
         Created(Vec<u64>),
     }
@@ -249,6 +473,12 @@ mod tests {
         calls: Mutex<Vec<Call>>,
         next_stack_number: Mutex<u64>,
         unstack_fails: bool,
+        /// `Some(members)` means GitHub answered 200 with those PRs still in
+        /// the stack; `None` means it dissolved the stack with 204.
+        unstack_remaining: Option<Vec<u64>>,
+        /// The state returned by the post-append coverage re-read.
+        read_back_stack: Option<PullRequestStack>,
+        read_back_prs: Vec<PrDetails>,
     }
 
     impl FakeGh {
@@ -257,6 +487,9 @@ mod tests {
                 calls: Mutex::new(Vec::new()),
                 next_stack_number: Mutex::new(100),
                 unstack_fails: false,
+                unstack_remaining: None,
+                read_back_stack: None,
+                read_back_prs: Vec::new(),
             }
         }
 
@@ -265,6 +498,23 @@ mod tests {
         fn failing_unstack() -> Self {
             Self {
                 unstack_fails: true,
+                ..Self::new()
+            }
+        }
+
+        /// A fake where GitHub leaves the given open PRs stacked.
+        fn leaving_unstacked(members: &[u64]) -> Self {
+            Self {
+                unstack_remaining: Some(members.to_vec()),
+                ..Self::new()
+            }
+        }
+
+        /// A fake whose post-append reads report the given coverage state.
+        fn reading_back(stack: PullRequestStack, prs: Vec<PrDetails>) -> Self {
+            Self {
+                read_back_stack: Some(stack),
+                read_back_prs: prs,
                 ..Self::new()
             }
         }
@@ -287,11 +537,21 @@ mod tests {
                 .collect()
         }
 
-        fn unstacked(&self) -> Vec<(u64, Vec<u64>)> {
+        fn unstacked(&self) -> Vec<u64> {
             self.calls()
                 .into_iter()
                 .filter_map(|c| match c {
-                    Call::Unstacked { stack, prs } => Some((stack, prs)),
+                    Call::Unstacked { stack } => Some(stack),
+                    _ => None,
+                })
+                .collect()
+        }
+
+        fn appended(&self) -> Vec<(u64, Vec<u64>)> {
+            self.calls()
+                .into_iter()
+                .filter_map(|c| match c {
+                    Call::Appended { stack, prs } => Some((stack, prs)),
                     _ => None,
                 })
                 .collect()
@@ -358,8 +618,14 @@ mod tests {
         async fn disable_auto_merge(&self, _: &str) -> Result<()> {
             unimplemented!()
         }
-        async fn get_pr(&self, _: &str, _: &str, _: u64) -> Result<PrDetails> {
-            unimplemented!()
+        fn get_pr(&self, _: &str, _: &str, number: u64) -> impl Future<Output = Result<PrDetails>> {
+            let found = self
+                .read_back_prs
+                .iter()
+                .find(|pr| pr.number == number)
+                .cloned()
+                .with_context(|| format!("no read-back details for PR #{number}"));
+            std::future::ready(found)
         }
         async fn get_pr_diff(&self, _: &str, _: &str, _: u64) -> Result<String> {
             unimplemented!()
@@ -423,27 +689,71 @@ mod tests {
                     .collect(),
             }))
         }
-        fn unstack_prs(
+        fn append_to_stack(
             &self,
             _: &str,
             _: &str,
             stack_number: u64,
             pr_numbers: &[u64],
-        ) -> impl Future<Output = Result<()>> {
+        ) -> impl Future<Output = Result<PullRequestStack>> {
+            self.record(Call::Appended {
+                stack: stack_number,
+                prs: pr_numbers.to_vec(),
+            });
+            std::future::ready(Ok(PullRequestStack {
+                number: stack_number,
+                pull_requests: pr_numbers
+                    .iter()
+                    .map(|&number| StackPullRequest {
+                        number,
+                        state: "open".into(),
+                        merged_at: None,
+                    })
+                    .collect(),
+            }))
+        }
+        fn unstack_prs(
+            &self,
+            _: &str,
+            _: &str,
+            stack_number: u64,
+        ) -> impl Future<Output = Result<Option<PullRequestStack>>> {
             if self.unstack_fails {
                 return std::future::ready(Err(anyhow!("stack {stack_number} cannot be modified")));
             }
             self.record(Call::Unstacked {
                 stack: stack_number,
-                prs: pr_numbers.to_vec(),
             });
-            std::future::ready(Ok(()))
+            let remaining = self
+                .unstack_remaining
+                .as_ref()
+                .map(|members| PullRequestStack {
+                    number: stack_number,
+                    pull_requests: members
+                        .iter()
+                        .map(|&number| StackPullRequest {
+                            number,
+                            state: "open".into(),
+                            merged_at: None,
+                        })
+                        .collect(),
+                });
+            std::future::ready(Ok(remaining))
         }
         async fn list_stacks(&self, _: &str, _: &str) -> Result<Vec<PullRequestStack>> {
             unimplemented!("callers pass the existing stacks in")
         }
-        async fn get_stack(&self, _: &str, _: &str, _: u64) -> Result<PullRequestStack> {
-            unimplemented!("callers pass the existing stacks in")
+        fn get_stack(
+            &self,
+            _: &str,
+            _: &str,
+            _: u64,
+        ) -> impl Future<Output = Result<PullRequestStack>> {
+            std::future::ready(
+                self.read_back_stack
+                    .clone()
+                    .context("no read-back stack configured"),
+            )
         }
     }
 
@@ -527,7 +837,7 @@ mod tests {
 
         assert_eq!(results[0].outcome, ChainOutcome::AlreadyExists);
         assert_eq!(gh.created(), [] as [Vec<u64>; 0]);
-        assert_eq!(gh.unstacked(), [] as [(u64, Vec<u64>); 0]);
+        assert_eq!(gh.unstacked(), [] as [u64; 0]);
     }
 
     #[tokio::test]
@@ -570,21 +880,34 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn grown_chain_unstacks_the_old_stack_then_recreates() {
+    async fn grown_chain_is_appended_to_instead_of_recreated() {
         // Stack #7 holds [1, 2]; the local graph now says [1, 2, 3].
         let gh = FakeGh::new();
-        let prs = vec![
-            pr(1, "main", Some(7)),
-            pr(2, "branch-1", Some(7)),
-            pr(3, "branch-2", None),
-        ];
+        let prs = aligned_chain(&[1, 2, 3])
+            .into_iter()
+            .enumerate()
+            .map(|(i, mut pr)| {
+                if i < 2 {
+                    pr.stack_number = Some(7);
+                }
+                pr
+            })
+            .collect::<Vec<_>>();
         let results = create_stacks(&gh, &target(), &[vec![1, 2, 3]], &prs, &[stack(7, &[1, 2])])
             .await
             .unwrap();
 
-        assert_eq!(results[0].outcome, ChainOutcome::Created(100));
-        assert_eq!(gh.unstacked(), vec![(7, vec![1, 2])]);
-        assert_eq!(gh.created(), vec![vec![1, 2, 3]]);
+        assert_eq!(
+            results[0].outcome,
+            ChainOutcome::Appended {
+                stack_number: 7,
+                added: vec![3],
+            }
+        );
+        assert_eq!(gh.appended(), vec![(7, vec![3])]);
+        assert!(gh.unstacked().is_empty(), "the stack was not reshaped");
+        assert!(gh.created().is_empty(), "the stack was not recreated");
+        assert!(gh.retargeted().is_empty(), "the chain was already aligned");
     }
 
     #[tokio::test]
@@ -610,13 +933,19 @@ mod tests {
 
         let outcomes = results
             .iter()
-            .map(|r| (r.chain.clone(), r.outcome))
+            .map(|r| (r.chain.clone(), r.outcome.clone()))
             .collect::<Vec<_>>();
         assert_eq!(
             outcomes,
             vec![
-                (vec![1, 2, 3], ChainOutcome::Created(100)),
-                (vec![5, 6], ChainOutcome::Created(101)),
+                (
+                    vec![1, 2, 3],
+                    ChainOutcome::Appended {
+                        stack_number: 7,
+                        added: vec![3],
+                    }
+                ),
+                (vec![5, 6], ChainOutcome::Created(100)),
             ]
         );
     }
@@ -662,10 +991,7 @@ mod tests {
         assert_eq!(
             gh.calls(),
             vec![
-                Call::Unstacked {
-                    stack: 7,
-                    prs: vec![1, 2, 3],
-                },
+                Call::Unstacked { stack: 7 },
                 Call::Retargeted {
                     node_id: "node_3".into(),
                     base: "branch-4".into(),
@@ -698,7 +1024,7 @@ mod tests {
             pr(2, "branch-1", Some(7)),
             pr(3, "branch-1", None),
         ];
-        let err = create_stacks(&gh, &target(), &[vec![1, 2, 3]], &prs, &[])
+        let err = create_stacks(&gh, &target(), &[vec![1, 3]], &prs, &[stack(7, &[1, 2, 3])])
             .await
             .expect_err("the unstack failed");
 
@@ -720,23 +1046,108 @@ mod tests {
             pr(9, "main", Some(11)),
             pr(10, "main", None),
         ];
-        let unstacked = unstack(&gh, &target(), &[1, 2, 9, 10], &prs).await.unwrap();
+        let existing = [stack(7, &[1, 2]), stack(11, &[9])];
+        let outcome = unstack(&gh, &target(), &[1, 2, 9, 10], &prs, &existing)
+            .await
+            .unwrap();
 
-        assert_eq!(unstacked, vec![1, 2, 9]);
+        assert_eq!(outcome.unstacked, vec![1, 2, 9]);
+        let mut dissolved = outcome.dissolved;
+        dissolved.sort_unstable();
+        assert_eq!(dissolved, vec![7, 11]);
+        assert_eq!(outcome.remaining, vec![]);
         let mut calls = gh.unstacked();
-        calls.sort_by_key(|(stack, _)| *stack);
-        assert_eq!(calls, vec![(7, vec![1, 2]), (11, vec![9])]);
+        calls.sort_unstable();
+        assert_eq!(calls, vec![7, 11]);
     }
 
     #[tokio::test]
-    async fn unstack_ignores_prs_it_has_no_details_for() {
-        // A stack member with no local bookmark keeps its membership rather
-        // than being silently unstacked.
+    async fn unstack_refuses_a_stack_with_a_nonlocal_member() {
+        // Rebuilding would drop #99 from the stack, so the whole reshape has
+        // to stop rather than silently cancel its membership.
         let gh = FakeGh::new();
-        let prs = vec![pr(2, "branch-1", Some(11))];
-        let unstacked = unstack(&gh, &target(), &[2, 99], &prs).await.unwrap();
+        let prs = vec![pr(1, "main", Some(7)), pr(2, "branch-1", Some(7))];
+        let err = unstack(&gh, &target(), &[1, 2], &prs, &[stack(7, &[1, 2, 99])])
+            .await
+            .expect_err("the stack has a nonlocal member");
 
-        assert_eq!(unstacked, vec![2]);
-        assert_eq!(gh.unstacked(), vec![(11, vec![2])]);
+        let msg = format!("{err:#}");
+        assert!(msg.contains("#99"), "unexpected error: {msg}");
+        assert!(msg.contains("not local"), "unexpected error: {msg}");
+        assert!(
+            gh.unstacked().is_empty(),
+            "nothing should have been unstacked"
+        );
+    }
+
+    #[tokio::test]
+    async fn unstack_refuses_a_stack_with_auto_merge() {
+        // Unstacking cancels GitHub's stack request; stop and let the user
+        // decide how to move it instead of doing that as a side effect.
+        let gh = FakeGh::new();
+        let mut prs = vec![pr(1, "main", Some(7)), pr(2, "branch-1", Some(7))];
+        prs[0].stack_auto_merge_request = Some(AutoMergeRequest {
+            pr_number: 2,
+            method: None,
+        });
+        let err = unstack(&gh, &target(), &[1], &prs, &[stack(7, &[1, 2])])
+            .await
+            .expect_err("the stack has auto-merge enabled");
+
+        let msg = format!("{err:#}");
+        assert!(msg.contains("auto-merge"), "unexpected error: {msg}");
+        assert!(msg.contains("jj-gh pr edit"), "unexpected error: {msg}");
+        assert!(
+            gh.unstacked().is_empty(),
+            "nothing should have been unstacked"
+        );
+    }
+
+    #[tokio::test]
+    async fn unstack_fails_when_github_leaves_an_open_pr_stacked() {
+        let gh = FakeGh::leaving_unstacked(&[1, 2]);
+        let prs = vec![
+            pr(1, "main", Some(7)),
+            pr(2, "branch-1", Some(7)),
+            pr(3, "branch-2", None),
+        ];
+        let err = unstack(&gh, &target(), &[1, 3], &prs, &[stack(7, &[1, 2])])
+            .await
+            .expect_err("GitHub left #1 stacked");
+
+        let msg = format!("{err:#}");
+        assert!(msg.contains("#1"), "unexpected error: {msg}");
+        assert!(msg.contains("jj-gh pr edit"), "unexpected error: {msg}");
+    }
+
+    #[tokio::test]
+    async fn appending_to_an_auto_merge_stack_rechecks_coverage() {
+        let mut prs = aligned_chain(&[1, 2, 3])
+            .into_iter()
+            .enumerate()
+            .map(|(i, mut pr)| {
+                if i < 2 {
+                    pr.stack_number = Some(7);
+                }
+                pr
+            })
+            .collect::<Vec<_>>();
+        prs[1].stack_auto_merge_request = Some(AutoMergeRequest {
+            pr_number: 2,
+            method: None,
+        });
+        let gh = FakeGh::reading_back(stack(7, &[1, 2, 3]), prs.clone());
+        let results = create_stacks(&gh, &target(), &[vec![1, 2, 3]], &prs, &[stack(7, &[1, 2])])
+            .await
+            .unwrap();
+
+        assert_eq!(
+            results[0].outcome,
+            ChainOutcome::Appended {
+                stack_number: 7,
+                added: vec![3],
+            }
+        );
+        assert_eq!(gh.appended(), vec![(7, vec![3])]);
     }
 }

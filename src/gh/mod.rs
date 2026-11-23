@@ -43,7 +43,6 @@ pub struct PrDetails {
     /// The individual auto-merge request on this PR, if present.
     pub auto_merge_request: Option<AutoMergeRequest>,
     /// The stack auto-merge request covering this PR, if present.
-    #[expect(dead_code)]
     pub stack_auto_merge_request: Option<AutoMergeRequest>,
     pub number: u64,
     pub title: String,
@@ -116,19 +115,17 @@ impl UpdatePr {
 
 /// A pull request stack on GitHub. Stacks link related PRs together so
 /// GitHub's UI can show stack navigation and "merge the whole stack" features.
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 pub struct PullRequestStack {
     pub number: u64,
     pub pull_requests: Vec<StackPullRequest>,
 }
 
 /// A PR entry within a stack.
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 pub struct StackPullRequest {
     pub number: u64,
-    #[expect(dead_code)]
     pub state: String,
-    #[expect(dead_code)]
     pub merged_at: Option<String>,
 }
 
@@ -431,21 +428,39 @@ pub trait Gh {
         pr_numbers: &[u64],
     ) -> Result<PullRequestStack>;
 
-    /// Remove unmerged PRs from a stack. PRs that cannot be unstacked
-    /// (e.g., queued for merge) are left in place. If all PRs are removed,
-    /// the stack is dissolved.
+    /// Append PRs to the top of an existing stack. `pr_numbers` must be only
+    /// the delta, ordered from the current top upward; the first one's base
+    /// ref must already match the current top's head ref.
     ///
     /// # Errors
     ///
     /// Propagates API errors. Returns 409 if the stack is being modified
-    /// concurrently. Returns 422 if no PRs can be removed.
-    async fn unstack_prs(
+    /// concurrently, and 422 if the PRs cannot be appended.
+    async fn append_to_stack(
         &self,
         owner: &str,
         repo: &str,
         stack_number: u64,
         pr_numbers: &[u64],
-    ) -> Result<()>;
+    ) -> Result<PullRequestStack>;
+
+    /// Remove unmerged PRs from a stack. The server decides which PRs are
+    /// eligible; PRs that are merged, merging, queued, or have auto-merge
+    /// enabled are left in place.
+    ///
+    /// Returns `None` when GitHub dissolved the stack (204), and the updated
+    /// stack when some PRs remain (200).
+    ///
+    /// # Errors
+    ///
+    /// Propagates API errors. Returns 409 if the stack is being modified
+    /// concurrently, and 422 if no PRs can be removed.
+    async fn unstack_prs(
+        &self,
+        owner: &str,
+        repo: &str,
+        stack_number: u64,
+    ) -> Result<Option<PullRequestStack>>;
 
     /// List all pull request stacks in a repository.
     ///
@@ -459,6 +474,5 @@ pub trait Gh {
     /// # Errors
     ///
     /// Propagates API errors, including when the stack does not exist.
-    #[expect(dead_code)]
     async fn get_stack(&self, owner: &str, repo: &str, number: u64) -> Result<PullRequestStack>;
 }

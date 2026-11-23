@@ -362,7 +362,21 @@ mod tests {
         ) -> Result<crate::gh::PullRequestStack> {
             unimplemented!()
         }
-        async fn unstack_prs(&self, _: &str, _: &str, _: u64, _: &[u64]) -> Result<()> {
+        async fn append_to_stack(
+            &self,
+            _: &str,
+            _: &str,
+            _: u64,
+            _: &[u64],
+        ) -> Result<crate::gh::PullRequestStack> {
+            unimplemented!()
+        }
+        async fn unstack_prs(
+            &self,
+            _: &str,
+            _: &str,
+            _: u64,
+        ) -> Result<Option<crate::gh::PullRequestStack>> {
             unimplemented!()
         }
         async fn list_stacks(&self, _: &str, _: &str) -> Result<Vec<crate::gh::PullRequestStack>> {

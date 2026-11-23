@@ -1036,7 +1036,16 @@ mod tests {
         async fn create_stack(&self, _: &str, _: &str, _: &[u64]) -> Result<PullRequestStack> {
             unimplemented!()
         }
-        async fn unstack_prs(&self, _: &str, _: &str, _: u64, _: &[u64]) -> Result<()> {
+        async fn append_to_stack(
+            &self,
+            _: &str,
+            _: &str,
+            _: u64,
+            _: &[u64],
+        ) -> Result<PullRequestStack> {
+            unimplemented!()
+        }
+        async fn unstack_prs(&self, _: &str, _: &str, _: u64) -> Result<Option<PullRequestStack>> {
             unimplemented!()
         }
         async fn list_stacks(&self, _: &str, _: &str) -> Result<Vec<PullRequestStack>> {

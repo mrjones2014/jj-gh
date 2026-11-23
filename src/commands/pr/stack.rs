@@ -25,7 +25,8 @@ use crate::{
         pr_lookup::{MissingPr, resolve_pr_targets},
         remote,
         stack_create::{
-            ChainOutcome, ChainResult, create_stacks, stack_exists, stack_members, unstack,
+            ChainOutcome, ChainResult, append_candidate, apply_unstack_result, create_stacks,
+            stack_exists, stack_members, unstack,
         },
         stack_detect::{BasePlan, LocalShape, detect},
     },
@@ -189,7 +190,7 @@ async fn reconcile(model: &impl Model, args: &StackArgs) -> Result<()> {
 
     let links = PrLinks::from_details(&ctx.pr_details);
     show_graph(args, &ctx).await;
-    print_plan(&plan, &ctx.pr_details, &links);
+    print_plan(&plan, &ctx.pr_details, &links, &ctx.existing_stacks);
 
     if args.dry_run {
         eprintln!("\n{}Dry run: nothing was changed{}", on(DIM), on(RESET));
@@ -305,11 +306,20 @@ async fn build_plan(jj: &impl Jj, args: &StackArgs, ctx: &Gathered) -> Result<Pl
         .collect::<Vec<BasePlan>>();
 
     let retargeting = bases.iter().map(|b| b.pr_number).collect::<HashSet<u64>>();
+    let appendable = ctx
+        .shape
+        .chains
+        .iter()
+        .filter_map(|chain| {
+            append_candidate(&ctx.existing_stacks, chain).map(|(stack, _)| stack.number)
+        })
+        .collect::<HashSet<u64>>();
     let unstack = prs_to_unstack(
         &ctx.shape.chains,
         &ctx.pr_details,
         &ctx.existing_stacks,
         &retargeting,
+        &appendable,
     );
 
     // A chain needs (re)creating when GitHub does not have it verbatim, or
@@ -374,14 +384,15 @@ async fn build_plan(jj: &impl Jj, args: &StackArgs, ctx: &Gathered) -> Result<Pl
 /// - **b.** needs its base ref moved, which GitHub refuses while it is stacked;
 /// - **c.** sits in a stack that no longer has the shape of its chain.
 ///
-/// Only PRs in `pr_details` are considered and only they are returned, so a
-/// stack member with no local bookmark keeps its membership rather than being
-/// silently unstacked.
+/// Only PRs in `pr_details` are considered and only they are returned. A stack
+/// with an open nonlocal member is rejected by [`unstack`] rather than being
+/// silently reshaped, so such a stack never reaches this point in `apply`.
 fn prs_to_unstack(
     chains: &[Vec<u64>],
     pr_details: &[PrDetails],
     existing_stacks: &[PullRequestStack],
     retargeting: &HashSet<u64>,
+    appendable: &HashSet<u64>,
 ) -> Vec<u64> {
     let members_of = existing_stacks
         .iter()
@@ -392,10 +403,14 @@ fn prs_to_unstack(
         .iter()
         .filter_map(|pr| {
             let stack_number = pr.stack_number?;
-            let bad = match chains.iter().find(|chain| chain.contains(&pr.number)) {
-                None => true,
-                Some(_) if retargeting.contains(&pr.number) => true,
-                Some(chain) => members_of.get(&stack_number).is_none_or(|m| m != chain),
+            let bad = if appendable.contains(&stack_number) {
+                false
+            } else {
+                match chains.iter().find(|chain| chain.contains(&pr.number)) {
+                    None => true,
+                    Some(_) if retargeting.contains(&pr.number) => true,
+                    Some(chain) => members_of.get(&stack_number).is_none_or(|m| m != chain),
+                }
             };
             bad.then_some(stack_number)
         })
@@ -519,7 +534,12 @@ fn prs_leaving_stacks(plan: &Plan) -> Vec<u64> {
         .collect()
 }
 
-fn print_plan(plan: &Plan, pr_details: &[PrDetails], links: &PrLinks) {
+fn print_plan(
+    plan: &Plan,
+    pr_details: &[PrDetails],
+    links: &PrLinks,
+    existing_stacks: &[PullRequestStack],
+) {
     let title_of = pr_details
         .iter()
         .map(|pr| (pr.number, pr.title.as_str()))
@@ -585,6 +605,8 @@ fn print_plan(plan: &Plan, pr_details: &[PrDetails], links: &PrLinks) {
     for chain in &plan.chains {
         let detail = if chain.iter().any(|number| rebuilt.contains(number)) {
             "(an existing stack will be recreated)"
+        } else if append_candidate(existing_stacks, chain).is_some() {
+            "(an existing stack will be extended)"
         } else {
             "(a new stack will be created)"
         };
@@ -658,24 +680,11 @@ async fn apply(model: &impl Model, ctx: Gathered, plan: Plan) -> Result<()> {
     // base-ref change on a PR that is in a stack. The stacks are rebuilt below.
     if !plan.unstack.is_empty() {
         let status = crate::ui::status::push("Unstacking PRs");
-        let unstacked = unstack(gh, &target, &plan.unstack, &pr_details).await?;
+        let outcome = unstack(gh, &target, &plan.unstack, &pr_details, &existing_stacks).await?;
         drop(status);
+        apply_unstack_result(&outcome, &mut pr_details, &mut existing_stacks);
 
-        // Mirror the unstack locally so the create step neither re-issues an
-        // unstack for a PR already removed, nor skips a chain as
-        // "already exists" when we just dissolved its stack.
-        let done = unstacked.iter().copied().collect::<HashSet<u64>>();
-        let dissolved = pr_details
-            .iter()
-            .filter(|pr| done.contains(&pr.number))
-            .filter_map(|pr| pr.stack_number)
-            .collect::<HashSet<u64>>();
-        for pr in pr_details.iter_mut().filter(|pr| done.contains(&pr.number)) {
-            pr.stack_number = None;
-        }
-        existing_stacks.retain(|stack| !dissolved.contains(&stack.number));
-
-        for &number in &unstacked {
+        for &number in &outcome.unstacked {
             log::info!("{} unstacked", links.number(UI, number));
         }
     }
@@ -876,8 +885,17 @@ pub(crate) fn print_stack_results(links: &PrLinks, results: &[ChainResult]) {
         for number in &result.retargeted {
             log::debug!("retargeted #{number}'s base ref to make {chain} chain");
         }
-        match result.outcome {
+        match &result.outcome {
             ChainOutcome::Created(_) => log::info!("Stack created: {chain}"),
+            ChainOutcome::Appended { added, .. } => log::info!(
+                "Stack extended: {} (+ {})",
+                chain,
+                added
+                    .iter()
+                    .map(|n| format!("#{n}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
             ChainOutcome::AlreadyExists => log::info!("Already stacked: {chain}"),
         }
     }
@@ -1082,7 +1100,13 @@ mod tests {
         // #1 merged out of stack #11, leaving #2 alone in it.
         let prs = [pr(2, Some(11)), pr(3, None)];
         assert_eq!(
-            prs_to_unstack(&[], &prs, &[stack(11, &[2])], &retargeting(&[])),
+            prs_to_unstack(
+                &[],
+                &prs,
+                &[stack(11, &[2])],
+                &retargeting(&[]),
+                &HashSet::new()
+            ),
             vec![2]
         );
     }
@@ -1094,7 +1118,13 @@ mod tests {
         let prs = [pr(1, Some(7)), pr(2, Some(7))];
         let existing = [stack(7, &[1, 2])];
         assert_eq!(
-            prs_to_unstack(&[vec![1, 2]], &prs, &existing, &retargeting(&[2])),
+            prs_to_unstack(
+                &[vec![1, 2]],
+                &prs,
+                &existing,
+                &retargeting(&[2]),
+                &HashSet::new()
+            ),
             vec![1, 2]
         );
     }
@@ -1104,7 +1134,13 @@ mod tests {
         let prs = [pr(1, Some(7)), pr(2, Some(7))];
         let existing = [stack(7, &[1, 2])];
         assert_eq!(
-            prs_to_unstack(&[vec![1, 2]], &prs, &existing, &retargeting(&[])),
+            prs_to_unstack(
+                &[vec![1, 2]],
+                &prs,
+                &existing,
+                &retargeting(&[]),
+                &HashSet::new()
+            ),
             [] as [u64; 0]
         );
     }
@@ -1115,7 +1151,13 @@ mod tests {
         let prs = [pr(1, Some(7)), pr(2, Some(7)), pr(3, None)];
         let existing = [stack(7, &[1, 2])];
         assert_eq!(
-            prs_to_unstack(&[vec![1, 2, 3]], &prs, &existing, &retargeting(&[])),
+            prs_to_unstack(
+                &[vec![1, 2, 3]],
+                &prs,
+                &existing,
+                &retargeting(&[]),
+                &HashSet::new()
+            ),
             vec![1, 2]
         );
     }
@@ -1127,7 +1169,7 @@ mod tests {
         let prs = [pr(1, Some(7))];
         let existing = [stack(7, &[1, 99])];
         assert_eq!(
-            prs_to_unstack(&[], &prs, &existing, &retargeting(&[])),
+            prs_to_unstack(&[], &prs, &existing, &retargeting(&[]), &HashSet::new()),
             vec![1]
         );
     }

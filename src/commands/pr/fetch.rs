@@ -468,7 +468,21 @@ mod tests {
         ) -> Result<crate::gh::PullRequestStack> {
             unimplemented!("fetch does not call create_stack")
         }
-        async fn unstack_prs(&self, _: &str, _: &str, _: u64, _: &[u64]) -> Result<()> {
+        async fn append_to_stack(
+            &self,
+            _: &str,
+            _: &str,
+            _: u64,
+            _: &[u64],
+        ) -> Result<crate::gh::PullRequestStack> {
+            unimplemented!("fetch does not call append_to_stack")
+        }
+        async fn unstack_prs(
+            &self,
+            _: &str,
+            _: &str,
+            _: u64,
+        ) -> Result<Option<crate::gh::PullRequestStack>> {
             unimplemented!("fetch does not call unstack_prs")
         }
         async fn list_stacks(&self, _: &str, _: &str) -> Result<Vec<crate::gh::PullRequestStack>> {
