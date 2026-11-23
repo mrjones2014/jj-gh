@@ -26,7 +26,7 @@ PR body goes here.
 | `labels`            | List of label names.                                                                         |
 | `reviewers`         | Collaborator `@handle`s or team `@org/team` slugs.                                           |
 | `draft`             | Whether the PR is a draft.                                                                   |
-| `auto_merge`        | Enable GitHub auto-merge once required checks pass.                                          |
+| `auto_merge`        | Scope: `false`, `infer`, `all`, or `below`. See [Auto-merge](./auto-merge-rerun.md).         |
 | `auto_merge_method` | `merge`, `squash`, or `rebase`; omitted unless non-default.                                  |
 
 If a diff preview is enabled, it is appended after a `# 8< jj-gh: below this line removed on submit >8` marker. Everything from that marker onward is stripped when the buffer is parsed, so the preview never lands in the PR body.
@@ -34,6 +34,8 @@ If a diff preview is enabled, it is appended after a `# 8< jj-gh: below this lin
 ## Only changed metadata is applied
 
 `jj-gh` compares the edited frontmatter and body with the state fetched before opening the editor. It sends only the fields you changed and applies label and reviewer additions and removals individually, rather than replacing their complete lists. This preserves labels added by CI bots or teammates while you were editing, even though they were not in the original buffer.
+
+To change an existing auto-merge request or its merge method, use `jj pr auto-merge` instead: the frontmatter cannot express partial stack endpoints, while the command can move a request to the stack tip or cancel one. `jj pr edit` remains the path for the other metadata fields.
 
 The PR URL is printed on success.
 

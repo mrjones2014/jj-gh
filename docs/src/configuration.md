@@ -42,10 +42,12 @@ Token source precedence (high to low), resolved outside the config layering:
 | `default_remote`      | string or unset             | unset (`None`)                         | **Not deprecated.** Fallback for your own pushes and PR head lookups, used only when git's default remote cannot be auto-resolved; `--remote` and auto-detection win. |
 | `upstream_remote`     | string or unset             | unset (`None`), effectively `upstream` | Git remote used as the PR target in fork workflows and as the PR host for `fetch`. Falls back to `upstream` when unset.                                               |
 | `draft`               | bool                        | `false`                                | Open new PRs as drafts.                                                                                                                                               |
-| `auto_merge`          | bool                        | `false`                                | Enable auto-merge on newly created PRs.                                                                                                                               |
+| `auto_merge`          | mode                        | `false`                                | Auto-merge scope for new PRs: `false`, `infer`, `all`, or `below`. See [Auto-merge and rerun](./workflows/auto-merge-rerun.md).                                       |
 | `auto_merge_method`   | `merge`, `squash`, `rebase` | `merge`                                | Merge method when auto-merge is enabled.                                                                                                                              |
 | `auto_stack`          | bool                        | `true`                                 | Link created stacked PRs into a GitHub stack.                                                                                                                         |
 | `auto_push`           | bool                        | `true`                                 | Push stale bookmarks before `pr stack` links PRs into a stack.                                                                                                        |
+
+`auto_merge` accepts `false` (off, the default), `infer` (whole stack when the PR is stacked, otherwise just that PR), `all` (whole GitHub stack through its top PR), and `below` (an individual request for this PR, without stack-wide coverage). Boolean `auto_merge = true` is deprecated and treated as `infer`. See [Auto-merge and rerun](./workflows/auto-merge-rerun.md) for the CLI flags and creation-time behavior.
 
 ### Templates and editor
 
