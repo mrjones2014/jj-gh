@@ -10,6 +10,7 @@ use crate::{
 };
 use anyhow::{Context, Result, bail};
 use jj_gh_config_derive::subcommand_args;
+use std::collections::{HashMap, HashSet};
 
 /// The subset of [`PrDetails`] needed to move an auto-merge request. Owned so
 /// the editor flow can build it for a freshly created PR as well as for a PR
@@ -64,6 +65,33 @@ pub(crate) struct AutoMergeView {
     pub value: Option<AutoMergeMode>,
     pub comment: Option<String>,
     pub method: AutoMergeMethod,
+}
+
+/// Auto-merge intent captured from a created PR's editor frontmatter. Held
+/// until stack linking finishes so one whole-stack request can be made through
+/// the right endpoint instead of one request per created PR.
+#[derive(Debug, Clone)]
+pub(crate) struct CreatedAutoMerge {
+    pub target: AutoMergeTarget,
+    pub mode: AutoMergeMode,
+    pub method: AutoMergeMethod,
+}
+
+impl CreatedAutoMerge {
+    pub(crate) fn new(
+        number: u64,
+        node_id: &str,
+        html_url: &str,
+        base_has_merge_queue: bool,
+        mode: AutoMergeMode,
+        method: AutoMergeMethod,
+    ) -> Self {
+        Self {
+            target: AutoMergeTarget::created(number, node_id, html_url, base_has_merge_queue),
+            mode,
+            method,
+        }
+    }
 }
 
 subcommand_args! {
@@ -473,6 +501,128 @@ pub(crate) async fn apply_editor_change(
             }
         }
     }
+}
+
+/// Enable auto-merge for created PRs after stack linking.
+///
+/// `linked` carries post-link PR details when the created PRs were linked into
+/// GitHub stacks; `None` means they are standalone. Only one request is made
+/// per stack, through the highest requesting endpoint. PRs that requested
+/// `false` do not initiate a request and are never used as the endpoint of one,
+/// but they do not veto requests from other PRs. Conflicting merge methods
+/// abort before any request is made.
+pub(crate) async fn apply_created_auto_merge(
+    gh: &impl Gh,
+    target: &Target,
+    requests: &[CreatedAutoMerge],
+    linked: Option<&[PrDetails]>,
+) -> Result<()> {
+    let opted_out = requests
+        .iter()
+        .filter(|request| request.mode == AutoMergeMode::False)
+        .map(|request| request.target.number)
+        .collect::<HashSet<u64>>();
+    let mut active = requests
+        .iter()
+        .filter(|request| request.mode != AutoMergeMode::False)
+        .cloned()
+        .collect::<Vec<_>>();
+    if active.is_empty() {
+        return Ok(());
+    }
+
+    let method = active[0].method;
+    if let Some(other) = active.iter().find(|request| request.method != method) {
+        bail!(
+            "created PRs request conflicting auto-merge methods ({method:?} and {:?}); use `jj-gh pr auto-merge` to set one method before enabling auto-merge",
+            other.method
+        );
+    }
+    let requested = EvalWithCfgFallback::new(Some(method), Some(method));
+
+    if let Some(details) = linked {
+        let stacks = details
+            .iter()
+            .map(|pr| (pr.number, pr.stack_number))
+            .collect::<HashMap<u64, Option<u64>>>();
+        for request in &mut active {
+            if let Some(stack_number) = stacks.get(&request.target.number) {
+                request.target.stack_number = *stack_number;
+            }
+        }
+    }
+
+    // One request per stack, through the highest requesting endpoint. Created
+    // PRs have no covering request to cancel, so this is additive.
+    let mut groups = Vec::<(Option<u64>, Vec<CreatedAutoMerge>)>::new();
+    for request in active {
+        match groups
+            .iter_mut()
+            .find(|(stack, _)| *stack == request.target.stack_number)
+        {
+            Some((_, members)) => members.push(request),
+            None => groups.push((request.target.stack_number, vec![request])),
+        }
+    }
+
+    for (stack_number, members) in groups {
+        let Some(stack_number) = stack_number else {
+            // Standalone PRs each need their own request.
+            for request in &members {
+                enable_below(gh, target, &request.target, &requested).await?;
+            }
+            continue;
+        };
+
+        let whole_stack = members
+            .iter()
+            .filter(|request| matches!(request.mode, AutoMergeMode::All | AutoMergeMode::Infer))
+            .max_by_key(|request| request.target.number);
+        let highest = members
+            .iter()
+            .max_by_key(|r| r.target.number)
+            .expect("group is non-empty");
+
+        // Only a whole-stack request needs the tip: `enable_stack` always goes
+        // through it. If that tip explicitly requested `false`, honoring the
+        // whole-stack request would override its opt-out, so fall back to
+        // `enable_below` through the highest PR that did ask for it.
+        let through_tip = if whole_stack.is_some() {
+            let tip = gh
+                .get_stack(&target.owner, &target.repo, stack_number)
+                .await?
+                .pull_requests
+                .iter()
+                .rev()
+                .find(|member| is_open_unmerged(member))
+                .map(|member| member.number);
+            if tip.is_some_and(|tip| opted_out.contains(&tip)) {
+                log::info!(
+                    "stack tip PR #{} requested `false`; enabling auto-merge through PR #{} instead",
+                    tip.expect("checked above"),
+                    highest.target.number
+                );
+                false
+            } else {
+                true
+            }
+        } else {
+            false
+        };
+
+        let endpoint = if through_tip {
+            &whole_stack.expect("checked above").target
+        } else {
+            &highest.target
+        };
+        if through_tip {
+            enable_stack(gh, target, endpoint, &requested).await?;
+        } else {
+            enable_below(gh, target, endpoint, &requested).await?;
+        }
+    }
+
+    Ok(())
 }
 
 async fn enable_below(
@@ -1463,5 +1613,185 @@ mod tests {
 
         assert!(gh.enabled.lock().unwrap().is_empty());
         assert!(gh.disabled.lock().unwrap().is_empty());
+    }
+
+    fn created_request(
+        number: u64,
+        mode: AutoMergeMode,
+        method: AutoMergeMethod,
+        stack: Option<u64>,
+    ) -> CreatedAutoMerge {
+        let mut request = CreatedAutoMerge::new(
+            number,
+            &format!("node-{number}"),
+            &format!("https://github.com/o/r/pull/{number}"),
+            false,
+            mode,
+            method,
+        );
+        request.target.stack_number = stack;
+        request
+    }
+
+    async fn apply_created(
+        gh: &FakeGh,
+        requests: Vec<CreatedAutoMerge>,
+        linked: Option<Vec<PrDetails>>,
+    ) -> Result<()> {
+        apply_created_auto_merge(gh, &test_target(), &requests, linked.as_deref()).await
+    }
+
+    #[tokio::test]
+    async fn created_false_requests_do_not_enable_anything() {
+        let gh = FakeGh::new(vec![]);
+        apply_created(
+            &gh,
+            vec![created_request(
+                1,
+                AutoMergeMode::False,
+                AutoMergeMethod::Merge,
+                None,
+            )],
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert!(gh.enabled.lock().unwrap().is_empty());
+        assert!(gh.disabled.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn created_conflicting_methods_error_without_mutating() {
+        let gh = FakeGh::new(vec![]);
+        let err = apply_created(
+            &gh,
+            vec![
+                created_request(1, AutoMergeMode::All, AutoMergeMethod::Merge, Some(7)),
+                created_request(2, AutoMergeMode::All, AutoMergeMethod::Squash, Some(7)),
+            ],
+            None,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(err.to_string().contains("jj-gh pr auto-merge"), "{err}");
+        assert!(gh.enabled.lock().unwrap().is_empty());
+        assert!(gh.disabled.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn created_stack_makes_one_whole_stack_request() {
+        let gh = FakeGh::new(vec![pr_details(3, false)]).with_stack(stack(7, &[1, 2, 3]));
+        apply_created(
+            &gh,
+            vec![
+                created_request(1, AutoMergeMode::Infer, AutoMergeMethod::Merge, Some(7)),
+                created_request(2, AutoMergeMode::Below, AutoMergeMethod::Merge, Some(7)),
+                created_request(3, AutoMergeMode::All, AutoMergeMethod::Merge, Some(7)),
+            ],
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            *gh.enabled.lock().unwrap(),
+            vec![("node-3".into(), AutoMergeMethod::Merge, true)]
+        );
+        assert!(gh.disabled.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn created_below_requests_use_highest_endpoint() {
+        let gh = FakeGh::new(vec![]);
+        apply_created(
+            &gh,
+            vec![
+                created_request(1, AutoMergeMode::Below, AutoMergeMethod::Squash, Some(7)),
+                created_request(2, AutoMergeMode::Below, AutoMergeMethod::Squash, Some(7)),
+            ],
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            *gh.enabled.lock().unwrap(),
+            vec![("node-2".into(), AutoMergeMethod::Squash, false)]
+        );
+    }
+
+    #[tokio::test]
+    async fn created_standalone_prs_each_get_a_request() {
+        let gh = FakeGh::new(vec![]);
+        apply_created(
+            &gh,
+            vec![
+                created_request(1, AutoMergeMode::Infer, AutoMergeMethod::Merge, None),
+                created_request(2, AutoMergeMode::All, AutoMergeMethod::Merge, None),
+            ],
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            *gh.enabled.lock().unwrap(),
+            vec![
+                ("node-1".into(), AutoMergeMethod::Merge, false),
+                ("node-2".into(), AutoMergeMethod::Merge, false),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn created_linked_details_supply_stack_membership() {
+        let gh = FakeGh::new(vec![pr_details(3, false)]).with_stack(stack(7, &[1, 2, 3]));
+        apply_created(
+            &gh,
+            vec![created_request(
+                1,
+                AutoMergeMode::All,
+                AutoMergeMethod::Merge,
+                None,
+            )],
+            Some(vec![
+                stacked_pr(1, 7),
+                pr_details(2, false),
+                pr_details(3, false),
+            ]),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            *gh.enabled.lock().unwrap(),
+            vec![("node-3".into(), AutoMergeMethod::Merge, true)]
+        );
+    }
+
+    #[tokio::test]
+    async fn created_false_tip_is_not_used_as_endpoint_but_does_not_veto() {
+        let gh = FakeGh::new(vec![pr_details(1, false), pr_details(3, false)])
+            .with_stack(stack(7, &[1, 2, 3]));
+        apply_created(
+            &gh,
+            vec![
+                created_request(1, AutoMergeMode::All, AutoMergeMethod::Merge, Some(7)),
+                created_request(3, AutoMergeMode::False, AutoMergeMethod::Merge, Some(7)),
+            ],
+            None,
+        )
+        .await
+        .unwrap();
+
+        // The tip opted out, so the whole-stack request falls back to the
+        // highest PR that did ask. A request is still made: `false` is not a
+        // veto, it only keeps that PR out of the endpoint role.
+        assert_eq!(
+            *gh.enabled.lock().unwrap(),
+            vec![("node-1".into(), AutoMergeMethod::Merge, false)]
+        );
     }
 }

@@ -1,6 +1,6 @@
 use crate::{
     cli::GlobalOpts,
-    commands::pr::auto_merge::AutoMergeTarget,
+    commands::pr::auto_merge::{AutoMergeTarget, CreatedAutoMerge},
     config::{self, AutoMergeMethod, AutoMergeMode, DefaultTitleSource},
     editor::{self, ApplyChangesCtx},
     frontmatter::Frontmatter,
@@ -25,6 +25,9 @@ mod title_picker;
 struct CreatedPr {
     number: u64,
     html_url: String,
+    /// Auto-merge intent from the editor frontmatter, applied only after stack
+    /// linking. `None` for an already-open PR, which create never modifies.
+    auto_merge: Option<CreatedAutoMerge>,
 }
 
 /// jj template rendering one `<change id> <description first line>` row per
@@ -291,7 +294,20 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
         }
     }
 
+    let auto_merge_requests = created_prs
+        .iter()
+        .filter_map(|pr| pr.auto_merge.clone())
+        .collect::<Vec<_>>();
+
     if !*auto_stack {
+        // No linking to wait for: each PR is its own endpoint.
+        crate::commands::pr::auto_merge::apply_created_auto_merge(
+            gh,
+            &target,
+            &auto_merge_requests,
+            None,
+        )
+        .await?;
         return Ok(());
     }
 
@@ -301,11 +317,68 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
     let status = crate::ui::status::push("Detecting stack chains");
     let (pr_details, head_to_local) =
         gather_stack_inputs(jj, gh, &remote, &target, &created_prs).await?;
-    let results = link_stacks(gh, jj, &target, &pr_details, &head_to_local).await?;
+    let outcome = link_stacks(gh, jj, &target, &pr_details, &head_to_local).await;
     drop(status);
-    crate::commands::pr::stack::print_stack_results(&PrLinks::from_details(&pr_details), &results);
 
+    finish_after_linking(gh, &target, &pr_details, &auto_merge_requests, outcome).await
+}
+
+/// Print the linking result and apply deferred auto-merge when linking
+/// succeeded. A failure or declined confirmation leaves the PRs in place but
+/// skips auto-merge, since the stack topology they would use is unknown.
+async fn finish_after_linking(
+    gh: &impl Gh,
+    target: &crate::gh::remote::Target,
+    pr_details: &[crate::gh::PrDetails],
+    auto_merge_requests: &[CreatedAutoMerge],
+    outcome: Result<LinkOutcome>,
+) -> Result<()> {
+    let links = PrLinks::from_details(pr_details);
+    match outcome {
+        Ok(LinkOutcome::Linked(results)) => {
+            crate::commands::pr::stack::print_stack_results(&links, &results);
+            // Linking populates `stack_number`; re-read it so the auto-merge
+            // request goes through the resulting GitHub stack's tip.
+            let numbers = pr_details.iter().map(|pr| pr.number).collect::<Vec<_>>();
+            let linked = fetch_pr_details(gh, target, &numbers).await;
+            crate::commands::pr::auto_merge::apply_created_auto_merge(
+                gh,
+                target,
+                auto_merge_requests,
+                Some(&linked),
+            )
+            .await?;
+        }
+        Ok(LinkOutcome::NoChains) => {
+            crate::commands::pr::stack::print_stack_results(&links, &[]);
+            crate::commands::pr::auto_merge::apply_created_auto_merge(
+                gh,
+                target,
+                auto_merge_requests,
+                None,
+            )
+            .await?;
+        }
+        Ok(LinkOutcome::Skipped) => {
+            log::info!("Skipping auto-merge; the PRs were still created");
+        }
+        Err(e) => {
+            log::warn!("Failed to link PR stacks: {e:#}");
+            log::info!("Skipping auto-merge; the PRs were still created");
+        }
+    }
     Ok(())
+}
+
+/// Synthesized pre-edit frontmatter: everything `create_pr` already set is
+/// carried over, so only labels/reviewers are applied here. Auto-merge is
+/// intentionally unchanged; it is applied later, after stack linking.
+fn metadata_before_fm(final_fm: &Frontmatter) -> Frontmatter {
+    Frontmatter {
+        labels: vec![],
+        reviewers: vec![],
+        ..final_fm.clone()
+    }
 }
 
 /// Gather the inputs for post-create stack detection: full details for every
@@ -371,6 +444,17 @@ async fn fetch_pr_details(
     details
 }
 
+/// Outcome of the post-create linking attempt, which decides whether auto-merge
+/// can be applied to the resulting GitHub stacks.
+enum LinkOutcome {
+    /// No chains were detected; the created PRs are standalone.
+    NoChains,
+    /// Chains were linked, with the result of each.
+    Linked(Vec<crate::gh::stack_create::ChainResult>),
+    /// Linking was declined (or there was no TTY to ask); nothing was linked.
+    Skipped,
+}
+
 /// Detect stack chains among the given PRs and create stacks on GitHub.
 ///
 /// Linking is best-effort: the PRs themselves are already created by the time
@@ -381,18 +465,16 @@ async fn fetch_pr_details(
 /// base the user chose in the editor; reconciling every base against the graph
 /// is `jj-gh pr stack`'s job, not something `pr create` should do behind the
 /// user's back.
-///
-/// Returns what happened so the caller decides how to print it.
 async fn link_stacks(
     gh: &impl Gh,
     jj: &impl Jj,
     target: &crate::gh::remote::Target,
     pr_details: &[crate::gh::PrDetails],
     head_to_local_commit: &HashMap<String, String>,
-) -> Result<Vec<crate::gh::stack_create::ChainResult>> {
+) -> Result<LinkOutcome> {
     let shape = crate::gh::stack_detect::detect(pr_details, jj, head_to_local_commit, None).await?;
     if shape.chains.is_empty() {
-        return Ok(Vec::new());
+        return Ok(LinkOutcome::NoChains);
     }
     let existing_stacks = gh.list_stacks(&target.owner, &target.repo).await?;
 
@@ -406,20 +488,20 @@ async fn link_stacks(
     );
     if !crate::commands::pr::stack::confirm_cancel_auto_merge(&blocked, &existing_stacks)? {
         log::info!("Skipping stack linking; the PRs were still created");
-        return Ok(Vec::new());
+        return Ok(LinkOutcome::Skipped);
     }
 
-    Ok(crate::gh::stack_create::create_stacks(
-        gh,
-        target,
-        &shape.chains,
-        pr_details,
-        &existing_stacks,
-        true,
-    )
-    .await
-    .inspect_err(|e| log::warn!("Failed to link PR stacks: {e:#}"))
-    .unwrap_or_default())
+    Ok(LinkOutcome::Linked(
+        crate::gh::stack_create::create_stacks(
+            gh,
+            target,
+            &shape.chains,
+            pr_details,
+            &existing_stacks,
+            true,
+        )
+        .await?,
+    ))
 }
 
 /// Check if any commit that `jj git push` would upload for `revs` matches the
@@ -530,6 +612,7 @@ async fn create_single_pr(
             return Ok(CreatedPr {
                 number: existing.number,
                 html_url: existing.html_url,
+                auto_merge: None,
             });
         }
     }
@@ -711,19 +794,10 @@ async fn create_single_pr(
         })
         .await?;
 
-    // Synthesize "before" so the diff fires only for labels/reviewers/auto-merge.
-    // `create_pr` already set title/body/base/draft; reusing the same values
-    // makes `apply_frontmatter_diff` skip those calls.
-    let before_fm = Frontmatter {
-        title: final_fm.title.clone(),
-        base: final_fm.base.clone(),
-        labels: vec![],
-        reviewers: vec![],
-        draft: final_fm.draft,
-        auto_merge: Some(AutoMergeMode::False),
-        auto_merge_method: final_fm.auto_merge_method,
-        auto_merge_comment: None,
-    };
+    // Synthesize "before" so the diff fires only for labels/reviewers. `create_pr`
+    // already set title/body/base/draft, and auto-merge is deferred until after
+    // stack linking, so every other field is carried over unchanged.
+    let before_fm = metadata_before_fm(&final_fm);
     let ctx = ApplyChangesCtx {
         owner: &target.owner,
         repo: &target.repo,
@@ -737,7 +811,7 @@ async fn create_single_pr(
             &created.html_url,
             created.base_has_merge_queue,
         ),
-        auto_merge_before: Some(AutoMergeMode::False),
+        auto_merge_before: final_fm.auto_merge,
     };
     status.set_message("Applying PR metadata");
     editor::apply_frontmatter_diff(gh, &ctx, &before_fm, &body, &final_fm, &body)
@@ -753,7 +827,15 @@ async fn create_single_pr(
     crate::ui::print_url(&created.html_url);
     Ok(CreatedPr {
         number: created.number,
-        html_url: created.html_url,
+        html_url: created.html_url.clone(),
+        auto_merge: Some(CreatedAutoMerge::new(
+            created.number,
+            &created.node_id,
+            &created.html_url,
+            created.base_has_merge_queue,
+            final_fm.auto_merge.unwrap_or(AutoMergeMode::False),
+            final_fm.auto_merge_method,
+        )),
     })
 }
 
@@ -1153,6 +1235,7 @@ mod tests {
         CreatedPr {
             number,
             html_url: format!("https://github.com/o/r/pull/{number}"),
+            auto_merge: None,
         }
     }
 
@@ -1162,6 +1245,29 @@ mod tests {
 
     fn gather_numbers(gathered: &[PrDetails]) -> Vec<u64> {
         gathered.iter().map(|d| d.number).collect()
+    }
+
+    #[test]
+    fn metadata_before_fm_defers_auto_merge_and_keeps_metadata() {
+        let final_fm = Frontmatter {
+            title: "title".into(),
+            base: "main".into(),
+            labels: vec!["bug".into()],
+            reviewers: vec![crate::gh::Reviewer::parse("@alice").unwrap()],
+            draft: true,
+            auto_merge: Some(AutoMergeMode::All),
+            auto_merge_method: AutoMergeMethod::Squash,
+            auto_merge_comment: None,
+        };
+
+        let before = metadata_before_fm(&final_fm);
+        assert_eq!(before.auto_merge, final_fm.auto_merge);
+        assert_eq!(before.auto_merge_method, final_fm.auto_merge_method);
+        assert_eq!(before.title, final_fm.title);
+        assert_eq!(before.base, final_fm.base);
+        assert!(before.draft);
+        assert_eq!(before.labels, [] as [String; 0]);
+        assert_eq!(before.reviewers, [] as [crate::gh::Reviewer; 0]);
     }
 
     #[tokio::test]
