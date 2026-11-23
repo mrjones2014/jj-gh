@@ -108,11 +108,10 @@ pub async fn run(model: &impl Model, args: &EditArgs) -> Result<()> {
         html_url,
         base_ref,
         graphql_node_id,
-        in_merge_queue,
+        base_has_merge_queue,
         labels,
         is_draft,
-        auto_merge,
-        auto_merge_method,
+        auto_merge_request,
         reviewers,
         body,
         ..
@@ -129,8 +128,10 @@ pub async fn run(model: &impl Model, args: &EditArgs) -> Result<()> {
         labels: labels.into_iter().map(|l| l.name).collect(),
         reviewers,
         draft: is_draft,
-        auto_merge,
-        auto_merge_method: auto_merge_method.unwrap_or_default(),
+        auto_merge: auto_merge_request.is_some(),
+        auto_merge_method: auto_merge_request
+            .and_then(|request| request.method)
+            .unwrap_or_default(),
     };
 
     let preview = diff
@@ -147,7 +148,7 @@ pub async fn run(model: &impl Model, args: &EditArgs) -> Result<()> {
         repo: &target.repo,
         pr_number: number,
         pr_node_id: &graphql_node_id,
-        has_merge_queue: in_merge_queue,
+        base_has_merge_queue,
         before_label_ids,
     };
     editor::apply_frontmatter_diff(gh, &ctx, &before_fm, &before_body, &after_fm, &after_body)

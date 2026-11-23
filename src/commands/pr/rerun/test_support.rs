@@ -21,8 +21,8 @@ use std::sync::Mutex;
 pub(crate) fn pr_details(number: u64, sha: &str) -> PrDetails {
     PrDetails {
         is_draft: false,
-        auto_merge: false,
-        auto_merge_method: None,
+        auto_merge_request: None,
+        stack_auto_merge_request: None,
         number,
         title: "t".into(),
         html_url: format!("https://github.com/o/r/pull/{number}"),
@@ -33,11 +33,13 @@ pub(crate) fn pr_details(number: u64, sha: &str) -> PrDetails {
         head_user_login: Some("o".into()),
         head_repo_name: Some("r".into()),
         graphql_node_id: "node".into(),
-        in_merge_queue: false,
+        base_has_merge_queue: false,
         labels: Vec::<Label>::new(),
         reviewers: vec![],
         body: String::new(),
         stack_number: None,
+        stack_base_ref: None,
+        stack_position: None,
     }
 }
 
@@ -429,6 +431,9 @@ impl Gh for FakeGh {
         unimplemented!()
     }
     async fn list_stacks(&self, _: &str, _: &str) -> Result<Vec<crate::gh::PullRequestStack>> {
+        unimplemented!()
+    }
+    async fn get_stack(&self, _: &str, _: &str, _: u64) -> Result<crate::gh::PullRequestStack> {
         unimplemented!()
     }
 }

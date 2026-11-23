@@ -474,6 +474,9 @@ mod tests {
         async fn list_stacks(&self, _: &str, _: &str) -> Result<Vec<crate::gh::PullRequestStack>> {
             unimplemented!("fetch does not call list_stacks")
         }
+        async fn get_stack(&self, _: &str, _: &str, _: u64) -> Result<crate::gh::PullRequestStack> {
+            unimplemented!("fetch does not call get_stack")
+        }
     }
 
     #[derive(Debug, Clone)]
@@ -516,14 +519,16 @@ mod tests {
             head_user_login: Some("octocat".into()),
             head_repo_name: Some("r".into()),
             graphql_node_id: "PR_kwDOABCDEF".into(),
-            in_merge_queue: false,
+            base_has_merge_queue: false,
             is_draft: false,
-            auto_merge: false,
-            auto_merge_method: None,
+            auto_merge_request: None,
+            stack_auto_merge_request: None,
             labels: vec![],
             reviewers: vec![],
             body: String::new(),
             stack_number: None,
+            stack_base_ref: None,
+            stack_position: None,
         }
     }
 

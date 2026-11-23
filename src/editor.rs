@@ -69,7 +69,7 @@ pub struct ApplyChangesCtx<'a> {
     pub repo: &'a str,
     pub pr_number: u64,
     pub pr_node_id: &'a str,
-    pub has_merge_queue: bool,
+    pub base_has_merge_queue: bool,
     /// `label_name -> label_node_id` for labels on the PR at fetch time.
     /// Empty for `pr create` since a brand-new PR has no labels to remove.
     pub before_label_ids: HashMap<String, String>,
@@ -166,7 +166,7 @@ pub async fn apply_frontmatter_diff<G: Gh>(
 }
 
 fn ensure_not_merge_queue(ctx: &ApplyChangesCtx<'_>) -> Result<()> {
-    if ctx.has_merge_queue {
+    if ctx.base_has_merge_queue {
         bail!(
             "auto-merge not supported for repos with merge queues enabled; this is a limitation of the GitHub API. See https://github.com/mrjones2014/jj-gh/issues/103"
         );

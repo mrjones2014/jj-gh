@@ -694,7 +694,7 @@ async fn create_single_pr(
         repo: &target.repo,
         pr_number: created.number,
         pr_node_id: &created.node_id,
-        has_merge_queue: created.has_merge_queue,
+        base_has_merge_queue: created.base_has_merge_queue,
         before_label_ids: HashMap::new(),
     };
     status.set_message("Applying PR metadata");
@@ -1042,6 +1042,9 @@ mod tests {
         async fn list_stacks(&self, _: &str, _: &str) -> Result<Vec<PullRequestStack>> {
             unimplemented!()
         }
+        async fn get_stack(&self, _: &str, _: &str, _: u64) -> Result<PullRequestStack> {
+            unimplemented!()
+        }
     }
 
     fn bookmark(name: &str, local_commit_id: &str) -> PushedBookmark {
@@ -1079,17 +1082,19 @@ mod tests {
             title: format!("PR {number}"),
             html_url: format!("https://github.com/o/r/pull/{number}"),
             is_draft: false,
-            auto_merge: false,
-            auto_merge_method: None,
+            auto_merge_request: None,
+            stack_auto_merge_request: None,
             base_sha: "base".into(),
             head_user_login: None,
             head_repo_name: None,
             graphql_node_id: format!("node-{number}"),
-            in_merge_queue: false,
+            base_has_merge_queue: false,
             labels: vec![],
             reviewers: vec![],
             body: String::new(),
             stack_number: None,
+            stack_base_ref: None,
+            stack_position: None,
         }
     }
 

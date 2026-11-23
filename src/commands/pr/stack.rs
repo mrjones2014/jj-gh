@@ -895,7 +895,11 @@ mod tests {
             number,
             pull_requests: prs
                 .iter()
-                .map(|&number| StackPullRequest { number })
+                .map(|&number| StackPullRequest {
+                    number,
+                    state: "open".into(),
+                    merged_at: None,
+                })
                 .collect(),
         }
     }
@@ -909,17 +913,19 @@ mod tests {
             title: format!("PR {number}"),
             html_url: format!("https://github.com/o/r/pull/{number}"),
             is_draft: false,
-            auto_merge: false,
-            auto_merge_method: None,
+            auto_merge_request: None,
+            stack_auto_merge_request: None,
             base_sha: "base".into(),
             head_user_login: None,
             head_repo_name: None,
             graphql_node_id: format!("node_{number}"),
-            in_merge_queue: false,
+            base_has_merge_queue: false,
             labels: vec![],
             reviewers: vec![],
             body: String::new(),
             stack_number,
+            stack_base_ref: None,
+            stack_position: None,
         }
     }
 
