@@ -207,6 +207,9 @@ impl crate::jj::Jj for FakeJj {
     async fn pr_diff(&self, _: &str, _: &str) -> Result<String> {
         unimplemented!()
     }
+    async fn push_bookmarks(&self, _: &[String], _: String, _: bool) -> Result<()> {
+        unimplemented!()
+    }
 }
 
 #[derive(Default)]

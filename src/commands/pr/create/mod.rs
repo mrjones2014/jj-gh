@@ -5,7 +5,7 @@ use crate::{
     editor::{self, ApplyChangesCtx},
     frontmatter::Frontmatter,
     fs::RealFs,
-    gh::{CreatePrRequest, Gh, remote},
+    gh::{CreatePrRequest, Gh, PrDetails, remote, stack_detect},
     jj::{
         self, Jj,
         inject::{TemplateAliases, quote_jj},
@@ -26,6 +26,9 @@ mod title_picker;
 struct CreatedPr {
     number: u64,
     html_url: String,
+    /// Bookmark name for the PR's head branch (always set for created PRs;
+    /// `None` for already-open PRs where we didn't create the branch).
+    bookmark: Option<String>,
     /// Auto-merge intent from the editor frontmatter, applied only after stack
     /// linking. `None` for an already-open PR, which create never modifies.
     auto_merge: Option<CreatedAutoMerge>,
@@ -178,6 +181,21 @@ subcommand_args! {
         #[arg(long = "no-stack", conflicts_with = "auto_stack")]
         pub no_stack: bool,
 
+        /// Push bookmarks of detected stack members before creating PRs.
+        /// Default: true. Use `--no-push` to disable.
+        #[arg(
+            long = "push",
+            num_args = 0,
+            default_missing_value = "true",
+            default_value_if("no_push", "true", Some("false"))
+        )]
+        #[config]
+        pub auto_push: bool,
+
+        /// Do not push bookmarks of existing stack members. Overrides config.
+        #[arg(long = "no-push", conflicts_with = "auto_push")]
+        pub no_push: bool,
+
         /// Skip the private-commit check and pass `--allow-private` to
         /// `jj git push`, pushing commits that match the jj
         /// `git.private-commits` revset.
@@ -205,6 +223,7 @@ fn reject_reserved_rev(value: &str) -> Result<String, String> {
 /// # Errors
 ///
 /// Returns an error from any step (rev resolution, GH API, push, editor, etc.).
+#[expect(clippy::too_many_lines)]
 pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
     let jj = model.jj();
     let gh = model.gh().await?;
@@ -240,6 +259,9 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
         // stack linking control
         no_stack: _,
         auto_stack,
+        // push control
+        no_push: _,
+        auto_push,
         allow_private,
         // title source
         default_title_source,
@@ -277,6 +299,9 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
             default_title_source,
             &remote,
             &target,
+            *auto_stack,
+            *auto_push,
+            &created_prs,
         )
         .await?;
         created_prs.push(created);
@@ -562,6 +587,139 @@ fn private_commits_error(listing: &str) -> String {
     )
 }
 
+/// Detect the chain containing `this_bookmark` and return bookmarks of PRs
+/// below it whose remote target is behind. Only these need a second push
+/// after the current rev was already pushed.
+async fn stale_chain_bookmarks(
+    jj: &impl Jj,
+    gh: &impl Gh,
+    remote: &str,
+    target: &crate::gh::remote::Target,
+    this_bookmark: &str,
+    created_prs: &[CreatedPr],
+) -> Result<Vec<String>> {
+    let bookmarks = jj.pushed_bookmarks(remote).await?;
+    let branch_names = bookmarks.iter().map(|b| b.name.clone()).collect::<Vec<_>>();
+    let all_prs = gh
+        .local_pulls(
+            &target.owner,
+            &target.repo,
+            target.origin_owner(),
+            &branch_names,
+        )
+        .await?;
+
+    let head_to_local = bookmarks
+        .iter()
+        .map(|b| (b.name.clone(), b.local_commit_id.clone()))
+        .collect::<HashMap<_, _>>();
+
+    // Fetch full details for all local PRs; individual failures are skipped.
+    let mut pr_details = Vec::with_capacity(all_prs.len());
+    for pr in &all_prs {
+        if let Ok(d) = gh.get_pr(&target.owner, &target.repo, pr.number).await {
+            pr_details.push(d);
+        }
+    }
+
+    // Add previously created PRs from this run that may not have been
+    // picked up by `local_pulls` yet (GitHub indexing lag).
+    for created in created_prs {
+        if all_prs.iter().any(|pr| pr.number == created.number) {
+            continue;
+        }
+
+        let Some(head_ref) = &created.bookmark else {
+            continue;
+        };
+
+        let Some(sha) = head_to_local.get(head_ref) else {
+            continue;
+        };
+
+        pr_details.push(PrDetails {
+            number: created.number,
+            head_ref: head_ref.clone(),
+            head_sha: sha.clone(),
+            base_ref: String::new(),
+            title: String::new(),
+            html_url: created.html_url.clone(),
+            is_draft: false,
+            auto_merge_request: None,
+            stack_auto_merge_request: None,
+            base_sha: String::new(),
+            head_user_login: None,
+            head_repo_name: None,
+            graphql_node_id: String::new(),
+            base_has_merge_queue: false,
+            labels: vec![],
+            reviewers: vec![],
+            body: String::new(),
+            stack_number: None,
+            stack_base_ref: None,
+            stack_position: None,
+        });
+    }
+
+    // Add the current rev's entry so stack_detect sees it.
+    if let Some(sha) = head_to_local.get(this_bookmark) {
+        pr_details.push(PrDetails {
+            number: 0,
+            head_ref: this_bookmark.to_string(),
+            head_sha: sha.clone(),
+            base_ref: String::new(),
+            title: String::new(),
+            html_url: String::new(),
+            is_draft: false,
+            auto_merge_request: None,
+            stack_auto_merge_request: None,
+            base_sha: String::new(),
+            head_user_login: None,
+            head_repo_name: None,
+            graphql_node_id: String::new(),
+            base_has_merge_queue: false,
+            labels: vec![],
+            reviewers: vec![],
+            body: String::new(),
+            stack_number: None,
+            stack_base_ref: None,
+            stack_position: None,
+        });
+    }
+
+    let trunk = jj.trunk_branch().await.ok().flatten();
+    let shape = stack_detect::detect(&pr_details, jj, &head_to_local, trunk.as_deref()).await?;
+
+    // Find the chain that contains this rev's bookmark, and collect
+    // bookmarks of PRs below it (not including this one, which was just pushed).
+    let head_to_pr = pr_details
+        .iter()
+        .map(|pr| (pr.head_ref.clone(), pr.number))
+        .collect::<HashMap<_, _>>();
+    let this_pr_number = head_to_pr.get(this_bookmark);
+
+    for chain in &shape.chains {
+        if this_pr_number.is_some_and(|n| chain.contains(n)) {
+            let mut stale = Vec::new();
+            for &pr_number in chain {
+                if this_pr_number.is_some_and(|n| *n == pr_number) {
+                    break;
+                }
+                if let Some(pr) = pr_details.iter().find(|p| p.number == pr_number) {
+                    let remote_sha = jj.remote_bookmark_sha(&pr.head_ref, remote).await?;
+                    let local_sha = head_to_local.get(&pr.head_ref);
+                    if remote_sha.as_deref() != local_sha.map(String::as_str) {
+                        stale.push(pr.head_ref.clone());
+                    }
+                }
+            }
+            return Ok(stale);
+        }
+    }
+
+    Ok(Vec::new())
+}
+
 /// Create a single PR for one revision.
 #[expect(clippy::too_many_lines)]
 #[expect(clippy::too_many_arguments)]
@@ -583,6 +741,9 @@ async fn create_single_pr(
     default_title_source: &crate::config::DefaultTitleSource,
     remote: &str,
     target: &crate::gh::remote::Target,
+    auto_stack: bool,
+    auto_push: bool,
+    created_prs: &[CreatedPr],
 ) -> Result<CreatedPr> {
     if *pick_title {
         crate::ui::tui::require_tty("--pick-title")?;
@@ -613,6 +774,7 @@ async fn create_single_pr(
             return Ok(CreatedPr {
                 number: existing.number,
                 html_url: existing.html_url,
+                bookmark: None,
                 auto_merge: None,
             });
         }
@@ -758,29 +920,52 @@ async fn create_single_pr(
         lookup
     };
 
-    jj.push(
-        rev,
-        existing_branch.as_deref(),
-        remote.to_string(),
-        args.allow_private,
-    )
-    .await?;
+    // Push bookmarks. When stacking with auto_push, first push this rev's
+    // bookmark (handling the no-bookmark case with `-c <rev>`), then detect
+    // the chain and push any stale bookmarks below it in one subprocess.
+    // Otherwise fall back to the legacy single-rev push.
+    let branch = if auto_stack && auto_push {
+        jj.push(
+            rev,
+            existing_branch.as_deref(),
+            remote.to_string(),
+            args.allow_private,
+        )
+        .await?;
 
-    let status = crate::ui::status::push(if existing_branch.is_some() {
-        "Creating pull request"
-    } else {
-        "Verifying commit on remote"
-    });
-    let branch = if let Some(b) = existing_branch {
-        b
-    } else {
-        let refreshed = jj.resolve_rev(rev).await?;
-        refreshed
+        let resolved = jj.resolve_rev(rev).await?;
+        let branch = resolved
             .bookmarks
-            .into_iter()
-            .next()
-            .ok_or_else(|| anyhow!("`jj git push -c {rev}` did not create a bookmark"))?
+            .first()
+            .ok_or_else(|| anyhow!("`jj git push` did not create a bookmark"))?
+            .clone();
+
+        let stale_below =
+            stale_chain_bookmarks(jj, gh, remote, target, &branch, created_prs).await?;
+        if !stale_below.is_empty() {
+            jj.push_bookmarks(&stale_below, remote.to_string(), args.allow_private)
+                .await?;
+        }
+
+        branch
+    } else {
+        jj.push(
+            rev,
+            existing_branch.as_deref(),
+            remote.to_string(),
+            args.allow_private,
+        )
+        .await?;
+
+        let resolved = jj.resolve_rev(rev).await?;
+        resolved
+            .bookmarks
+            .first()
+            .ok_or_else(|| anyhow!("`jj git push` did not create a bookmark"))?
+            .clone()
     };
+
+    let status = crate::ui::status::push("Creating pull request");
     let head_spec = target.head_spec(&branch);
 
     status.set_message("Creating pull request");
@@ -829,6 +1014,7 @@ async fn create_single_pr(
     Ok(CreatedPr {
         number: created.number,
         html_url: created.html_url.clone(),
+        bookmark: Some(branch.clone()),
         auto_merge: Some(CreatedAutoMerge::new(
             created.number,
             &created.node_id,
@@ -1052,6 +1238,14 @@ mod tests {
         async fn pr_diff(&self, _: &str, _: &str) -> Result<String> {
             unimplemented!("private-commit check does not call pr_diff")
         }
+        async fn push_bookmarks(
+            &self,
+            _bookmarks: &[String],
+            _remote: String,
+            _allow_private: bool,
+        ) -> Result<()> {
+            unimplemented!("private-commit check does not call push_bookmarks")
+        }
     }
 
     /// Gh fake for `gather_stack_inputs`: `local_pulls` lists the PRs in
@@ -1236,6 +1430,7 @@ mod tests {
         CreatedPr {
             number,
             html_url: format!("https://github.com/o/r/pull/{number}"),
+            bookmark: Some(format!("branch-{number}")),
             auto_merge: None,
         }
     }

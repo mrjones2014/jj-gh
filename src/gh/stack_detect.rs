@@ -250,6 +250,14 @@ mod tests {
         async fn pr_diff(&self, _base_oid: &str, _head_oid: &str) -> Result<String> {
             unimplemented!()
         }
+        async fn push_bookmarks(
+            &self,
+            _bookmarks: &[String],
+            _remote: String,
+            _allow_private: bool,
+        ) -> Result<()> {
+            unimplemented!()
+        }
     }
 
     fn pr(number: u64, head_ref: &str, head_sha: &str) -> PrDetails {

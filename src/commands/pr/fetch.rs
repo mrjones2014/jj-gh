@@ -350,6 +350,9 @@ mod tests {
         async fn pr_diff(&self, _: &str, _: &str) -> Result<String> {
             unimplemented!("fetch does not call pr_diff")
         }
+        async fn push_bookmarks(&self, _: &[String], _: String, _: bool) -> Result<()> {
+            unimplemented!("fetch does not call push_bookmarks")
+        }
     }
 
     struct FakeGh {
