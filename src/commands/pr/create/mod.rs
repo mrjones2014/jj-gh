@@ -590,6 +590,7 @@ fn private_commits_error(listing: &str) -> String {
 /// Detect the chain containing `this_bookmark` and return bookmarks of PRs
 /// below it whose remote target is behind. Only these need a second push
 /// after the current rev was already pushed.
+#[expect(clippy::too_many_lines)]
 async fn stale_chain_bookmarks(
     jj: &impl Jj,
     gh: &impl Gh,
