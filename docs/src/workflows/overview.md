@@ -1,5 +1,10 @@
 # Everyday workflows
 
+> [!TIP]
+> `jj-gh` sets `JJ_GH="1"` in the editor process's environment; this can be
+> used to detect the `jj-gh` flow and apply tweaks to your editor specifically
+> for `jj-gh`, for example in Neovim, by checking `vim.env.JJ_GH ~= nil`.
+
 With the `pr` alias installed (`jj pr` → `jj-gh pr`), these are the commands you'll use most. See [Installation](../installation.md) if you haven't set the alias up yet.
 
 | Command                      | What it does                                                                                                                                  |

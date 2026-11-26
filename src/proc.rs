@@ -152,7 +152,7 @@ fn duplicate_stderr() -> Result<std::process::Stdio> {
 /// This keeps interactive programs usable when this process's stdout is piped.
 /// If no controlling terminal or console is available, falls back to inheriting
 /// the parent's stdio.
-pub async fn interactive(argv: &[&str]) -> Result<()> {
+pub async fn interactive(argv: &[&str], env: &[(&str, &str)]) -> Result<()> {
     let _suspended = crate::ui::status::suspend();
     let (prog, rest) = split(argv)?;
     let mut command = Command::new(prog);
@@ -173,6 +173,7 @@ pub async fn interactive(argv: &[&str]) -> Result<()> {
             .try_clone()
             .context("could not clone controlling terminal for stderr")?;
         command
+            .envs(env.iter().copied())
             .stdin(Stdio::from(tty))
             .stdout(Stdio::from(tty_stdout))
             .stderr(Stdio::from(tty_stderr));
@@ -187,6 +188,7 @@ pub async fn interactive(argv: &[&str]) -> Result<()> {
         use std::process::Stdio;
 
         command
+            .envs(envs.iter().copied())
             .stdin(Stdio::from(stdin))
             .stdout(Stdio::from(stdout))
             .stderr(Stdio::from(stderr));

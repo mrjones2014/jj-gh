@@ -24,6 +24,11 @@ This is like `jj log`, with PR number, CI status, and merge status added inline 
 
 ## 3. Create a PR from a revision
 
+> [!TIP]
+> `jj-gh` sets `JJ_GH="1"` in the editor process's environment; this can be
+> used to detect the `jj-gh` flow and apply tweaks to your editor specifically
+> for `jj-gh`, for example in Neovim, by checking `vim.env.JJ_GH ~= nil`.
+
 ```sh
 jj pr create <rev>
 ```
