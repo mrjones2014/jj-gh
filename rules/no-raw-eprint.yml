@@ -1,0 +1,12 @@
+id: no-raw-eprint
+language: Rust
+severity: error
+message: Use logging::ui and logging::confirm instead of raw eprint macros.
+note: >-
+  eprint! and eprintln! bypass the status-aware stderr writer, so their output can collide with a live status line. Use logging::ui for plain lines and logging::confirm for yes/no prompts.
+rule:
+  any:
+    - pattern: eprint!($$$ARGS)
+    - pattern: eprintln!($$$ARGS)
+    - pattern: std::eprint!($$$ARGS)
+    - pattern: std::eprintln!($$$ARGS)

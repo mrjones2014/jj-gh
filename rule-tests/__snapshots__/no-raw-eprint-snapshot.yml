@@ -1,0 +1,26 @@
+id: no-raw-eprint
+snapshots:
+  ? "eprint!(\"Apply this plan? [y/N] \");\n"
+  : labels:
+      - source: eprint!("Apply this plan? [y/N] ")
+        style: primary
+        start: 0
+        end: 34
+  ? "eprintln!(\"Aborted\");\n"
+  : labels:
+      - source: eprintln!("Aborted")
+        style: primary
+        start: 0
+        end: 20
+  ? "eprintln!(\"Created {} PRs\", count);\n"
+  : labels:
+      - source: eprintln!("Created {} PRs", count)
+        style: primary
+        start: 0
+        end: 34
+  ? "std::eprintln!(\"Aborted\");\n"
+  : labels:
+      - source: std::eprintln!("Aborted")
+        style: primary
+        start: 0
+        end: 25

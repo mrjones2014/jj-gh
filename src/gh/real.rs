@@ -24,7 +24,7 @@ use crate::{
 };
 use anyhow::{Context, Result, anyhow};
 use graphql_client::GraphQLQuery;
-use octocrab::Octocrab;
+use octocrab::{FromResponse, Octocrab};
 use secrecy::{ExposeSecret, SecretString};
 use std::collections::HashSet;
 
@@ -148,7 +148,7 @@ impl Gh for OctocrabGh {
             number: u64::try_from(pr.number).context("PR number out of range")?,
             html_url: pr.url,
             node_id: pr.id,
-            has_merge_queue: pr.merge_queue.is_some(),
+            base_has_merge_queue: pr.merge_queue.is_some(),
         })
     }
 
@@ -284,10 +284,11 @@ impl Gh for OctocrabGh {
         Ok(())
     }
 
-    async fn disable_auto_merge(&self, pr_node_id: &str) -> Result<()> {
+    async fn disable_auto_merge(&self, pr_node_id: &str, include_stack: bool) -> Result<()> {
         let _status = crate::ui::status::push("Disabling auto-merge");
         let vars = DisableAutoMergeVariables {
             pr_id: pr_node_id.to_string(),
+            include_stack,
         };
         let body = DisableAutoMergeInternal::build_query(vars);
         self.octo
@@ -312,91 +313,11 @@ impl Gh for OctocrabGh {
             .await
             .map_err(humanize)
             .with_context(|| format!("fetching PR #{number} on {owner}/{repo}"))?;
-        let GetPrInternalRepositoryPullRequest {
-            id,
-            number,
-            title,
-            url,
-            head_ref_name,
-            base_ref_name,
-            head_ref_oid,
-            base_ref_oid,
-            merge_queue,
-            head_repository,
-            labels,
-            is_draft,
-            auto_merge_request,
-            review_requests,
-            body,
-            stack,
-            stack_entry: _,
-        } = data
+        let pr = data
             .repository
             .and_then(|r| r.pull_request)
             .ok_or_else(|| anyhow!("PR #{number} not found on {owner}/{repo}"))?;
-        let (head_user_login, head_repo_name) = match head_repository {
-            Some(hr) => (Some(hr.owner.login), Some(hr.name)),
-            None => (None, None),
-        };
-        let stack_number = stack
-            .map(|s| u64::try_from(s.number))
-            .transpose()
-            .context("stack number out of range")?;
-        Ok(PrDetails {
-            number: u64::try_from(number).context("PR number out of range")?,
-            title,
-            is_draft,
-            html_url: url,
-            head_ref: head_ref_name,
-            base_ref: base_ref_name,
-            head_sha: head_ref_oid,
-            base_sha: base_ref_oid,
-            head_user_login,
-            head_repo_name,
-            graphql_node_id: id,
-            in_merge_queue: merge_queue.is_some(),
-            stack_number,
-            body,
-            labels: labels
-                .and_then(|labels| labels.nodes)
-                .map(|nodes| {
-                    nodes
-                        .into_iter()
-                        .flatten()
-                        .map(|label| Label {
-                            name: label.name,
-                            node_id: label.id,
-                        })
-                        .collect()
-                })
-                .unwrap_or_default(),
-            auto_merge: auto_merge_request.is_some(),
-            auto_merge_method: auto_merge_request.and_then(Into::into),
-            reviewers: review_requests
-                .and_then(|requests| requests.nodes)
-                .map(|nodes| {
-                    nodes
-                        .into_iter()
-                        .flatten()
-                        .filter_map(|node| node.requested_reviewer)
-                        .filter_map(|node| {
-                            let slug = match node {
-                                RequestedReviewer::User(user) => user.login,
-                                RequestedReviewer::Bot(clanker) => clanker.login,
-                                RequestedReviewer::Mannequin(mannequin) => mannequin.login,
-                                RequestedReviewer::Team(team) => team.combined_slug,
-                                RequestedReviewer::EnterpriseTeam(team) => team.combined_slug,
-                            };
-                            Reviewer::parse(&slug)
-                                .inspect_err(|e| {
-                                    log::warn!("dropping unparseable reviewer `{slug}`: {e}");
-                                })
-                                .ok()
-                        })
-                        .collect()
-                })
-                .unwrap_or_default(),
-        })
+        pr_details_from_graphql(pr)
     }
 
     async fn get_pr_diff(&self, owner: &str, repo: &str, number: u64) -> Result<String> {
@@ -409,11 +330,17 @@ impl Gh for OctocrabGh {
             .with_context(|| format!("fetching diff for {owner}/{repo}#{number}"))
     }
 
-    async fn enable_auto_merge(&self, pr_node_id: &str, method: AutoMergeMethod) -> Result<()> {
+    async fn enable_auto_merge(
+        &self,
+        pr_node_id: &str,
+        method: AutoMergeMethod,
+        include_stack: bool,
+    ) -> Result<()> {
         let _status = crate::ui::status::push("Enabling auto-merge");
         let vars = EnableAutoMergeVariables {
             pr_id: pr_node_id.to_string(),
             method: to_graphql_method(method),
+            include_stack,
         };
         let body = EnableAutoMergeInternal::build_query(vars);
         self.octo
@@ -552,19 +479,53 @@ impl Gh for OctocrabGh {
             .with_context(|| format!("creating stack in {owner}/{repo}"))
     }
 
-    async fn unstack_prs(
+    async fn append_to_stack(
         &self,
         owner: &str,
         repo: &str,
         stack_number: u64,
         pr_numbers: &[u64],
-    ) -> Result<()> {
+    ) -> Result<PullRequestStack> {
+        let _status = crate::ui::status::push("Adding PRs to stack");
+        let route = format!("/repos/{owner}/{repo}/stacks/{stack_number}/add");
+        let body = serde_json::json!({ "pull_requests": pr_numbers });
+        self.octo
+            .post::<_, PullRequestStack>(&route, Some(&body))
+            .await
+            .map_err(humanize)
+            .with_context(|| format!("adding PRs to stack #{stack_number} in {owner}/{repo}"))
+    }
+
+    async fn unstack_prs(
+        &self,
+        owner: &str,
+        repo: &str,
+        stack_number: u64,
+    ) -> Result<Option<PullRequestStack>> {
         let _status = crate::ui::status::push("Unstacking PRs");
         let route = format!("/repos/{owner}/{repo}/stacks/{stack_number}/unstack");
-        let body = serde_json::json!({ "pull_requests": pr_numbers });
-        post_no_content(&self.octo, &route, Some(&body))
+        let uri = http::Uri::try_from(route.as_str())
+            .with_context(|| format!("building URI for {route}"))?;
+        let response = self
+            .octo
+            ._post(uri, None::<&()>)
             .await
-            .with_context(|| format!("unstacking PRs from stack {stack_number} in {owner}/{repo}"))
+            .map_err(humanize)
+            .with_context(|| format!("POST {route}"))?;
+        let response = octocrab::map_github_error(response)
+            .await
+            .map_err(humanize)
+            .with_context(|| format!("POST {route}"))?;
+        // `http::Response::status`, not a process spawn.
+        // ast-grep-ignore: no-direct-process-spawn
+        if response.status() == http::StatusCode::NO_CONTENT {
+            return Ok(None);
+        }
+        let stack = PullRequestStack::from_response(response)
+            .await
+            .map_err(humanize)
+            .with_context(|| format!("reading unstack result for stack #{stack_number}"))?;
+        Ok(Some(stack))
     }
 
     async fn list_stacks(&self, owner: &str, repo: &str) -> Result<Vec<PullRequestStack>> {
@@ -576,6 +537,115 @@ impl Gh for OctocrabGh {
             .map_err(humanize)
             .with_context(|| format!("listing stacks in {owner}/{repo}"))
     }
+
+    async fn get_stack(&self, owner: &str, repo: &str, number: u64) -> Result<PullRequestStack> {
+        let _status = crate::ui::status::push(format!("Loading stack #{number}"));
+        let route = format!("/repos/{owner}/{repo}/stacks/{number}");
+        self.octo
+            .get::<PullRequestStack, _, _>(&route, None::<&()>)
+            .await
+            .map_err(humanize)
+            .with_context(|| format!("fetching stack #{number} in {owner}/{repo}"))
+    }
+}
+
+fn pr_details_from_graphql(pr: GetPrInternalRepositoryPullRequest) -> Result<PrDetails> {
+    let GetPrInternalRepositoryPullRequest {
+        id,
+        number,
+        title,
+        url,
+        head_ref_name,
+        base_ref_name,
+        head_ref_oid,
+        base_ref_oid,
+        merge_queue,
+        head_repository,
+        labels,
+        is_draft,
+        auto_merge_request,
+        stack_auto_merge_request,
+        review_requests,
+        body,
+        stack,
+        stack_entry,
+    } = pr;
+
+    let (head_user_login, head_repo_name) = match head_repository {
+        Some(hr) => (Some(hr.owner.login), Some(hr.name)),
+        None => (None, None),
+    };
+    let (stack_number, stack_base_ref) = match stack {
+        Some(stack) => (
+            Some(u64::try_from(stack.number).context("stack number out of range")?),
+            Some(stack.base_ref_name),
+        ),
+        None => (None, None),
+    };
+    let stack_position = stack_entry
+        .map(|entry| u64::try_from(entry.position))
+        .transpose()
+        .context("stack position out of range")?;
+
+    Ok(PrDetails {
+        number: u64::try_from(number).context("PR number out of range")?,
+        title,
+        is_draft,
+        html_url: url,
+        head_ref: head_ref_name,
+        base_ref: base_ref_name,
+        head_sha: head_ref_oid,
+        base_sha: base_ref_oid,
+        head_user_login,
+        head_repo_name,
+        graphql_node_id: id,
+        base_has_merge_queue: merge_queue.is_some(),
+        stack_number,
+        stack_base_ref,
+        stack_position,
+        body,
+        labels: labels
+            .and_then(|labels| labels.nodes)
+            .map(|nodes| {
+                nodes
+                    .into_iter()
+                    .flatten()
+                    .map(|label| Label {
+                        name: label.name,
+                        node_id: label.id,
+                    })
+                    .collect::<Vec<Label>>()
+            })
+            .unwrap_or_default(),
+        auto_merge_request: auto_merge_request.map(TryInto::try_into).transpose()?,
+        stack_auto_merge_request: stack_auto_merge_request
+            .map(TryInto::try_into)
+            .transpose()?,
+        reviewers: review_requests
+            .and_then(|requests| requests.nodes)
+            .map(|nodes| {
+                nodes
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|node| node.requested_reviewer)
+                    .filter_map(|node| {
+                        let slug = match node {
+                            RequestedReviewer::User(user) => user.login,
+                            RequestedReviewer::Bot(clanker) => clanker.login,
+                            RequestedReviewer::Mannequin(mannequin) => mannequin.login,
+                            RequestedReviewer::Team(team) => team.combined_slug,
+                            RequestedReviewer::EnterpriseTeam(team) => team.combined_slug,
+                        };
+                        Reviewer::parse(&slug)
+                            .inspect_err(|e| {
+                                log::warn!("dropping unparseable reviewer `{slug}`: {e}");
+                            })
+                            .ok()
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+    })
 }
 
 fn is_local_pull(pr: &PrWithCiStatus, head_owner: &str) -> bool {
@@ -809,10 +879,14 @@ mod tests {
             "number": 7,
             "pull_requests": [
                 {
-                    "number": 101
+                    "number": 101,
+                    "state": "MERGED",
+                    "merged_at": "2026-11-20T12:00:00Z"
                 },
                 {
-                    "number": 102
+                    "number": 102,
+                    "state": "OPEN",
+                    "merged_at": null
                 }
             ]
         });
@@ -830,7 +904,7 @@ mod tests {
             "pull_requests": []
         });
         let stack = serde_json::from_value::<PullRequestStack>(json).unwrap();
-        assert!(stack.pull_requests.is_empty());
+        assert_eq!(stack.pull_requests, vec![]);
     }
 
     #[test]

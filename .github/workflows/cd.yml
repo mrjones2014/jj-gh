@@ -1,5 +1,7 @@
 name: cd
 on:
+  push:
+    branches: [master]
   release:
     types: [published]
   # Manual run to (re)cache and pin an existing release without republishing.
@@ -47,6 +49,47 @@ jobs:
           locked: true
           checksum: sha256
           include: ${{ matrix.include }}
+  # Publish the PR-editor frontmatter schema as a release asset
+  # Pushes to master refresh the rolling `nightly` pre-release.
+  upload-schema:
+    if: github.event_name == 'push' || github.event_name == 'release'
+    concurrency:
+      group: frontmatter-schema-${{ github.ref }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name || github.ref }}
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
+      - uses: cachix/cachix-action@v17
+        with:
+          name: jj-gh
+          extraPullNames: nix-community
+      - name: Generate schema
+        run: nix run . -- config frontmatter-schema > frontmatter.schema.json
+      - name: Upload to the nightly pre-release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if ! gh release view nightly >/dev/null 2>&1; then
+            gh release create nightly --prerelease --title nightly \
+              --notes "Rolling JSON schema for the jj-gh PR editor frontmatter. Updated on every push to master."
+          fi
+          gh release upload nightly frontmatter.schema.json --clobber
+      - name: Attach schema to the release
+        if: github.event_name == 'release' && github.event.release.tag_name != 'nightly'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$TAG" frontmatter.schema.json --clobber
   # Move the `stable` branch to each new release, so that a Nix flake can
   # use `github:mrjones2014/jj-gh/stable` as an input and get the latest
   # release. The push is not a force push, so it can only move the branch
@@ -69,7 +112,7 @@ jobs:
   # the result. Repinning the same name with --keep-revisions 2 keeps the
   # current and previous release safe from garbage collection.
   cache-nix-packages:
-    if: ${{ github.event_name == 'workflow_dispatch' || !github.event.release.prerelease }}
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'release' && !github.event.release.prerelease) }}
     strategy:
       fail-fast: false
       matrix:

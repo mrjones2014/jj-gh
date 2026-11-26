@@ -25,11 +25,13 @@ use crate::{
         pr_lookup::{MissingPr, resolve_pr_targets},
         remote,
         stack_create::{
-            ChainOutcome, ChainResult, create_stacks, stack_exists, stack_members, unstack,
+            ChainOutcome, ChainResult, append_candidate, apply_unstack_result, create_stacks,
+            stack_exists, stack_members, stacks_blocked_by_auto_merge, unstack,
         },
         stack_detect::{BasePlan, LocalShape, detect},
     },
     jj::{Jj, PushedBookmark},
+    logging,
     model::Model,
     ui::{PrLinks, Stream},
 };
@@ -37,7 +39,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use jj_gh_config_derive::subcommand_args;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
-use std::io::{self, IsTerminal, Write};
+use std::io::{self, IsTerminal};
 
 /// Everything this command prints is UI: the plan, the prompt, the progress
 /// lines. Only `--json` is a result, and it goes to stdout.
@@ -183,16 +185,20 @@ async fn reconcile(model: &impl Model, args: &StackArgs) -> Result<()> {
     }
 
     if plan.is_empty() {
-        eprintln!("Everything already matches the local graph");
+        logging::ui!("Everything already matches the local graph");
         return Ok(());
     }
 
     let links = PrLinks::from_details(&ctx.pr_details);
     show_graph(args, &ctx).await;
-    print_plan(&plan, &ctx.pr_details, &links);
+    print_plan(&plan, &ctx.pr_details, &links, &ctx.existing_stacks);
+    warn_auto_merge_cancelled(
+        &stacks_blocked_by_auto_merge(&plan.chains, &ctx.pr_details, &ctx.existing_stacks),
+        &ctx.existing_stacks,
+    );
 
     if args.dry_run {
-        eprintln!("\n{}Dry run: nothing was changed{}", on(DIM), on(RESET));
+        logging::ui!("\n{}Dry run: nothing was changed{}", on(DIM), on(RESET));
         return Ok(());
     }
     // Outside a terminal there is nobody to answer the prompt, so the safe
@@ -200,7 +206,7 @@ async fn reconcile(model: &impl Model, args: &StackArgs) -> Result<()> {
     // so that is the stream that has to be a terminal.
     let interactive = io::stdin().is_terminal() && io::stderr().is_terminal();
     if !args.force && !interactive {
-        eprintln!(
+        logging::ui!(
             "\n{}Not a TTY, so nothing was changed. Pass --force to apply.{}",
             on(DIM),
             on(RESET),
@@ -209,8 +215,8 @@ async fn reconcile(model: &impl Model, args: &StackArgs) -> Result<()> {
     }
     // Reaching the apply step means either `--force` or an interactive `y`;
     // both mean "yes, including unstacking whatever is in the way".
-    if !args.force && !confirm()? {
-        eprintln!("Aborted");
+    if !args.force && !logging::confirm!("\nApply this plan? [y/N] ")? {
+        logging::ui!("Aborted");
         return Ok(());
     }
 
@@ -242,7 +248,7 @@ async fn gather(model: &impl Model, args: &StackArgs) -> Result<Option<Gathered>
         .collect::<Vec<String>>();
     if branch_names.is_empty() {
         drop(status);
-        eprintln!("No bookmarks are tracked on `{remote_name}`");
+        logging::ui!("No bookmarks are tracked on `{remote_name}`");
         return Ok(None);
     }
 
@@ -256,7 +262,7 @@ async fn gather(model: &impl Model, args: &StackArgs) -> Result<Option<Gathered>
         .await?;
     if prs.is_empty() {
         drop(status);
-        eprintln!("No local PRs found");
+        logging::ui!("No local PRs found");
         return Ok(None);
     }
 
@@ -305,11 +311,20 @@ async fn build_plan(jj: &impl Jj, args: &StackArgs, ctx: &Gathered) -> Result<Pl
         .collect::<Vec<BasePlan>>();
 
     let retargeting = bases.iter().map(|b| b.pr_number).collect::<HashSet<u64>>();
+    let appendable = ctx
+        .shape
+        .chains
+        .iter()
+        .filter_map(|chain| {
+            append_candidate(&ctx.existing_stacks, chain).map(|(stack, _)| stack.number)
+        })
+        .collect::<HashSet<u64>>();
     let unstack = prs_to_unstack(
         &ctx.shape.chains,
         &ctx.pr_details,
         &ctx.existing_stacks,
         &retargeting,
+        &appendable,
     );
 
     // A chain needs (re)creating when GitHub does not have it verbatim, or
@@ -374,14 +389,15 @@ async fn build_plan(jj: &impl Jj, args: &StackArgs, ctx: &Gathered) -> Result<Pl
 /// - **b.** needs its base ref moved, which GitHub refuses while it is stacked;
 /// - **c.** sits in a stack that no longer has the shape of its chain.
 ///
-/// Only PRs in `pr_details` are considered and only they are returned, so a
-/// stack member with no local bookmark keeps its membership rather than being
-/// silently unstacked.
+/// Only PRs in `pr_details` are considered and only they are returned. A stack
+/// with an open nonlocal member is rejected by [`unstack`] rather than being
+/// silently reshaped, so such a stack never reaches this point in `apply`.
 fn prs_to_unstack(
     chains: &[Vec<u64>],
     pr_details: &[PrDetails],
     existing_stacks: &[PullRequestStack],
     retargeting: &HashSet<u64>,
+    appendable: &HashSet<u64>,
 ) -> Vec<u64> {
     let members_of = existing_stacks
         .iter()
@@ -392,10 +408,14 @@ fn prs_to_unstack(
         .iter()
         .filter_map(|pr| {
             let stack_number = pr.stack_number?;
-            let bad = match chains.iter().find(|chain| chain.contains(&pr.number)) {
-                None => true,
-                Some(_) if retargeting.contains(&pr.number) => true,
-                Some(chain) => members_of.get(&stack_number).is_none_or(|m| m != chain),
+            let bad = if appendable.contains(&stack_number) {
+                false
+            } else {
+                match chains.iter().find(|chain| chain.contains(&pr.number)) {
+                    None => true,
+                    Some(_) if retargeting.contains(&pr.number) => true,
+                    Some(chain) => members_of.get(&stack_number).is_none_or(|m| m != chain),
+                }
             };
             bad.then_some(stack_number)
         })
@@ -519,7 +539,12 @@ fn prs_leaving_stacks(plan: &Plan) -> Vec<u64> {
         .collect()
 }
 
-fn print_plan(plan: &Plan, pr_details: &[PrDetails], links: &PrLinks) {
+fn print_plan(
+    plan: &Plan,
+    pr_details: &[PrDetails],
+    links: &PrLinks,
+    existing_stacks: &[PullRequestStack],
+) {
     let title_of = pr_details
         .iter()
         .map(|pr| (pr.number, pr.title.as_str()))
@@ -535,7 +560,7 @@ fn print_plan(plan: &Plan, pr_details: &[PrDetails], links: &PrLinks) {
                 .remote_commit_id
                 .as_deref()
                 .map_or("(not on remote)".to_string(), short_sha);
-            eprintln!(
+            logging::ui!(
                 "  {}{}{}  {} {}->{} {}",
                 on(MAGENTA),
                 push.bookmark,
@@ -573,7 +598,7 @@ fn print_plan(plan: &Plan, pr_details: &[PrDetails], links: &PrLinks) {
                 base.proposed_base,
                 on(RESET),
             );
-            eprintln!("  {}", links.link(UI, base.pr_number, &line));
+            logging::ui!("  {}", links.link(UI, base.pr_number, &line));
         }
     }
 
@@ -585,6 +610,8 @@ fn print_plan(plan: &Plan, pr_details: &[PrDetails], links: &PrLinks) {
     for chain in &plan.chains {
         let detail = if chain.iter().any(|number| rebuilt.contains(number)) {
             "(an existing stack will be recreated)"
+        } else if append_candidate(existing_stacks, chain).is_some() {
+            "(an existing stack will be extended)"
         } else {
             "(a new stack will be created)"
         };
@@ -602,12 +629,12 @@ fn print_plan(plan: &Plan, pr_details: &[PrDetails], links: &PrLinks) {
         }
         // Worth spelling out: these are the ones that do not come back, and
         // the reason is local, so the user can tell it from a mistake.
-        eprintln!(
+        logging::ui!(
             "  {}These are no longer part of a local chain, so they leave{}",
             on(DIM),
             on(RESET),
         );
-        eprintln!("  {}their stack for good.{}", on(DIM), on(RESET));
+        logging::ui!("  {}their stack for good.{}", on(DIM), on(RESET));
     }
 }
 
@@ -617,9 +644,9 @@ fn section(first: &mut bool, label: &str, detail: &str) {
     if *first {
         *first = false;
     } else {
-        eprintln!();
+        logging::ui!("");
     }
-    eprintln!("{}{label}{} {detail}:", on(DIM), on(RESET));
+    logging::ui!("{}{label}{} {detail}:", on(DIM), on(RESET));
 }
 
 /// `#123  title`, with the whole row hyperlinked to the PR.
@@ -630,7 +657,7 @@ fn print_pr_line(links: &PrLinks, number: u64, title: &str) {
         links.underlined_number(UI, number),
         on(RESET),
     );
-    eprintln!("  {}", links.link(UI, number, &line));
+    logging::ui!("  {}", links.link(UI, number, &line));
 }
 
 /// Apply the plan. Unstack first so base refs can move, then move them, then
@@ -658,24 +685,21 @@ async fn apply(model: &impl Model, ctx: Gathered, plan: Plan) -> Result<()> {
     // base-ref change on a PR that is in a stack. The stacks are rebuilt below.
     if !plan.unstack.is_empty() {
         let status = crate::ui::status::push("Unstacking PRs");
-        let unstacked = unstack(gh, &target, &plan.unstack, &pr_details).await?;
+        // The plan was shown and confirmed above, so that consent covers
+        // cancelling any auto-merge request that a reshape tears down.
+        let outcome = unstack(
+            gh,
+            &target,
+            &plan.unstack,
+            &pr_details,
+            &existing_stacks,
+            true,
+        )
+        .await?;
         drop(status);
+        apply_unstack_result(&outcome, &mut pr_details, &mut existing_stacks);
 
-        // Mirror the unstack locally so the create step neither re-issues an
-        // unstack for a PR already removed, nor skips a chain as
-        // "already exists" when we just dissolved its stack.
-        let done = unstacked.iter().copied().collect::<HashSet<u64>>();
-        let dissolved = pr_details
-            .iter()
-            .filter(|pr| done.contains(&pr.number))
-            .filter_map(|pr| pr.stack_number)
-            .collect::<HashSet<u64>>();
-        for pr in pr_details.iter_mut().filter(|pr| done.contains(&pr.number)) {
-            pr.stack_number = None;
-        }
-        existing_stacks.retain(|stack| !dissolved.contains(&stack.number));
-
-        for &number in &unstacked {
+        for &number in &outcome.unstacked {
             log::info!("{} unstacked", links.number(UI, number));
         }
     }
@@ -726,7 +750,15 @@ async fn apply(model: &impl Model, ctx: Gathered, plan: Plan) -> Result<()> {
 
     if !plan.chains.is_empty() {
         let status = crate::ui::status::push("Creating stacks");
-        let results = create_stacks(gh, &target, &plan.chains, &pr_details, &existing_stacks).await;
+        let results = create_stacks(
+            gh,
+            &target,
+            &plan.chains,
+            &pr_details,
+            &existing_stacks,
+            true,
+        )
+        .await;
         drop(status);
         print_stack_results(&links, &results?);
     }
@@ -788,13 +820,13 @@ async fn explicit(model: &impl Model, args: &StackArgs) -> Result<()> {
         return Ok(());
     }
     if args.dry_run {
-        eprintln!(
+        logging::ui!(
             "{}Stack{}: {}",
             on(DIM),
             on(RESET),
             format_chain(&links, &chain)
         );
-        eprintln!("\n{}Dry run: nothing was changed{}", on(DIM), on(RESET));
+        logging::ui!("\n{}Dry run: nothing was changed{}", on(DIM), on(RESET));
         return Ok(());
     }
 
@@ -804,8 +836,15 @@ async fn explicit(model: &impl Model, args: &StackArgs) -> Result<()> {
 
     let status = crate::ui::status::push("Loading existing stacks");
     let existing_stacks = gh.list_stacks(&target.owner, &target.repo).await?;
-    status.set_message("Creating stack");
-    let results = create_stacks(gh, &target, &[chain], &pr_details, &existing_stacks).await;
+    drop(status);
+    // Naming the PRs is the confirmation here, so a warning is enough; the
+    // same consent lets the reshape cancel an existing auto-merge request.
+    warn_auto_merge_cancelled(
+        &stacks_blocked_by_auto_merge(std::slice::from_ref(&chain), &pr_details, &existing_stacks),
+        &existing_stacks,
+    );
+    let status = crate::ui::status::push("Creating stack");
+    let results = create_stacks(gh, &target, &[chain], &pr_details, &existing_stacks, true).await;
     drop(status);
     print_stack_results(&links, &results?);
 
@@ -841,13 +880,43 @@ async fn push_stale(jj: &impl Jj, pr_details: &[PrDetails], remote_name: &str) -
     Ok(())
 }
 
-fn confirm() -> Result<bool> {
-    eprint!("\nApply this plan? [y/N] ");
-    io::stderr().flush()?;
-    let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
-    let response = input.trim().to_lowercase();
-    Ok(response == "y" || response == "yes")
+/// Warn that reshaping the named stacks will cancel their auto-merge
+/// requests. `pr stack` shows this alongside its normal plan confirmation;
+/// `pr create` shows it before its dedicated prompt.
+pub(crate) fn warn_auto_merge_cancelled(stacks: &[u64], existing_stacks: &[PullRequestStack]) {
+    if stacks.is_empty() {
+        return;
+    }
+    let mut names = Vec::new();
+    for stack in existing_stacks {
+        if stacks.contains(&stack.number) {
+            let prs = stack
+                .pull_requests
+                .iter()
+                .map(|pr| format!("#{}", pr.number))
+                .collect::<Vec<_>>()
+                .join(", ");
+            names.push(format!("stack #{} ({prs})", stack.number));
+        }
+    }
+    log::warn!(
+        "reshaping {} will cancel its auto-merge request",
+        names.join(", ")
+    );
+}
+
+/// For `pr create`: warn and ask before a reshape cancels an existing
+/// auto-merge request. Returns `false` on a negative answer or outside a
+/// terminal, so linking stops while the created PRs stay in place.
+pub(crate) fn confirm_cancel_auto_merge(
+    stacks: &[u64],
+    existing_stacks: &[PullRequestStack],
+) -> Result<bool> {
+    warn_auto_merge_cancelled(stacks, existing_stacks);
+    if stacks.is_empty() {
+        return Ok(true);
+    }
+    logging::confirm!("\nCancel auto-merge and continue linking? [y/N] ")
 }
 
 /// Emit the ANSI code only when stderr, where all of this UI goes, is a
@@ -876,8 +945,17 @@ pub(crate) fn print_stack_results(links: &PrLinks, results: &[ChainResult]) {
         for number in &result.retargeted {
             log::debug!("retargeted #{number}'s base ref to make {chain} chain");
         }
-        match result.outcome {
+        match &result.outcome {
             ChainOutcome::Created(_) => log::info!("Stack created: {chain}"),
+            ChainOutcome::Appended { added, .. } => log::info!(
+                "Stack extended: {} (+ {})",
+                chain,
+                added
+                    .iter()
+                    .map(|n| format!("#{n}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
             ChainOutcome::AlreadyExists => log::info!("Already stacked: {chain}"),
         }
     }
@@ -895,7 +973,11 @@ mod tests {
             number,
             pull_requests: prs
                 .iter()
-                .map(|&number| StackPullRequest { number })
+                .map(|&number| StackPullRequest {
+                    number,
+                    state: "open".into(),
+                    merged_at: None,
+                })
                 .collect(),
         }
     }
@@ -909,17 +991,19 @@ mod tests {
             title: format!("PR {number}"),
             html_url: format!("https://github.com/o/r/pull/{number}"),
             is_draft: false,
-            auto_merge: false,
-            auto_merge_method: None,
+            auto_merge_request: None,
+            stack_auto_merge_request: None,
             base_sha: "base".into(),
             head_user_login: None,
             head_repo_name: None,
             graphql_node_id: format!("node_{number}"),
-            in_merge_queue: false,
+            base_has_merge_queue: false,
             labels: vec![],
             reviewers: vec![],
             body: String::new(),
             stack_number,
+            stack_base_ref: None,
+            stack_position: None,
         }
     }
 
@@ -1020,6 +1104,14 @@ mod tests {
         async fn pr_diff(&self, _base_oid: &str, _head_oid: &str) -> Result<String> {
             unimplemented!()
         }
+        async fn push_bookmarks(
+            &self,
+            _bookmarks: &[String],
+            _remote: String,
+            _allow_private: bool,
+        ) -> Result<()> {
+            unimplemented!()
+        }
     }
 
     #[tokio::test]
@@ -1076,7 +1168,13 @@ mod tests {
         // #1 merged out of stack #11, leaving #2 alone in it.
         let prs = [pr(2, Some(11)), pr(3, None)];
         assert_eq!(
-            prs_to_unstack(&[], &prs, &[stack(11, &[2])], &retargeting(&[])),
+            prs_to_unstack(
+                &[],
+                &prs,
+                &[stack(11, &[2])],
+                &retargeting(&[]),
+                &HashSet::new()
+            ),
             vec![2]
         );
     }
@@ -1088,7 +1186,13 @@ mod tests {
         let prs = [pr(1, Some(7)), pr(2, Some(7))];
         let existing = [stack(7, &[1, 2])];
         assert_eq!(
-            prs_to_unstack(&[vec![1, 2]], &prs, &existing, &retargeting(&[2])),
+            prs_to_unstack(
+                &[vec![1, 2]],
+                &prs,
+                &existing,
+                &retargeting(&[2]),
+                &HashSet::new()
+            ),
             vec![1, 2]
         );
     }
@@ -1098,7 +1202,13 @@ mod tests {
         let prs = [pr(1, Some(7)), pr(2, Some(7))];
         let existing = [stack(7, &[1, 2])];
         assert_eq!(
-            prs_to_unstack(&[vec![1, 2]], &prs, &existing, &retargeting(&[])),
+            prs_to_unstack(
+                &[vec![1, 2]],
+                &prs,
+                &existing,
+                &retargeting(&[]),
+                &HashSet::new()
+            ),
             [] as [u64; 0]
         );
     }
@@ -1109,7 +1219,13 @@ mod tests {
         let prs = [pr(1, Some(7)), pr(2, Some(7)), pr(3, None)];
         let existing = [stack(7, &[1, 2])];
         assert_eq!(
-            prs_to_unstack(&[vec![1, 2, 3]], &prs, &existing, &retargeting(&[])),
+            prs_to_unstack(
+                &[vec![1, 2, 3]],
+                &prs,
+                &existing,
+                &retargeting(&[]),
+                &HashSet::new()
+            ),
             vec![1, 2]
         );
     }
@@ -1121,7 +1237,7 @@ mod tests {
         let prs = [pr(1, Some(7))];
         let existing = [stack(7, &[1, 99])];
         assert_eq!(
-            prs_to_unstack(&[], &prs, &existing, &retargeting(&[])),
+            prs_to_unstack(&[], &prs, &existing, &retargeting(&[]), &HashSet::new()),
             vec![1]
         );
     }

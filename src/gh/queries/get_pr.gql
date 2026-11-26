@@ -16,9 +16,19 @@ query GetPrInternal($owner: String!, $name: String!, $number: Int!) {
       }
       autoMergeRequest {
         mergeMethod
+        pullRequest {
+          number
+        }
+      }
+      stackAutoMergeRequest: autoMergeRequest(includeStack: true) {
+        mergeMethod
+        pullRequest {
+          number
+        }
       }
       stack {
         number
+        baseRefName
       }
       stackEntry {
         position

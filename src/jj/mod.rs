@@ -111,6 +111,20 @@ pub trait Jj {
         allow_private: bool,
     ) -> Result<()>;
 
+    /// Push a set of bookmarks to `remote` in a single subprocess:
+    /// `jj git push --remote <remote> -b b1 -b b2 ...`. With `allow_private`,
+    /// passes `--allow-private`.
+    ///
+    /// # Errors
+    ///
+    /// Propagates jj failures.
+    async fn push_bookmarks(
+        &self,
+        bookmarks: &[String],
+        remote: String,
+        allow_private: bool,
+    ) -> Result<()>;
+
     /// The `git.private-commits` revset from jj config, or `Ok(None)` when the
     /// setting is unset. jj refuses to push commits matching this revset
     /// unless `--allow-private` is given.

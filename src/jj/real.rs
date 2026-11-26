@@ -174,6 +174,30 @@ impl Jj for JjCli {
         run_jj_passthrough(&refs).await.context("pushing revision")
     }
 
+    async fn push_bookmarks(
+        &self,
+        bookmarks: &[String],
+        remote: String,
+        allow_private: bool,
+    ) -> Result<()> {
+        let mut argv = vec![
+            "git".into(),
+            "push".into(),
+            "--remote".into(),
+            remote.clone(),
+        ];
+        for b in bookmarks {
+            argv.extend(["-b".into(), b.into()]);
+        }
+        if allow_private {
+            argv.push("--allow-private".into());
+        }
+        let refs = argv.iter().map(String::as_str).collect::<Vec<&str>>();
+        run_jj_passthrough(&refs)
+            .await
+            .with_context(|| format!("pushing {} bookmark(s) to `{remote}`", bookmarks.len()))
+    }
+
     async fn private_commits_revset(&self) -> Result<Option<String>> {
         let _status = crate::ui::status::push("Reading jj config");
         let Ok(stdout) = run_jj(&["config", "get", "git.private-commits"]).await else {
@@ -410,6 +434,22 @@ fn pr_diff_argv(base_oid: &str, head_oid: &str) -> Vec<String> {
 mod tests {
     use super::*;
 
+    fn push_bookmarks_argv(bookmarks: &[String], remote: &str, allow_private: bool) -> Vec<String> {
+        let mut argv = vec![
+            "git".into(),
+            "push".into(),
+            "--remote".into(),
+            remote.into(),
+        ];
+        for b in bookmarks {
+            argv.extend(["-b".into(), b.into()]);
+        }
+        if allow_private {
+            argv.push("--allow-private".into());
+        }
+        argv
+    }
+
     #[test]
     fn eval_template_argv_minimal() {
         let argv = eval_template_argv("@", "description", None, false, false);
@@ -497,6 +537,44 @@ mod tests {
                 "--to",
                 "head",
                 "--color=never",
+            ]
+        );
+    }
+
+    #[test]
+    fn push_bookmarks_argv_single() {
+        assert_eq!(
+            push_bookmarks_argv(&["feature".into()], "origin", false),
+            vec!["git", "push", "--remote", "origin", "-b", "feature"]
+        );
+    }
+
+    #[test]
+    fn push_bookmarks_argv_multiple() {
+        assert_eq!(
+            push_bookmarks_argv(
+                &["feat-a".into(), "feat-b".into(), "feat-c".into()],
+                "origin",
+                false
+            ),
+            vec![
+                "git", "push", "--remote", "origin", "-b", "feat-a", "-b", "feat-b", "-b", "feat-c"
+            ]
+        );
+    }
+
+    #[test]
+    fn push_bookmarks_argv_with_allow_private() {
+        assert_eq!(
+            push_bookmarks_argv(&["feature".into()], "origin", true),
+            vec![
+                "git",
+                "push",
+                "--remote",
+                "origin",
+                "-b",
+                "feature",
+                "--allow-private"
             ]
         );
     }

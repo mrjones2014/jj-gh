@@ -1,14 +1,16 @@
 use crate::{
     cli::GlobalOpts,
-    config::{self, AutoMergeMethod, DefaultTitleSource},
+    commands::pr::auto_merge::{AutoMergeTarget, CreatedAutoMerge},
+    config::{self, AutoMergeMethod, AutoMergeMode, DefaultTitleSource},
     editor::{self, ApplyChangesCtx},
     frontmatter::Frontmatter,
     fs::RealFs,
-    gh::{CreatePrRequest, Gh, remote},
+    gh::{CreatePrRequest, Gh, PrDetails, remote, stack_detect},
     jj::{
         self, Jj,
         inject::{TemplateAliases, quote_jj},
     },
+    logging,
     model::Model,
     template::{self, TemplateSource},
     ui::{PrLinks, Stream},
@@ -24,6 +26,12 @@ mod title_picker;
 struct CreatedPr {
     number: u64,
     html_url: String,
+    /// Bookmark name for the PR's head branch (always set for created PRs;
+    /// `None` for already-open PRs where we didn't create the branch).
+    bookmark: Option<String>,
+    /// Auto-merge intent from the editor frontmatter, applied only after stack
+    /// linking. `None` for an already-open PR, which create never modifies.
+    auto_merge: Option<CreatedAutoMerge>,
 }
 
 /// jj template rendering one `<change id> <description first line>` row per
@@ -34,7 +42,7 @@ const PRIVATE_LISTING_TEMPLATE: &str =
 subcommand_args! {
     pub struct CreateArgs {
         /// Revision(s) to create PR(s) from. Pass multiple revisions to create a stack.
-        #[arg(value_name = "REV", required = true)]
+        #[arg(value_name = "REV", required = true, value_parser = reject_reserved_rev)]
         pub revs: Vec<String>,
 
         /// Override the base bookmark. Default: closest ancestor bookmark on
@@ -59,17 +67,20 @@ subcommand_args! {
         #[arg(long, conflicts_with = "draft")]
         pub no_draft: bool,
 
-        /// Enable auto-merge on the PR after creation (merges once required checks
-        /// pass). Overrides config (default: `auto_merge = false`). Use
-        /// `--no-auto-merge` to force no auto-merge.
+        /// Enable auto-merge on the PR after creation. Bare flag means
+        /// `infer`: the whole GitHub stack when stacked, otherwise this PR.
+        /// Overrides config (default: `auto_merge = false`). Explicit values
+        /// require `=` (`--auto-merge=all`, `=below`, `=infer`, `=false`).
         #[arg(
             long,
-            num_args = 0,
-            default_missing_value = "true",
+            num_args = 0..=1,
+            require_equals = true,
+            value_enum,
+            default_missing_value = "infer",
             default_value_if("no_auto_merge", "true", Some("false"))
         )]
         #[config]
-        pub auto_merge: bool,
+        pub auto_merge: AutoMergeMode,
 
         /// Disable auto-merge on the created PR. Overrides config.
         #[arg(long, conflicts_with = "auto_merge")]
@@ -170,6 +181,21 @@ subcommand_args! {
         #[arg(long = "no-stack", conflicts_with = "auto_stack")]
         pub no_stack: bool,
 
+        /// Push bookmarks of detected stack members before creating PRs.
+        /// Default: true. Use `--no-push` to disable.
+        #[arg(
+            long = "push",
+            num_args = 0,
+            default_missing_value = "true",
+            default_value_if("no_push", "true", Some("false"))
+        )]
+        #[config]
+        pub auto_push: bool,
+
+        /// Do not push bookmarks of existing stack members. Overrides config.
+        #[arg(long = "no-push", conflicts_with = "auto_push")]
+        pub no_push: bool,
+
         /// Skip the private-commit check and pass `--allow-private` to
         /// `jj git push`, pushing commits that match the jj
         /// `git.private-commits` revset.
@@ -178,11 +204,26 @@ subcommand_args! {
     }
 }
 
+/// Revisions named like auto-merge values are reserved so that the space form
+/// `--auto-merge all` fails at parse time instead of silently meaning a bare
+/// `--auto-merge` plus a revision called `all`. The explicit form is
+/// `--auto-merge=all`.
+fn reject_reserved_rev(value: &str) -> Result<String, String> {
+    if AutoMergeMode::from_keyword(value).is_some() {
+        Err(format!(
+            "`{value}` is an auto-merge value; use `--auto-merge={value}` to select it"
+        ))
+    } else {
+        Ok(value.to_string())
+    }
+}
+
 /// Run the full pr-create flow.
 ///
 /// # Errors
 ///
 /// Returns an error from any step (rev resolution, GH API, push, editor, etc.).
+#[expect(clippy::too_many_lines)]
 pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
     let jj = model.jj();
     let gh = model.gh().await?;
@@ -218,6 +259,9 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
         // stack linking control
         no_stack: _,
         auto_stack,
+        // push control
+        no_push: _,
+        auto_push,
         allow_private,
         // title source
         default_title_source,
@@ -255,25 +299,41 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
             default_title_source,
             &remote,
             &target,
+            *auto_stack,
+            *auto_push,
+            &created_prs,
         )
         .await?;
         created_prs.push(created);
     }
 
-    // A summary block we format ourselves, so it goes to stderr directly rather
+    // A summary block we format ourselves, so it goes out as plain UI rather
     // than through the logger, which would prefix and recolor every line.
     if created_prs.len() > 1 {
         let links = created_prs
             .iter()
             .map(|pr| (pr.number, pr.html_url.clone()))
             .collect::<PrLinks>();
-        eprintln!("\nCreated {} PRs:", created_prs.len());
+        logging::ui!("\nCreated {} PRs:", created_prs.len());
         for pr in &created_prs {
-            eprintln!("  {}", links.number(Stream::Stderr, pr.number));
+            logging::ui!("  {}", links.number(Stream::Stderr, pr.number));
         }
     }
 
+    let auto_merge_requests = created_prs
+        .iter()
+        .filter_map(|pr| pr.auto_merge.clone())
+        .collect::<Vec<_>>();
+
     if !*auto_stack {
+        // No linking to wait for: each PR is its own endpoint.
+        crate::commands::pr::auto_merge::apply_created_auto_merge(
+            gh,
+            &target,
+            &auto_merge_requests,
+            None,
+        )
+        .await?;
         return Ok(());
     }
 
@@ -283,11 +343,68 @@ pub async fn run(model: &impl Model, args: &CreateArgs) -> Result<()> {
     let status = crate::ui::status::push("Detecting stack chains");
     let (pr_details, head_to_local) =
         gather_stack_inputs(jj, gh, &remote, &target, &created_prs).await?;
-    let results = link_stacks(gh, jj, &target, &pr_details, &head_to_local).await?;
+    let outcome = link_stacks(gh, jj, &target, &pr_details, &head_to_local).await;
     drop(status);
-    crate::commands::pr::stack::print_stack_results(&PrLinks::from_details(&pr_details), &results);
 
+    finish_after_linking(gh, &target, &pr_details, &auto_merge_requests, outcome).await
+}
+
+/// Print the linking result and apply deferred auto-merge when linking
+/// succeeded. A failure or declined confirmation leaves the PRs in place but
+/// skips auto-merge, since the stack topology they would use is unknown.
+async fn finish_after_linking(
+    gh: &impl Gh,
+    target: &crate::gh::remote::Target,
+    pr_details: &[crate::gh::PrDetails],
+    auto_merge_requests: &[CreatedAutoMerge],
+    outcome: Result<LinkOutcome>,
+) -> Result<()> {
+    let links = PrLinks::from_details(pr_details);
+    match outcome {
+        Ok(LinkOutcome::Linked(results)) => {
+            crate::commands::pr::stack::print_stack_results(&links, &results);
+            // Linking populates `stack_number`; re-read it so the auto-merge
+            // request goes through the resulting GitHub stack's tip.
+            let numbers = pr_details.iter().map(|pr| pr.number).collect::<Vec<_>>();
+            let linked = fetch_pr_details(gh, target, &numbers).await;
+            crate::commands::pr::auto_merge::apply_created_auto_merge(
+                gh,
+                target,
+                auto_merge_requests,
+                Some(&linked),
+            )
+            .await?;
+        }
+        Ok(LinkOutcome::NoChains) => {
+            crate::commands::pr::stack::print_stack_results(&links, &[]);
+            crate::commands::pr::auto_merge::apply_created_auto_merge(
+                gh,
+                target,
+                auto_merge_requests,
+                None,
+            )
+            .await?;
+        }
+        Ok(LinkOutcome::Skipped) => {
+            log::info!("Skipping auto-merge; the PRs were still created");
+        }
+        Err(e) => {
+            log::warn!("Failed to link PR stacks: {e:#}");
+            log::info!("Skipping auto-merge; the PRs were still created");
+        }
+    }
     Ok(())
+}
+
+/// Synthesized pre-edit frontmatter: everything `create_pr` already set is
+/// carried over, so only labels/reviewers are applied here. Auto-merge is
+/// intentionally unchanged; it is applied later, after stack linking.
+fn metadata_before_fm(final_fm: &Frontmatter) -> Frontmatter {
+    Frontmatter {
+        labels: vec![],
+        reviewers: vec![],
+        ..final_fm.clone()
+    }
 }
 
 /// Gather the inputs for post-create stack detection: full details for every
@@ -353,6 +470,17 @@ async fn fetch_pr_details(
     details
 }
 
+/// Outcome of the post-create linking attempt, which decides whether auto-merge
+/// can be applied to the resulting GitHub stacks.
+enum LinkOutcome {
+    /// No chains were detected; the created PRs are standalone.
+    NoChains,
+    /// Chains were linked, with the result of each.
+    Linked(Vec<crate::gh::stack_create::ChainResult>),
+    /// Linking was declined (or there was no TTY to ask); nothing was linked.
+    Skipped,
+}
+
 /// Detect stack chains among the given PRs and create stacks on GitHub.
 ///
 /// Linking is best-effort: the PRs themselves are already created by the time
@@ -363,30 +491,43 @@ async fn fetch_pr_details(
 /// base the user chose in the editor; reconciling every base against the graph
 /// is `jj-gh pr stack`'s job, not something `pr create` should do behind the
 /// user's back.
-///
-/// Returns what happened so the caller decides how to print it.
 async fn link_stacks(
     gh: &impl Gh,
     jj: &impl Jj,
     target: &crate::gh::remote::Target,
     pr_details: &[crate::gh::PrDetails],
     head_to_local_commit: &HashMap<String, String>,
-) -> Result<Vec<crate::gh::stack_create::ChainResult>> {
+) -> Result<LinkOutcome> {
     let shape = crate::gh::stack_detect::detect(pr_details, jj, head_to_local_commit, None).await?;
     if shape.chains.is_empty() {
-        return Ok(Vec::new());
+        return Ok(LinkOutcome::NoChains);
     }
     let existing_stacks = gh.list_stacks(&target.owner, &target.repo).await?;
-    Ok(crate::gh::stack_create::create_stacks(
-        gh,
-        target,
+
+    // Unlike `pr stack`, creation has no preflight plan to confirm. A reshape
+    // that cancels an existing auto-merge request needs its own consent; a
+    // decline (or no TTY to ask in) leaves the PRs created but unlinked.
+    let blocked = crate::gh::stack_create::stacks_blocked_by_auto_merge(
         &shape.chains,
         pr_details,
         &existing_stacks,
-    )
-    .await
-    .inspect_err(|e| log::warn!("Failed to link PR stacks: {e:#}"))
-    .unwrap_or_default())
+    );
+    if !crate::commands::pr::stack::confirm_cancel_auto_merge(&blocked, &existing_stacks)? {
+        log::info!("Skipping stack linking; the PRs were still created");
+        return Ok(LinkOutcome::Skipped);
+    }
+
+    Ok(LinkOutcome::Linked(
+        crate::gh::stack_create::create_stacks(
+            gh,
+            target,
+            &shape.chains,
+            pr_details,
+            &existing_stacks,
+            true,
+        )
+        .await?,
+    ))
 }
 
 /// Check if any commit that `jj git push` would upload for `revs` matches the
@@ -446,6 +587,140 @@ fn private_commits_error(listing: &str) -> String {
     )
 }
 
+/// Detect the chain containing `this_bookmark` and return bookmarks of PRs
+/// below it whose remote target is behind. Only these need a second push
+/// after the current rev was already pushed.
+#[expect(clippy::too_many_lines)]
+async fn stale_chain_bookmarks(
+    jj: &impl Jj,
+    gh: &impl Gh,
+    remote: &str,
+    target: &crate::gh::remote::Target,
+    this_bookmark: &str,
+    created_prs: &[CreatedPr],
+) -> Result<Vec<String>> {
+    let bookmarks = jj.pushed_bookmarks(remote).await?;
+    let branch_names = bookmarks.iter().map(|b| b.name.clone()).collect::<Vec<_>>();
+    let all_prs = gh
+        .local_pulls(
+            &target.owner,
+            &target.repo,
+            target.origin_owner(),
+            &branch_names,
+        )
+        .await?;
+
+    let head_to_local = bookmarks
+        .iter()
+        .map(|b| (b.name.clone(), b.local_commit_id.clone()))
+        .collect::<HashMap<_, _>>();
+
+    // Fetch full details for all local PRs; individual failures are skipped.
+    let mut pr_details = Vec::with_capacity(all_prs.len());
+    for pr in &all_prs {
+        if let Ok(d) = gh.get_pr(&target.owner, &target.repo, pr.number).await {
+            pr_details.push(d);
+        }
+    }
+
+    // Add previously created PRs from this run that may not have been
+    // picked up by `local_pulls` yet (GitHub indexing lag).
+    for created in created_prs {
+        if all_prs.iter().any(|pr| pr.number == created.number) {
+            continue;
+        }
+
+        let Some(head_ref) = &created.bookmark else {
+            continue;
+        };
+
+        let Some(sha) = head_to_local.get(head_ref) else {
+            continue;
+        };
+
+        pr_details.push(PrDetails {
+            number: created.number,
+            head_ref: head_ref.clone(),
+            head_sha: sha.clone(),
+            base_ref: String::new(),
+            title: String::new(),
+            html_url: created.html_url.clone(),
+            is_draft: false,
+            auto_merge_request: None,
+            stack_auto_merge_request: None,
+            base_sha: String::new(),
+            head_user_login: None,
+            head_repo_name: None,
+            graphql_node_id: String::new(),
+            base_has_merge_queue: false,
+            labels: vec![],
+            reviewers: vec![],
+            body: String::new(),
+            stack_number: None,
+            stack_base_ref: None,
+            stack_position: None,
+        });
+    }
+
+    // Add the current rev's entry so stack_detect sees it.
+    if let Some(sha) = head_to_local.get(this_bookmark) {
+        pr_details.push(PrDetails {
+            number: 0,
+            head_ref: this_bookmark.to_string(),
+            head_sha: sha.clone(),
+            base_ref: String::new(),
+            title: String::new(),
+            html_url: String::new(),
+            is_draft: false,
+            auto_merge_request: None,
+            stack_auto_merge_request: None,
+            base_sha: String::new(),
+            head_user_login: None,
+            head_repo_name: None,
+            graphql_node_id: String::new(),
+            base_has_merge_queue: false,
+            labels: vec![],
+            reviewers: vec![],
+            body: String::new(),
+            stack_number: None,
+            stack_base_ref: None,
+            stack_position: None,
+        });
+    }
+
+    let trunk = jj.trunk_branch().await.ok().flatten();
+    let shape = stack_detect::detect(&pr_details, jj, &head_to_local, trunk.as_deref()).await?;
+
+    // Find the chain that contains this rev's bookmark, and collect
+    // bookmarks of PRs below it (not including this one, which was just pushed).
+    let head_to_pr = pr_details
+        .iter()
+        .map(|pr| (pr.head_ref.clone(), pr.number))
+        .collect::<HashMap<_, _>>();
+    let this_pr_number = head_to_pr.get(this_bookmark);
+
+    for chain in &shape.chains {
+        if this_pr_number.is_some_and(|n| chain.contains(n)) {
+            let mut stale = Vec::new();
+            for &pr_number in chain {
+                if this_pr_number.is_some_and(|n| *n == pr_number) {
+                    break;
+                }
+                if let Some(pr) = pr_details.iter().find(|p| p.number == pr_number) {
+                    let remote_sha = jj.remote_bookmark_sha(&pr.head_ref, remote).await?;
+                    let local_sha = head_to_local.get(&pr.head_ref);
+                    if remote_sha.as_deref() != local_sha.map(String::as_str) {
+                        stale.push(pr.head_ref.clone());
+                    }
+                }
+            }
+            return Ok(stale);
+        }
+    }
+
+    Ok(Vec::new())
+}
+
 /// Create a single PR for one revision.
 #[expect(clippy::too_many_lines)]
 #[expect(clippy::too_many_arguments)]
@@ -457,7 +732,7 @@ async fn create_single_pr(
     rev: &str,
     base: &crate::util::EvalWithCfgFallback<String>,
     draft: &bool,
-    auto_merge: &bool,
+    auto_merge: &AutoMergeMode,
     editor_argv: Option<&crate::util::ShellCommand>,
     no_edit: &bool,
     auto_merge_method: &AutoMergeMethod,
@@ -467,6 +742,9 @@ async fn create_single_pr(
     default_title_source: &crate::config::DefaultTitleSource,
     remote: &str,
     target: &crate::gh::remote::Target,
+    auto_stack: bool,
+    auto_push: bool,
+    created_prs: &[CreatedPr],
 ) -> Result<CreatedPr> {
     if *pick_title {
         crate::ui::tui::require_tty("--pick-title")?;
@@ -497,6 +775,8 @@ async fn create_single_pr(
             return Ok(CreatedPr {
                 number: existing.number,
                 html_url: existing.html_url,
+                bookmark: None,
+                auto_merge: None,
             });
         }
     }
@@ -591,8 +871,9 @@ async fn create_single_pr(
         labels: vec![],
         reviewers: vec![],
         draft: *draft,
-        auto_merge: *auto_merge,
+        auto_merge: Some(*auto_merge),
         auto_merge_method: *auto_merge_method,
+        auto_merge_comment: None,
     };
     let (final_fm, body) = if *no_edit {
         drop(status);
@@ -640,29 +921,52 @@ async fn create_single_pr(
         lookup
     };
 
-    jj.push(
-        rev,
-        existing_branch.as_deref(),
-        remote.to_string(),
-        args.allow_private,
-    )
-    .await?;
+    // Push bookmarks. When stacking with auto_push, first push this rev's
+    // bookmark (handling the no-bookmark case with `-c <rev>`), then detect
+    // the chain and push any stale bookmarks below it in one subprocess.
+    // Otherwise fall back to the legacy single-rev push.
+    let branch = if auto_stack && auto_push {
+        jj.push(
+            rev,
+            existing_branch.as_deref(),
+            remote.to_string(),
+            args.allow_private,
+        )
+        .await?;
 
-    let status = crate::ui::status::push(if existing_branch.is_some() {
-        "Creating pull request"
-    } else {
-        "Verifying commit on remote"
-    });
-    let branch = if let Some(b) = existing_branch {
-        b
-    } else {
-        let refreshed = jj.resolve_rev(rev).await?;
-        refreshed
+        let resolved = jj.resolve_rev(rev).await?;
+        let branch = resolved
             .bookmarks
-            .into_iter()
-            .next()
-            .ok_or_else(|| anyhow!("`jj git push -c {rev}` did not create a bookmark"))?
+            .first()
+            .ok_or_else(|| anyhow!("`jj git push` did not create a bookmark"))?
+            .clone();
+
+        let stale_below =
+            stale_chain_bookmarks(jj, gh, remote, target, &branch, created_prs).await?;
+        if !stale_below.is_empty() {
+            jj.push_bookmarks(&stale_below, remote.to_string(), args.allow_private)
+                .await?;
+        }
+
+        branch
+    } else {
+        jj.push(
+            rev,
+            existing_branch.as_deref(),
+            remote.to_string(),
+            args.allow_private,
+        )
+        .await?;
+
+        let resolved = jj.resolve_rev(rev).await?;
+        resolved
+            .bookmarks
+            .first()
+            .ok_or_else(|| anyhow!("`jj git push` did not create a bookmark"))?
+            .clone()
     };
+
+    let status = crate::ui::status::push("Creating pull request");
     let head_spec = target.head_spec(&branch);
 
     status.set_message("Creating pull request");
@@ -677,25 +981,24 @@ async fn create_single_pr(
         })
         .await?;
 
-    // Synthesize "before" so the diff fires only for labels/reviewers/auto-merge.
-    // `create_pr` already set title/body/base/draft; reusing the same values
-    // makes `apply_frontmatter_diff` skip those calls.
-    let before_fm = Frontmatter {
-        title: final_fm.title.clone(),
-        base: final_fm.base.clone(),
-        labels: vec![],
-        reviewers: vec![],
-        draft: final_fm.draft,
-        auto_merge: false,
-        auto_merge_method: final_fm.auto_merge_method,
-    };
+    // Synthesize "before" so the diff fires only for labels/reviewers. `create_pr`
+    // already set title/body/base/draft, and auto-merge is deferred until after
+    // stack linking, so every other field is carried over unchanged.
+    let before_fm = metadata_before_fm(&final_fm);
     let ctx = ApplyChangesCtx {
         owner: &target.owner,
         repo: &target.repo,
         pr_number: created.number,
         pr_node_id: &created.node_id,
-        has_merge_queue: created.has_merge_queue,
         before_label_ids: HashMap::new(),
+        auto_merge_target: target,
+        auto_merge_pr: AutoMergeTarget::created(
+            created.number,
+            &created.node_id,
+            &created.html_url,
+            created.base_has_merge_queue,
+        ),
+        auto_merge_before: final_fm.auto_merge,
     };
     status.set_message("Applying PR metadata");
     editor::apply_frontmatter_diff(gh, &ctx, &before_fm, &body, &final_fm, &body)
@@ -711,7 +1014,16 @@ async fn create_single_pr(
     crate::ui::print_url(&created.html_url);
     Ok(CreatedPr {
         number: created.number,
-        html_url: created.html_url,
+        html_url: created.html_url.clone(),
+        bookmark: Some(branch.clone()),
+        auto_merge: Some(CreatedAutoMerge::new(
+            created.number,
+            &created.node_id,
+            &created.html_url,
+            created.base_has_merge_queue,
+            final_fm.auto_merge.unwrap_or(AutoMergeMode::False),
+            final_fm.auto_merge_method,
+        )),
     })
 }
 
@@ -927,6 +1239,14 @@ mod tests {
         async fn pr_diff(&self, _: &str, _: &str) -> Result<String> {
             unimplemented!("private-commit check does not call pr_diff")
         }
+        async fn push_bookmarks(
+            &self,
+            _bookmarks: &[String],
+            _remote: String,
+            _allow_private: bool,
+        ) -> Result<()> {
+            unimplemented!("private-commit check does not call push_bookmarks")
+        }
     }
 
     /// Gh fake for `gather_stack_inputs`: `local_pulls` lists the PRs in
@@ -977,7 +1297,7 @@ mod tests {
         async fn set_draft(&self, _: &str, _: bool) -> Result<()> {
             unimplemented!()
         }
-        async fn disable_auto_merge(&self, _: &str) -> Result<()> {
+        async fn disable_auto_merge(&self, _: &str, _: bool) -> Result<()> {
             unimplemented!()
         }
         fn get_pr(&self, _: &str, _: &str, number: u64) -> impl Future<Output = Result<PrDetails>> {
@@ -991,7 +1311,7 @@ mod tests {
         async fn get_pr_diff(&self, _: &str, _: &str, _: u64) -> Result<String> {
             unimplemented!()
         }
-        async fn enable_auto_merge(&self, _: &str, _: AutoMergeMethod) -> Result<()> {
+        async fn enable_auto_merge(&self, _: &str, _: AutoMergeMethod, _: bool) -> Result<()> {
             unimplemented!()
         }
         fn local_pulls(
@@ -1036,10 +1356,22 @@ mod tests {
         async fn create_stack(&self, _: &str, _: &str, _: &[u64]) -> Result<PullRequestStack> {
             unimplemented!()
         }
-        async fn unstack_prs(&self, _: &str, _: &str, _: u64, _: &[u64]) -> Result<()> {
+        async fn append_to_stack(
+            &self,
+            _: &str,
+            _: &str,
+            _: u64,
+            _: &[u64],
+        ) -> Result<PullRequestStack> {
+            unimplemented!()
+        }
+        async fn unstack_prs(&self, _: &str, _: &str, _: u64) -> Result<Option<PullRequestStack>> {
             unimplemented!()
         }
         async fn list_stacks(&self, _: &str, _: &str) -> Result<Vec<PullRequestStack>> {
+            unimplemented!()
+        }
+        async fn get_stack(&self, _: &str, _: &str, _: u64) -> Result<PullRequestStack> {
             unimplemented!()
         }
     }
@@ -1079,17 +1411,19 @@ mod tests {
             title: format!("PR {number}"),
             html_url: format!("https://github.com/o/r/pull/{number}"),
             is_draft: false,
-            auto_merge: false,
-            auto_merge_method: None,
+            auto_merge_request: None,
+            stack_auto_merge_request: None,
             base_sha: "base".into(),
             head_user_login: None,
             head_repo_name: None,
             graphql_node_id: format!("node-{number}"),
-            in_merge_queue: false,
+            base_has_merge_queue: false,
             labels: vec![],
             reviewers: vec![],
             body: String::new(),
             stack_number: None,
+            stack_base_ref: None,
+            stack_position: None,
         }
     }
 
@@ -1097,6 +1431,8 @@ mod tests {
         CreatedPr {
             number,
             html_url: format!("https://github.com/o/r/pull/{number}"),
+            bookmark: Some(format!("branch-{number}")),
+            auto_merge: None,
         }
     }
 
@@ -1106,6 +1442,29 @@ mod tests {
 
     fn gather_numbers(gathered: &[PrDetails]) -> Vec<u64> {
         gathered.iter().map(|d| d.number).collect()
+    }
+
+    #[test]
+    fn metadata_before_fm_defers_auto_merge_and_keeps_metadata() {
+        let final_fm = Frontmatter {
+            title: "title".into(),
+            base: "main".into(),
+            labels: vec!["bug".into()],
+            reviewers: vec![crate::gh::Reviewer::parse("@alice").unwrap()],
+            draft: true,
+            auto_merge: Some(AutoMergeMode::All),
+            auto_merge_method: AutoMergeMethod::Squash,
+            auto_merge_comment: None,
+        };
+
+        let before = metadata_before_fm(&final_fm);
+        assert_eq!(before.auto_merge, final_fm.auto_merge);
+        assert_eq!(before.auto_merge_method, final_fm.auto_merge_method);
+        assert_eq!(before.title, final_fm.title);
+        assert_eq!(before.base, final_fm.base);
+        assert!(before.draft);
+        assert_eq!(before.labels, [] as [String; 0]);
+        assert_eq!(before.reviewers, [] as [crate::gh::Reviewer; 0]);
     }
 
     #[tokio::test]

@@ -1,13 +1,14 @@
 //! CLI Logging
 
 use anstyle::{AnsiColor, Color, Style};
+use anyhow::Context;
 use flexi_logger::{
     DeferredNow, FlexiLoggerError, LogSpecification, Logger, LoggerHandle, writers::LogWriter,
 };
 use log::Record;
 use std::{
     fmt::Display,
-    io::{IsTerminal, Write as _},
+    io::{self, IsTerminal, Write as _},
 };
 
 pub use log::{LevelFilter, debug, error, info, warn};
@@ -46,6 +47,65 @@ pub fn fatal(error: impl Display) {
         format!("ERROR {message}")
     };
     crate::ui::status::print_above(&line);
+}
+
+/// Print a plain UI line to stderr, above any live status line.
+///
+/// Use this instead of `eprintln!`; it goes through the same writer as log
+/// records, so output cannot collide with a spinner that is being redrawn.
+#[doc(hidden)]
+pub fn ui_impl(text: &str) {
+    crate::ui::status::print_above(text);
+}
+
+/// Print a formatted UI line to stderr, above any live status line.
+#[macro_export]
+macro_rules! ui {
+    ($($arg:tt)*) => {
+        $crate::logging::ui_impl(&format!($($arg)*))
+    };
+}
+pub use crate::ui;
+
+/// Ask a yes/no question on stderr and return whether the answer was yes.
+///
+/// The prompt suspends the status line until the answer is read. Outside a
+/// terminal there is nobody to answer, so this declines without reading stdin.
+///
+/// # Errors
+///
+/// Returns an error if writing the prompt or reading the answer fails.
+#[doc(hidden)]
+pub fn confirm_impl(prompt: &str) -> anyhow::Result<bool> {
+    if !io::stdin().is_terminal() || !io::stderr().is_terminal() {
+        return Ok(false);
+    }
+
+    let _suspended = crate::ui::status::suspend();
+    {
+        let mut err = io::stderr().lock();
+        write!(err, "{prompt}").context("write prompt to stderr")?;
+        err.flush().context("flush prompt to stderr")?;
+    }
+
+    let mut answer = String::new();
+    io::stdin()
+        .read_line(&mut answer)
+        .context("read prompt answer from stdin")?;
+    Ok(is_yes(&answer))
+}
+
+/// Ask a formatted yes/no question on stderr.
+#[macro_export]
+macro_rules! confirm {
+    ($($arg:tt)*) => {
+        $crate::logging::confirm_impl(&format!($($arg)*))
+    };
+}
+pub use crate::confirm;
+
+fn is_yes(answer: &str) -> bool {
+    matches!(answer.trim().to_lowercase().as_str(), "y" | "yes")
 }
 
 /// Stderr log writer that routes each record through
@@ -247,5 +307,15 @@ mod tests {
             indent_continuations("first\nsecond\nthird", 6),
             "first\n      second\n      third"
         );
+    }
+
+    #[test]
+    fn only_affirmative_answers_confirm() {
+        assert!(is_yes("y"));
+        assert!(is_yes("Y\n"));
+        assert!(is_yes(" yes \n"));
+        assert!(!is_yes(""));
+        assert!(!is_yes("n"));
+        assert!(!is_yes("default"));
     }
 }

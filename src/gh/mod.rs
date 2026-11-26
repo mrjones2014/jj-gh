@@ -26,14 +26,24 @@ pub struct PrSummary {
     pub state: String,
 }
 
+/// An auto-merge request and the PR through which it was requested.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AutoMergeRequest {
+    pub pr_number: u64,
+    /// `None` when GitHub returns a merge method unknown to this version.
+    pub method: Option<AutoMergeMethod>,
+}
+
 /// Full PR metadata used to render bookmark templates and stderr hints in
 /// `pr fetch`. `head_user_login` / `head_repo_name` are `None` when GitHub
 /// returns a null user/repo (e.g. the source fork has been deleted).
 #[derive(Debug, Clone)]
 pub struct PrDetails {
     pub is_draft: bool,
-    pub auto_merge: bool,
-    pub auto_merge_method: Option<AutoMergeMethod>,
+    /// The individual auto-merge request on this PR, if present.
+    pub auto_merge_request: Option<AutoMergeRequest>,
+    /// The stack auto-merge request covering this PR, if present.
+    pub stack_auto_merge_request: Option<AutoMergeRequest>,
     pub number: u64,
     pub title: String,
     pub html_url: String,
@@ -46,15 +56,20 @@ pub struct PrDetails {
     pub head_user_login: Option<String>,
     pub head_repo_name: Option<String>,
     pub graphql_node_id: String,
-    /// True when the PR's base branch has a merge queue. Determines whether
-    /// "merge when ready" routes through `enqueuePullRequest` instead of
-    /// `enablePullRequestAutoMerge`.
-    pub in_merge_queue: bool,
+    /// True when the PR's immediate base branch has a merge queue. This does
+    /// not indicate whether the PR itself has been added to the queue.
+    pub base_has_merge_queue: bool,
     pub labels: Vec<Label>,
     pub reviewers: Vec<Reviewer>,
     pub body: String,
     /// Stack number if this PR is part of a stack, `None` otherwise.
     pub stack_number: Option<u64>,
+    /// The stack's base branch, which may differ from this PR's immediate base.
+    #[expect(dead_code)]
+    pub stack_base_ref: Option<String>,
+    /// Position in the stack, starting at 1 for the bottom PR.
+    #[expect(dead_code)]
+    pub stack_position: Option<u64>,
 }
 
 /// Result of [`Gh::lookup_base`]: the base repo's GraphQL node ID plus whether
@@ -100,16 +115,18 @@ impl UpdatePr {
 
 /// A pull request stack on GitHub. Stacks link related PRs together so
 /// GitHub's UI can show stack navigation and "merge the whole stack" features.
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 pub struct PullRequestStack {
     pub number: u64,
     pub pull_requests: Vec<StackPullRequest>,
 }
 
 /// A PR entry within a stack.
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 pub struct StackPullRequest {
     pub number: u64,
+    pub state: String,
+    pub merged_at: Option<String>,
 }
 
 /// One label on a PR, with both the human-readable name and the GraphQL
@@ -128,8 +145,8 @@ pub struct PrCreated {
     /// GraphQL node ID for the PR. Needed to enable auto-merge.
     pub node_id: String,
     /// True when the PR's base branch has a merge queue. See
-    /// [`PrDetails::has_merge_queue`].
-    pub has_merge_queue: bool,
+    /// [`PrDetails::base_has_merge_queue`].
+    pub base_has_merge_queue: bool,
 }
 
 /// Top-level state of a workflow run from the Actions API.
@@ -289,12 +306,13 @@ pub trait Gh {
     async fn set_draft(&self, pr_node_id: &str, draft: bool) -> Result<()>;
 
     /// Disable "merge when ready" on a PR. No-op on the server if auto-merge
-    /// was not enabled.
+    /// was not enabled. With `include_stack`, GitHub also cancels the
+    /// whole-stack request covering this PR, not just an individual one.
     ///
     /// # Errors
     ///
     /// Propagates API errors.
-    async fn disable_auto_merge(&self, pr_node_id: &str) -> Result<()>;
+    async fn disable_auto_merge(&self, pr_node_id: &str, include_stack: bool) -> Result<()>;
 
     /// Fetch full metadata for a PR by number.
     ///
@@ -311,18 +329,23 @@ pub trait Gh {
     async fn get_pr_diff(&self, owner: &str, repo: &str, number: u64) -> Result<String>;
 
     /// Enable "merge when ready" on a PR via `enablePullRequestAutoMerge`.
-    /// Callers must check [`PrDetails::in_merge_queue`] /
-    /// [`PrCreated::has_merge_queue`] beforehand: GitHub's public API has no
-    /// equivalent of the web UI's merge-queue auto-merge, so this call would
-    /// fail on those repos. See
-    /// <https://github.com/mrjones2014/jj-gh/issues/103>.
+    /// With `include_stack`, the request covers this PR and the eligible PRs
+    /// below it in its GitHub stack; a whole-stack merge needs the stack's
+    /// actual top PR here.
     ///
     /// # Errors
     ///
     /// Propagates API errors. Common failures: the repo does not have
     /// auto-merge enabled, required branch protections are missing, or the PR
-    /// is already mergeable.
-    async fn enable_auto_merge(&self, pr_node_id: &str, method: AutoMergeMethod) -> Result<()>;
+    /// is already mergeable. A base branch with a merge queue also fails;
+    /// callers can check [`PrDetails::base_has_merge_queue`] /
+    /// [`PrCreated::base_has_merge_queue`] to add a hint.
+    async fn enable_auto_merge(
+        &self,
+        pr_node_id: &str,
+        method: AutoMergeMethod,
+        include_stack: bool,
+    ) -> Result<()>;
 
     /// Fetch open PRs with head commit SHA and CI status, scoped to the given
     /// `branches` (head ref names) and `head_owner`. Used by `pr log` to build
@@ -411,21 +434,39 @@ pub trait Gh {
         pr_numbers: &[u64],
     ) -> Result<PullRequestStack>;
 
-    /// Remove unmerged PRs from a stack. PRs that cannot be unstacked
-    /// (e.g., queued for merge) are left in place. If all PRs are removed,
-    /// the stack is dissolved.
+    /// Append PRs to the top of an existing stack. `pr_numbers` must be only
+    /// the delta, ordered from the current top upward; the first one's base
+    /// ref must already match the current top's head ref.
     ///
     /// # Errors
     ///
     /// Propagates API errors. Returns 409 if the stack is being modified
-    /// concurrently. Returns 422 if no PRs can be removed.
-    async fn unstack_prs(
+    /// concurrently, and 422 if the PRs cannot be appended.
+    async fn append_to_stack(
         &self,
         owner: &str,
         repo: &str,
         stack_number: u64,
         pr_numbers: &[u64],
-    ) -> Result<()>;
+    ) -> Result<PullRequestStack>;
+
+    /// Remove unmerged PRs from a stack. The server decides which PRs are
+    /// eligible; PRs that are merged, merging, queued, or have auto-merge
+    /// enabled are left in place.
+    ///
+    /// Returns `None` when GitHub dissolved the stack (204), and the updated
+    /// stack when some PRs remain (200).
+    ///
+    /// # Errors
+    ///
+    /// Propagates API errors. Returns 409 if the stack is being modified
+    /// concurrently, and 422 if no PRs can be removed.
+    async fn unstack_prs(
+        &self,
+        owner: &str,
+        repo: &str,
+        stack_number: u64,
+    ) -> Result<Option<PullRequestStack>>;
 
     /// List all pull request stacks in a repository.
     ///
@@ -433,4 +474,11 @@ pub trait Gh {
     ///
     /// Propagates API errors.
     async fn list_stacks(&self, owner: &str, repo: &str) -> Result<Vec<PullRequestStack>>;
+
+    /// Fetch a stack by number, including its ordered remote PR membership.
+    ///
+    /// # Errors
+    ///
+    /// Propagates API errors, including when the stack does not exist.
+    async fn get_stack(&self, owner: &str, repo: &str, number: u64) -> Result<PullRequestStack>;
 }

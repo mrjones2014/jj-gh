@@ -56,6 +56,17 @@ first PR's generated bookmark as its base.
 
 A revset is not expanded by `pr create`; use separate revision arguments for separate PRs. (By contrast, `jj pr stack` _does_ expand a range like `qv::uw` into a bottom-to-top chain.)
 
+## Pushing stale stack members
+
+When creating PRs that form a stack, `jj-gh` pushes the current rev as usual, then detects whether there are existing PRs below it in the chain. Any of those whose remote target has fallen behind the local one are refreshed in a single `jj git push` call. This avoids triggering unnecessary CODEOWNERS reviews from stale diffs.
+
+```sh
+jj pr create @- @             # pushes the rev, then any stale PRs below it
+jj pr create --no-push @- @   # push only the current rev (no batch refresh)
+```
+
+The `auto_push` setting (default: `true`, same config key as `pr stack`) controls this behaviour. Pass `--no-push` to disable it, which falls back to pushing only the current rev's bookmark.
+
 ## Base selection order
 
 For each PR, the base is resolved in this order:

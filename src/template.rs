@@ -136,7 +136,7 @@ mod tests {
             base: crate::util::EvalWithCfgFallback::new(None, None),
             draft: false,
             no_draft: false,
-            auto_merge: false,
+            auto_merge: crate::config::AutoMergeMode::False,
             no_auto_merge: false,
             auto_merge_method: crate::config::AutoMergeMethod::Merge,
             template: None,
@@ -150,6 +150,8 @@ mod tests {
             no_diffs: false,
             auto_stack: true,
             no_stack: false,
+            auto_push: true,
+            no_push: false,
             allow_private: false,
             default_title_source: crate::config::DefaultTitleSource::Base,
             globals: crate::cli::GlobalOpts {

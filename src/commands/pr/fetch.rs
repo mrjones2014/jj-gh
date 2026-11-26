@@ -350,6 +350,9 @@ mod tests {
         async fn pr_diff(&self, _: &str, _: &str) -> Result<String> {
             unimplemented!("fetch does not call pr_diff")
         }
+        async fn push_bookmarks(&self, _: &[String], _: String, _: bool) -> Result<()> {
+            unimplemented!("fetch does not call push_bookmarks")
+        }
     }
 
     struct FakeGh {
@@ -402,7 +405,7 @@ mod tests {
         async fn set_draft(&self, _pr_node_id: &str, _draft: bool) -> Result<()> {
             unimplemented!("fetch does not call set_draft")
         }
-        async fn disable_auto_merge(&self, _pr_node_id: &str) -> Result<()> {
+        async fn disable_auto_merge(&self, _pr_node_id: &str, _: bool) -> Result<()> {
             unimplemented!("fetch does not call disable_auto_merge")
         }
         fn get_pr(
@@ -423,6 +426,7 @@ mod tests {
             &self,
             _node_id: &str,
             _method: crate::config::AutoMergeMethod,
+            _: bool,
         ) -> Result<()> {
             unimplemented!("fetch does not call enable_auto_merge")
         }
@@ -468,11 +472,28 @@ mod tests {
         ) -> Result<crate::gh::PullRequestStack> {
             unimplemented!("fetch does not call create_stack")
         }
-        async fn unstack_prs(&self, _: &str, _: &str, _: u64, _: &[u64]) -> Result<()> {
+        async fn append_to_stack(
+            &self,
+            _: &str,
+            _: &str,
+            _: u64,
+            _: &[u64],
+        ) -> Result<crate::gh::PullRequestStack> {
+            unimplemented!("fetch does not call append_to_stack")
+        }
+        async fn unstack_prs(
+            &self,
+            _: &str,
+            _: &str,
+            _: u64,
+        ) -> Result<Option<crate::gh::PullRequestStack>> {
             unimplemented!("fetch does not call unstack_prs")
         }
         async fn list_stacks(&self, _: &str, _: &str) -> Result<Vec<crate::gh::PullRequestStack>> {
             unimplemented!("fetch does not call list_stacks")
+        }
+        async fn get_stack(&self, _: &str, _: &str, _: u64) -> Result<crate::gh::PullRequestStack> {
+            unimplemented!("fetch does not call get_stack")
         }
     }
 
@@ -516,14 +537,16 @@ mod tests {
             head_user_login: Some("octocat".into()),
             head_repo_name: Some("r".into()),
             graphql_node_id: "PR_kwDOABCDEF".into(),
-            in_merge_queue: false,
+            base_has_merge_queue: false,
             is_draft: false,
-            auto_merge: false,
-            auto_merge_method: None,
+            auto_merge_request: None,
+            stack_auto_merge_request: None,
             labels: vec![],
             reviewers: vec![],
             body: String::new(),
             stack_number: None,
+            stack_base_ref: None,
+            stack_position: None,
         }
     }
 

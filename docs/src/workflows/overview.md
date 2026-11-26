@@ -8,7 +8,7 @@ With the `pr` alias installed (`jj pr` → `jj-gh pr`), these are the commands y
 | `jj pr create <rev>`         | Open your editor to write a PR from a revision; supports stacked PRs. The editor frontmatter and body are shared with [Edit](./edit.md).      |
 | `jj pr edit <pr-num\|rev>`   | Edit an existing PR's title, body, base, labels, reviewers, draft state, and auto-merge via the same frontmatter flow. See [Edit](./edit.md). |
 | `jj pr fetch <pr-num>`       | Fetch a PR head into a local bookmark, including across forks. See [Fetch](./fetch.md).                                                       |
-| `jj pr auto-merge <targets>` | Enable auto-merge by PR number or revset. See [Auto-merge and rerun](./auto-merge-rerun.md).                                                  |
+| `jj pr auto-merge <targets>` | Enable, move to the stack tip (`--stack`), or cancel (`--cancel`) auto-merge. See [Auto-merge and rerun](./auto-merge-rerun.md).              |
 | `jj pr rerun <targets>`      | Retry failed CI jobs, once or continuously with `--watch`. See [Auto-merge and rerun](./auto-merge-rerun.md).                                 |
 | `jj pr stack`                | Make GitHub match the shape of your local `jj` graph; see [Reconciling stacks](../stack-reconciliation.md).                                   |
 | `jj pr url <pr-num\|rev>`    | Print a PR's full URL. Handy in pipes: `jj pr url <rev> \| pbcopy` (or `wl-copy`).                                                            |

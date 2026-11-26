@@ -1,8 +1,9 @@
 use crate::{
     cli::GlobalOpts,
+    commands::pr::auto_merge::{self, AutoMergeTarget},
     editor::{self, ApplyChangesCtx},
     frontmatter::Frontmatter,
-    gh::{Gh, PrDetails},
+    gh::{Gh, PrDetails, remote::Target},
     jj::Jj,
     model::Model,
 };
@@ -82,25 +83,11 @@ pub async fn run(model: &impl Model, args: &EditArgs) -> Result<()> {
         .get_pr(&target.owner, &target.repo, pr_number)
         .await
         .context("fetching PR from GitHub")?;
+    let tip_number = auto_merge::stack_tip_number(gh, &target, &details).await?;
+    let auto_merge_view = auto_merge::current_view(&details, tip_number);
+    let auto_merge_pr = AutoMergeTarget::from(&details);
 
-    let diff = if *show_diffs {
-        match model
-            .jj()
-            .pr_diff(&details.base_sha, &details.head_sha)
-            .await
-        {
-            Ok(diff) => Some(diff),
-            Err(e) => {
-                log::debug!("could not render PR diff from local commits: {e:#}");
-                gh.get_pr_diff(&target.owner, &target.repo, details.number)
-                    .await
-                    .inspect_err(|e| log::warn!("Could not load PR diff preview: {e:#}"))
-                    .ok()
-            }
-        }
-    } else {
-        None
-    };
+    let diff = load_diff(model, gh, &target, &details, *show_diffs).await;
 
     let PrDetails {
         number,
@@ -108,11 +95,8 @@ pub async fn run(model: &impl Model, args: &EditArgs) -> Result<()> {
         html_url,
         base_ref,
         graphql_node_id,
-        in_merge_queue,
         labels,
         is_draft,
-        auto_merge,
-        auto_merge_method,
         reviewers,
         body,
         ..
@@ -129,8 +113,9 @@ pub async fn run(model: &impl Model, args: &EditArgs) -> Result<()> {
         labels: labels.into_iter().map(|l| l.name).collect(),
         reviewers,
         draft: is_draft,
-        auto_merge,
-        auto_merge_method: auto_merge_method.unwrap_or_default(),
+        auto_merge: auto_merge_view.value,
+        auto_merge_method: auto_merge_view.method,
+        auto_merge_comment: auto_merge_view.comment.clone(),
     };
 
     let preview = diff
@@ -147,8 +132,10 @@ pub async fn run(model: &impl Model, args: &EditArgs) -> Result<()> {
         repo: &target.repo,
         pr_number: number,
         pr_node_id: &graphql_node_id,
-        has_merge_queue: in_merge_queue,
         before_label_ids,
+        auto_merge_target: &target,
+        auto_merge_pr,
+        auto_merge_before: auto_merge_view.value,
     };
     editor::apply_frontmatter_diff(gh, &ctx, &before_fm, &before_body, &after_fm, &after_body)
         .await
@@ -157,6 +144,34 @@ pub async fn run(model: &impl Model, args: &EditArgs) -> Result<()> {
     log::info!("Updated PR #{number}");
     crate::ui::print_url(&html_url);
     Ok(())
+}
+
+/// Load the optional PR diff preview from local commits, falling back to the
+/// GitHub diff when the local one cannot be rendered.
+async fn load_diff(
+    model: &impl Model,
+    gh: &impl Gh,
+    target: &Target,
+    details: &PrDetails,
+    show_diffs: bool,
+) -> Option<String> {
+    if !show_diffs {
+        return None;
+    }
+    match model
+        .jj()
+        .pr_diff(&details.base_sha, &details.head_sha)
+        .await
+    {
+        Ok(diff) => Some(diff),
+        Err(e) => {
+            log::debug!("could not render PR diff from local commits: {e:#}");
+            gh.get_pr_diff(&target.owner, &target.repo, details.number)
+                .await
+                .inspect_err(|e| log::warn!("Could not load PR diff preview: {e:#}"))
+                .ok()
+        }
+    }
 }
 
 fn validate_edit(frontmatter: &Frontmatter, body: &str, force: bool) -> Result<()> {

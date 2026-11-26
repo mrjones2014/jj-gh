@@ -19,8 +19,12 @@
 //! `````
 //! ```````
 
-use crate::{config::AutoMergeMethod, gh::Reviewer};
+use crate::{
+    config::{AutoMergeMethod, AutoMergeMode},
+    gh::Reviewer,
+};
 use anyhow::{Context, Result, anyhow};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::ops::Not;
 
@@ -35,27 +39,86 @@ const DIFF_FENCE_END: &str = "`````";
 
 const TITLE_WARN_LEN: usize = 72;
 
+/// Editor schema for this version. Release assets keep old schemas accessible
+/// even after the docs site is redeployed for a newer release.
+const SCHEMA_URL: &str = concat!(
+    "https://github.com/mrjones2014/jj-gh/releases/download/jj-gh-v",
+    env!("CARGO_PKG_VERSION"),
+    "/frontmatter.schema.json"
+);
+
 fn is_default<T: Default + PartialEq>(val: &T) -> bool {
     *val == T::default()
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// The YAML frontmatter at the top of a `pr create` / `pr edit` buffer.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[schemars(title = "jj-gh PR frontmatter")]
 pub struct Frontmatter {
+    /// PR title; required and non-empty.
     pub title: String,
+    /// Base branch; use `owner:branch` for cross-fork PRs.
     pub base: String,
+    /// Label names to apply to the PR.
     #[serde(default)]
     pub labels: Vec<String>,
+    /// Reviewers as `@user` or `@org/team` slugs.
     #[serde(default)]
+    #[schemars(with = "Vec<String>")]
     pub reviewers: Vec<Reviewer>,
+    /// Whether the PR is a draft.
     #[serde(default)]
     pub draft: bool,
-    #[serde(default)]
-    pub auto_merge: bool,
+    /// Auto-merge scope. Omit this field when the current request cannot be
+    /// represented by one of the four values; submitting it unchanged then
+    /// leaves the request alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_merge: Option<AutoMergeMode>,
+    /// Merge method when auto-merge is enabled.
     #[serde(default, skip_serializing_if = "is_default")]
     pub auto_merge_method: AutoMergeMethod,
+    /// Rendered as a YAML comment above `auto_merge` (or where it would be).
+    /// Not parsed back; it only explains a state the enum cannot express.
+    #[serde(skip)]
+    pub auto_merge_comment: Option<String>,
 }
 
 impl Frontmatter {
+    /// Add the auto-merge explanation directly into the YAML block so it is
+    /// visible in the editor. Comments are stripped by the YAML parser, so the
+    /// round-trip is unaffected.
+    fn annotated_yaml(&self, yaml: &str) -> String {
+        let mut notes = vec![
+            "# auto_merge options: false, infer, all, below".to_string(),
+            "#   false = cancel; infer = whole stack if stacked, otherwise this PR".to_string(),
+            "#   all = whole GitHub stack through its top PR; below = this PR and its descendants"
+                .to_string(),
+        ];
+        if let Some(note) = &self.auto_merge_comment {
+            notes.push(format!("# {note}"));
+        }
+        let notes = notes.join("\n");
+
+        let mut out = String::new();
+        let mut inserted = false;
+        for line in yaml.lines() {
+            if !inserted
+                && (line.starts_with("auto_merge:") || line.starts_with("auto_merge_method:"))
+            {
+                out.push_str(&notes);
+                out.push('\n');
+                inserted = true;
+            }
+            out.push_str(line);
+            out.push('\n');
+        }
+        if !inserted {
+            out.push_str(&notes);
+            out.push('\n');
+        }
+        out.trim_end().to_string()
+    }
+
     /// Emit YAML block + blank line + body for the editor buffer.
     ///
     /// # Errors
@@ -63,10 +126,12 @@ impl Frontmatter {
     /// Returns an error if the YAML serializer fails (unlikely for our fields).
     pub fn render(&self, body: &str, preview: Option<&str>) -> Result<String> {
         let yaml = noyalib::to_string(self).context("could not serialize frontmatter")?;
+        let yaml = self.annotated_yaml(&yaml);
         let orig_body_empty = body.trim().is_empty();
         let body = body.trim_start_matches('\n');
         let body = if body.is_empty() { "\n" } else { body };
-        let body = format!("---\n{yaml}\n---\n\n{body}");
+        let body =
+            format!("---\n# yaml-language-server: $schema={SCHEMA_URL}\n{yaml}\n---\n\n{body}");
         let Some(diff) = preview else {
             return Ok(body);
         };
@@ -164,8 +229,9 @@ mod tests {
             labels: vec!["bug".into(), "p1".into()],
             reviewers: vec![Reviewer::parse("@john-carmack").unwrap()],
             draft: false,
-            auto_merge: false,
+            auto_merge: Some(AutoMergeMode::False),
             auto_merge_method: AutoMergeMethod::Merge,
+            auto_merge_comment: None,
         }
     }
 
@@ -184,6 +250,20 @@ mod tests {
     }
 
     #[test]
+    fn render_includes_schema_directive_for_editors() {
+        let rendered = fm("title").render("body", None).unwrap();
+        assert!(
+            rendered.starts_with(&format!(
+                "---\n# yaml-language-server: $schema={SCHEMA_URL}\n"
+            )),
+            "{rendered}"
+        );
+        assert!(SCHEMA_URL.contains(env!("CARGO_PKG_VERSION")));
+        // The directive must not disturb the frontmatter round trip.
+        Frontmatter::parse(&rendered).unwrap();
+    }
+
+    #[test]
     fn render_quotes_titles_containing_yaml_specials() {
         let original = fm("feat(thing): do the thing");
         let rendered = original.render("body", None).unwrap();
@@ -199,7 +279,7 @@ mod tests {
         assert_eq!(fm.base, "main");
         assert_eq!(fm.labels, [] as [String; 0]);
         assert!(!fm.draft);
-        assert!(!fm.auto_merge);
+        assert_eq!(fm.auto_merge, None);
         assert_eq!(fm.auto_merge_method, AutoMergeMethod::Merge);
         assert_eq!(body, "body text");
     }
@@ -212,11 +292,59 @@ mod tests {
     }
 
     #[test]
-    fn parse_reads_auto_merge_fields() {
-        let buffer = "---\ntitle: hello\nbase: main\nauto_merge: true\nauto_merge_method: squash\n---\n\nbody\n";
+    fn parse_reads_auto_merge_values() {
+        for (value, expected) in [
+            ("false", AutoMergeMode::False),
+            ("infer", AutoMergeMode::Infer),
+            ("all", AutoMergeMode::All),
+            ("below", AutoMergeMode::Below),
+        ] {
+            let buffer = format!(
+                "---\ntitle: hello\nbase: main\nauto_merge: {value}\nauto_merge_method: squash\n---\n\nbody\n"
+            );
+            let (fm, _) = Frontmatter::parse(&buffer).unwrap();
+            assert_eq!(fm.auto_merge, Some(expected), "value: {value}");
+            assert_eq!(fm.auto_merge_method, AutoMergeMethod::Squash);
+        }
+    }
+
+    #[test]
+    fn parse_accepts_legacy_true_as_infer() {
+        let buffer = "---\ntitle: hello\nbase: main\nauto_merge: true\n---\n\nbody\n";
         let (fm, _) = Frontmatter::parse(buffer).unwrap();
-        assert!(fm.auto_merge);
-        assert_eq!(fm.auto_merge_method, AutoMergeMethod::Squash);
+        assert_eq!(fm.auto_merge, Some(AutoMergeMode::Infer));
+    }
+
+    #[test]
+    fn parse_rejects_unknown_auto_merge_value() {
+        let buffer = "---\ntitle: hello\nbase: main\nauto_merge: through-2\n---\n\nbody\n";
+        Frontmatter::parse(buffer).expect_err("`through-2` is not a valid auto_merge value");
+    }
+
+    #[test]
+    fn render_emits_explicit_value_with_explanation() {
+        let mut data = fm("t");
+        data.auto_merge = Some(AutoMergeMode::All);
+        let rendered = data.render("body", None).unwrap();
+        assert!(rendered.contains("auto_merge: all"), "{rendered}");
+        assert!(rendered.contains("# auto_merge options:"), "{rendered}");
+        let (parsed, _) = Frontmatter::parse(&rendered).unwrap();
+        assert_eq!(parsed.auto_merge, Some(AutoMergeMode::All));
+    }
+
+    #[test]
+    fn render_omits_auto_merge_and_keeps_endpoint_note_in_comment() {
+        let mut data = fm("t");
+        data.auto_merge = None;
+        data.auto_merge_comment = Some("auto-merge is requested through PR #3".into());
+        let rendered = data.render("body", None).unwrap();
+        assert!(!rendered.contains("auto_merge:"), "{rendered}");
+        assert!(
+            rendered.contains("# auto-merge is requested through PR #3"),
+            "{rendered}"
+        );
+        let (parsed, _) = Frontmatter::parse(&rendered).unwrap();
+        assert_eq!(parsed.auto_merge, None);
     }
 
     #[test]
@@ -313,8 +441,9 @@ mod tests {
             labels: vec![],
             reviewers: vec![],
             draft: false,
-            auto_merge: false,
+            auto_merge: Some(AutoMergeMode::False),
             auto_merge_method: AutoMergeMethod::Merge,
+            auto_merge_comment: None,
         }
     }
 
@@ -359,8 +488,9 @@ mod tests {
             labels: vec![],
             reviewers: vec![],
             draft: false,
-            auto_merge: false,
+            auto_merge: Some(AutoMergeMode::False),
             auto_merge_method: AutoMergeMethod::Merge,
+            auto_merge_comment: None,
         }
     }
 
@@ -385,5 +515,39 @@ mod tests {
     fn validate_long_title_warns_but_passes() {
         let long_title = "x".repeat(TITLE_WARN_LEN + 1);
         fm(&long_title).validate().unwrap();
+    }
+
+    #[test]
+    fn json_schema_describes_the_editor_frontmatter() {
+        let schema = serde_json::to_value(schemars::schema_for!(Frontmatter)).unwrap();
+        let properties = schema["properties"].as_object().unwrap();
+
+        for field in [
+            "title",
+            "base",
+            "labels",
+            "reviewers",
+            "draft",
+            "auto_merge",
+        ] {
+            assert!(
+                properties.contains_key(field),
+                "missing schema field: {field}"
+            );
+        }
+        assert!(!properties.contains_key("auto_merge_comment"));
+        assert_eq!(schema["required"], serde_json::json!(["title", "base"]));
+
+        let mode = &schema["$defs"]["AutoMergeMode"];
+        assert_eq!(
+            mode["anyOf"][0]["enum"],
+            serde_json::json!(["false", "infer", "all", "below"]),
+            "auto_merge values should match the editor keywords"
+        );
+        assert_eq!(
+            mode["anyOf"][1]["type"],
+            serde_json::json!("boolean"),
+            "auto_merge should also accept YAML booleans"
+        );
     }
 }

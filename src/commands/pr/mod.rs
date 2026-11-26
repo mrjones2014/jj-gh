@@ -3,7 +3,7 @@
 //! builds the GitHub client lazily. One module per CLI subcommand; PR lookup
 //! helpers live in [`crate::gh::pr_lookup`].
 
-mod auto_merge;
+pub(crate) mod auto_merge;
 mod create;
 mod edit;
 pub mod fetch;
@@ -214,7 +214,7 @@ pub async fn dispatch(global: GlobalOptsInput, action: PrAction) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{AutoMergeMethod, Config};
+    use crate::config::{AutoMergeMethod, AutoMergeMode, Config};
     use clap::Parser;
 
     #[derive(clap::Parser, Debug)]
@@ -317,6 +317,36 @@ mod tests {
     fn auto_merge_requires_a_target() {
         AutoMergeArgsParser::try_parse_from::<[&str; 0], _>([])
             .expect_err("bare auto-merge should be rejected");
+    }
+
+    #[test]
+    fn auto_merge_stack_flag_accepts_target_on_either_side() {
+        for argv in [&["42", "--stack"][..], &["--stack", "42"][..]] {
+            let parsed = AutoMergeArgsParser::try_parse_from(argv.iter().copied())
+                .expect("stack mode should accept the positional target on either side")
+                .args;
+            assert_eq!(parsed.revsets, vec!["42"]);
+            assert!(parsed.stack);
+            assert!(!parsed.cancel);
+        }
+    }
+
+    #[test]
+    fn auto_merge_cancel_flag_accepts_target_on_either_side() {
+        for argv in [&["42", "--cancel"][..], &["--cancel", "42"][..]] {
+            let parsed = AutoMergeArgsParser::try_parse_from(argv.iter().copied())
+                .expect("cancel mode should accept the positional target on either side")
+                .args;
+            assert_eq!(parsed.revsets, vec!["42"]);
+            assert!(parsed.cancel);
+            assert!(!parsed.stack);
+        }
+    }
+
+    #[test]
+    fn auto_merge_stack_and_cancel_conflict() {
+        AutoMergeArgsParser::try_parse_from(["42", "--stack", "--cancel"])
+            .expect_err("--stack and --cancel should be mutually exclusive");
     }
 
     #[test]
@@ -478,7 +508,7 @@ mod tests {
             "#,
         );
         assert!(c.draft);
-        assert!(c.auto_merge);
+        assert_eq!(c.auto_merge, AutoMergeMode::Infer);
         assert_eq!(c.auto_merge_method, AutoMergeMethod::Squash);
         assert!(!c.pr_create_show_diffs);
 
@@ -493,7 +523,7 @@ mod tests {
             "#,
         );
         assert!(!c.draft);
-        assert!(!c.auto_merge);
+        assert_eq!(c.auto_merge, AutoMergeMode::False);
         assert_eq!(c.auto_merge_method, AutoMergeMethod::Rebase);
         assert!(c.pr_create_show_diffs);
     }
@@ -518,9 +548,37 @@ mod tests {
             "#,
         );
         assert!(c.draft);
-        assert!(c.auto_merge);
+        assert_eq!(c.auto_merge, AutoMergeMode::Infer);
         assert_eq!(c.auto_merge_method, AutoMergeMethod::Rebase);
         assert!(c.pr_create_show_diffs);
+    }
+
+    #[test]
+    fn create_auto_merge_value_requires_equals() {
+        assert_eq!(
+            parse_create(&["@-", "--auto-merge"]).auto_merge,
+            Some(AutoMergeMode::Infer)
+        );
+        for (value, expected) in [
+            ("false", AutoMergeMode::False),
+            ("infer", AutoMergeMode::Infer),
+            ("all", AutoMergeMode::All),
+            ("below", AutoMergeMode::Below),
+        ] {
+            let flag = format!("--auto-merge={value}");
+            assert_eq!(
+                parse_create(&["@-", &flag]).auto_merge,
+                Some(expected),
+                "flag: {flag}"
+            );
+        }
+    }
+
+    #[test]
+    fn create_auto_merge_space_value_is_rejected() {
+        let err = CreateArgsParser::try_parse_from(["@-", "--auto-merge", "all"])
+            .expect_err("a separate value should be rejected");
+        assert!(err.to_string().contains("--auto-merge=all"), "err: {err}");
     }
 
     #[test]
@@ -547,7 +605,7 @@ mod tests {
             ",
         );
         assert!(!c.draft);
-        assert!(!c.auto_merge);
+        assert_eq!(c.auto_merge, AutoMergeMode::False);
         assert!(!c.pr_create_show_diffs);
     }
 
@@ -777,9 +835,11 @@ mod tests {
     }
 
     #[test]
-    fn auto_merge_args_method_overrides_config_via_rename() {
+    fn auto_merge_args_keep_cli_and_config_methods_separate() {
         let input = AutoMergeArgsInput {
             revsets: vec!["1".into()],
+            stack: false,
+            cancel: false,
             auto_merge_method: Some(AutoMergeMethod::Squash),
         };
         let fig = config::defaults_figment()
@@ -788,8 +848,15 @@ mod tests {
                 AutoMergeMethod::Rebase,
             ))
             .merge(Serialized::defaults(&input));
-        let c = config::extract(&fig).unwrap();
-        assert_eq!(c.auto_merge_method, AutoMergeMethod::Squash);
+        let config = config::extract(&fig).unwrap();
+        assert_eq!(config.auto_merge_method, AutoMergeMethod::Rebase);
+
+        let resolved = AutoMergeArgs::resolve(input, &config, &resolve_globals(&[]));
+        assert_eq!(resolved.auto_merge_method, Some(AutoMergeMethod::Squash));
+        assert_eq!(
+            resolved.configured_auto_merge_method,
+            AutoMergeMethod::Rebase
+        );
     }
 
     /// Build the resolved [`GlobalOpts`] from CLI args plus a config layer that

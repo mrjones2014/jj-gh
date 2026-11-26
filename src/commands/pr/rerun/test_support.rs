@@ -21,8 +21,8 @@ use std::sync::Mutex;
 pub(crate) fn pr_details(number: u64, sha: &str) -> PrDetails {
     PrDetails {
         is_draft: false,
-        auto_merge: false,
-        auto_merge_method: None,
+        auto_merge_request: None,
+        stack_auto_merge_request: None,
         number,
         title: "t".into(),
         html_url: format!("https://github.com/o/r/pull/{number}"),
@@ -33,11 +33,13 @@ pub(crate) fn pr_details(number: u64, sha: &str) -> PrDetails {
         head_user_login: Some("o".into()),
         head_repo_name: Some("r".into()),
         graphql_node_id: "node".into(),
-        in_merge_queue: false,
+        base_has_merge_queue: false,
         labels: Vec::<Label>::new(),
         reviewers: vec![],
         body: String::new(),
         stack_number: None,
+        stack_base_ref: None,
+        stack_position: None,
     }
 }
 
@@ -205,6 +207,9 @@ impl crate::jj::Jj for FakeJj {
     async fn pr_diff(&self, _: &str, _: &str) -> Result<String> {
         unimplemented!()
     }
+    async fn push_bookmarks(&self, _: &[String], _: String, _: bool) -> Result<()> {
+        unimplemented!()
+    }
 }
 
 #[derive(Default)]
@@ -350,7 +355,7 @@ impl Gh for FakeGh {
     async fn set_draft(&self, _id: &str, _d: bool) -> Result<()> {
         unimplemented!()
     }
-    async fn disable_auto_merge(&self, _id: &str) -> Result<()> {
+    async fn disable_auto_merge(&self, _id: &str, _: bool) -> Result<()> {
         unimplemented!()
     }
     fn get_pr(&self, _o: &str, _r: &str, n: u64) -> impl Future<Output = Result<PrDetails>> {
@@ -363,7 +368,12 @@ impl Gh for FakeGh {
     async fn get_pr_diff(&self, _: &str, _: &str, _: u64) -> Result<String> {
         unimplemented!()
     }
-    async fn enable_auto_merge(&self, _id: &str, _m: crate::config::AutoMergeMethod) -> Result<()> {
+    async fn enable_auto_merge(
+        &self,
+        _id: &str,
+        _m: crate::config::AutoMergeMethod,
+        _: bool,
+    ) -> Result<()> {
         unimplemented!()
     }
     fn local_pulls(
@@ -425,10 +435,27 @@ impl Gh for FakeGh {
     ) -> Result<crate::gh::PullRequestStack> {
         unimplemented!()
     }
-    async fn unstack_prs(&self, _: &str, _: &str, _: u64, _: &[u64]) -> Result<()> {
+    async fn append_to_stack(
+        &self,
+        _: &str,
+        _: &str,
+        _: u64,
+        _: &[u64],
+    ) -> Result<crate::gh::PullRequestStack> {
+        unimplemented!()
+    }
+    async fn unstack_prs(
+        &self,
+        _: &str,
+        _: &str,
+        _: u64,
+    ) -> Result<Option<crate::gh::PullRequestStack>> {
         unimplemented!()
     }
     async fn list_stacks(&self, _: &str, _: &str) -> Result<Vec<crate::gh::PullRequestStack>> {
+        unimplemented!()
+    }
+    async fn get_stack(&self, _: &str, _: &str, _: u64) -> Result<crate::gh::PullRequestStack> {
         unimplemented!()
     }
 }

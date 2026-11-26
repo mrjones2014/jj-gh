@@ -4,11 +4,14 @@
 //! the editor (inheriting stdio), then reads back. Tests use a fake.
 
 use crate::{
+    commands::pr::auto_merge::{self, AutoMergeTarget},
+    config::AutoMergeMode,
     frontmatter::Frontmatter,
     gh::{Gh, Reviewer, UpdatePr, remote},
+    logging,
     util::ShellCommand,
 };
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow};
 use std::collections::HashMap;
 
 pub trait Editor {
@@ -69,10 +72,15 @@ pub struct ApplyChangesCtx<'a> {
     pub repo: &'a str,
     pub pr_number: u64,
     pub pr_node_id: &'a str,
-    pub has_merge_queue: bool,
     /// `label_name -> label_node_id` for labels on the PR at fetch time.
     /// Empty for `pr create` since a brand-new PR has no labels to remove.
     pub before_label_ids: HashMap<String, String>,
+    /// GitHub target used to move an auto-merge request, if the diff changes it.
+    pub auto_merge_target: &'a remote::Target,
+    /// The PR's current auto-merge state, as rendered in the editor.
+    pub auto_merge_pr: AutoMergeTarget,
+    /// Auto-merge value shown in the editor before the user edited it.
+    pub auto_merge_before: Option<AutoMergeMode>,
 }
 
 /// Apply the diff between `before` and `after` (and their bodies) to an
@@ -143,34 +151,36 @@ pub async fn apply_frontmatter_diff<G: Gh>(
 
     // Auto-merge needs disable+enable when the user keeps it on but changes
     // the merge method, since `enablePullRequestAutoMerge` does not update the
-    // method on an already-enabled PR.
-    match (before.auto_merge, after.auto_merge) {
-        (false, true) => {
-            ensure_not_merge_queue(ctx)?;
-            gh.enable_auto_merge(ctx.pr_node_id, after.auto_merge_method)
-                .await?;
+    // method on an already-enabled PR. Whole-stack requests are moved through
+    // the stack tip rather than re-enabled on this PR.
+    // NB: Do not hard error here, just print a warning, in case
+    // GitHub fixes their stupid API on their end. Auto-merge
+    // cannot be enabled via API for repos with merge queues enabled
+    // because GitHub's API is stupid.
+    if let Err(err) = auto_merge::apply_editor_change(
+        gh,
+        auto_merge::AutoMergeEditorChange {
+            target: ctx.auto_merge_target,
+            pr: ctx.auto_merge_pr.clone(),
+            before: ctx.auto_merge_before,
+            after: after.auto_merge,
+            method: after.auto_merge_method,
+            method_explicit: before.auto_merge_method != after.auto_merge_method,
+        },
+    )
+    .await
+    {
+        logging::warn!("Failed to enable auto-merge!");
+        if ctx.auto_merge_pr.base_has_merge_queue {
+            logging::warn!(
+                "Merge queues are enabled for this repository. This is \
+                currently a GitHub limitation, auto-merge cannot be enabled via \
+                the API for repositories with merge queues enabled."
+            );
         }
-        (true, false) => {
-            gh.disable_auto_merge(ctx.pr_node_id).await?;
-        }
-        (true, true) if before.auto_merge_method != after.auto_merge_method => {
-            ensure_not_merge_queue(ctx)?;
-            gh.disable_auto_merge(ctx.pr_node_id).await?;
-            gh.enable_auto_merge(ctx.pr_node_id, after.auto_merge_method)
-                .await?;
-        }
-        _ => {}
+        logging::error!("{err}");
     }
 
-    Ok(())
-}
-
-fn ensure_not_merge_queue(ctx: &ApplyChangesCtx<'_>) -> Result<()> {
-    if ctx.has_merge_queue {
-        bail!(
-            "auto-merge not supported for repos with merge queues enabled; this is a limitation of the GitHub API. See https://github.com/mrjones2014/jj-gh/issues/103"
-        );
-    }
     Ok(())
 }
 
@@ -179,7 +189,10 @@ pub struct TempfileEditor;
 
 impl Editor for TempfileEditor {
     async fn edit(&self, argv: &[String], initial: &str) -> Result<String> {
+        // The recognizable name lets editors associate the published
+        // frontmatter JSON schema with just this buffer.
         let tmp = tempfile::Builder::new()
+            .prefix(".jj-gh-pr-")
             .suffix(".md")
             .tempfile()
             .context("could not create tempfile for editor buffer")?;
