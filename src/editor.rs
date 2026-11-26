@@ -14,6 +14,8 @@ use crate::{
 use anyhow::{Context, Result, anyhow};
 use std::collections::HashMap;
 
+const EDITOR_BASE_ENV: [(&str, &str); 1] = [("JJ_GH", "1")];
+
 pub trait Editor {
     /// Edit `initial` with the configured editor and return the resulting buffer.
     ///
@@ -207,7 +209,7 @@ impl Editor for TempfileEditor {
             .map(String::as_str)
             .chain(std::iter::once(tmp_arg.as_str()))
             .collect::<Vec<&str>>();
-        crate::proc::interactive(&full).await?;
+        crate::proc::interactive(&full, &EDITOR_BASE_ENV).await?;
 
         std::fs::read_to_string(tmp.path()).context("could not read edited buffer")
     }

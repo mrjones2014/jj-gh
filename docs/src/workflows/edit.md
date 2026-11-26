@@ -1,5 +1,10 @@
 # Editing a PR
 
+> [!TIP]
+> `jj-gh` sets `JJ_GH="1"` in the editor process's environment; this can be
+> used to detect the `jj-gh` flow and apply tweaks to your editor specifically
+> for `jj-gh`, for example in Neovim, by checking `vim.env.JJ_GH ~= nil`.
+
 `jj pr edit <pr-num|rev>` (alias `jj pr e`) resolves a PR from a PR number or a revision (via its local bookmark), fetches its current state, and opens a markdown file in your editor.
 
 ## The editor buffer
@@ -46,7 +51,7 @@ An empty body is refused by default to avoid clobbering a body that exists but f
 
 - `--diffs` / `--no-diffs` toggle the read-only diff preview; the defaults are the `pr_edit_show_diffs` / `pr_create_show_diffs` config settings (both `true`).
 - The preview is rendered from local commits when possible, falling back to GitHub's API.
-- `-e` / `--editor` wins over `editor` in config, which wins over jj's `ui.editor` (jj resolves `$JJ_EDITOR`, `$VISUAL`, and `$EDITOR` itself). A common trick is `editor = ["env", "JJ_GH=1", "nvim", "+10"]` to detect this flow in your editor config.
+- `-e` / `--editor` wins over `editor` in config, which wins over jj's `ui.editor` (jj resolves `$JJ_EDITOR`, `$VISUAL`, and `$EDITOR` itself).
 
 ## Editor schema
 
