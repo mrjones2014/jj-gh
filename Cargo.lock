@@ -2351,12 +2351,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
 
 [[package]]
-name = "libm"
-version = "0.2.16"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
-
-[[package]]
 name = "linux-raw-sys"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2453,14 +2447,13 @@ checksum = "9737e026353e5cd0736f98eddae28665118eb6f6600902a7f50db585621fecb6"
 
 [[package]]
 name = "noyalib"
-version = "0.0.58"
+version = "0.0.60"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3fad8f1a552070f6ba5f60f25e880f7b6daeda8fe138f589345141d31a21a3bb"
+checksum = "c4f58e0d7f94aac1ff656e07a05512093b0a0f866f5778f94e84909f50fc3157"
 dependencies = [
  "hashbrown 0.17.1",
  "indexmap",
  "itoa",
- "libm",
  "memchr",
  "rustc-hash",
  "ryu",
