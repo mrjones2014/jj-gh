@@ -1910,14 +1910,14 @@ type ConvertedToDiscussionEvent implements Node @docsCategory(name: "issues") {
     id: ID!
 }
 enum CopilotCodeReviewEffort @docsCategory(name: "copilot") {
+    ADAPTIVE
     BALANCED
-    DYNAMIC
     LITE
     MAX
 }
 enum CopilotCodeReviewEffortLevel @docsCategory(name: "copilot") {
+    ADAPTIVE
     BALANCED
-    DYNAMIC
     LITE
     MAX
 }
@@ -1944,6 +1944,11 @@ enum CopilotCodeReviewRunnerConfiguredBy @docsCategory(name: "copilot") {
 enum CopilotCodeReviewRunnerType @docsCategory(name: "copilot") {
     LABELED
     STANDARD
+}
+enum CopilotCodeReviewSeverity @docsCategory(name: "pulls") {
+    HIGH
+    LOW
+    MEDIUM
 }
 enum CopilotCodeReviewSeverityFilter @docsCategory(name: "copilot") {
     LOW
@@ -10639,8 +10644,8 @@ type OrganizationCopilotCodeReviewDefaultEffort @docsCategory(name: "copilot") {
     managedBy: OrganizationCopilotCodeReviewPolicyManager!
 }
 enum OrganizationCopilotCodeReviewEffortSetting @docsCategory(name: "copilot") {
+    ADAPTIVE
     BALANCED
-    DYNAMIC
     INHERIT
     LITE
     MAX
@@ -13149,6 +13154,7 @@ type PullRequestReviewComment implements Comment &
     bodyHTML: HTML!
     bodyText: String!
     commit: Commit
+    copilotCodeReviewSeverity: CopilotCodeReviewSeverity
     copilotCodeReviewSources: [CopilotCodeReviewSource!]!
     createdAt: DateTime!
     createdViaEmail: Boolean!
@@ -13283,6 +13289,7 @@ type PullRequestReviewThread implements Node @docsCategory(name: "pulls") {
     path: String!
     pullRequest: PullRequest!
     repository: Repository!
+    resolutionReason: PullRequestReviewThreadResolutionReason
     resolvedBy: User
     startDiffSide: DiffSide
     startLine: Int
@@ -16458,14 +16465,15 @@ type RepositoryCopilotCodeReviewEffort @docsCategory(name: "copilot") {
     effective: CopilotCodeReviewEffortLevel!
 }
 enum RepositoryCopilotCodeReviewEffortSetting @docsCategory(name: "copilot") {
+    ADAPTIVE
     BALANCED
-    DYNAMIC
     INHERIT
     LITE
     MAX
 }
 type RepositoryCopilotCodeReviewSettings @docsCategory(name: "copilot") {
     availableReviewEfforts: [CopilotCodeReviewEffortLevel!]!
+    crossRepoContextEnabled: Boolean!
     customInstructionsEnabled: Boolean!
     mcpEnabled: Boolean!
     reviewEffort: RepositoryCopilotCodeReviewEffort!
@@ -20388,6 +20396,7 @@ type UpdateRefsPayload {
 }
 input UpdateRepositoryCopilotCodeReviewSettingsInput {
     clientMutationId: String
+    crossRepoContextEnabled: Boolean
     customInstructionsEnabled: Boolean
     mcpEnabled: Boolean
     repositoryId: ID! @possibleTypes(concreteTypes: ["Repository"])
