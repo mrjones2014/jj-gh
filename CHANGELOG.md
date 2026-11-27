@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.10](https://github.com/mrjones2014/jj-gh/compare/jj-gh-v0.3.9...jj-gh-v0.3.10) - 2026-11-27
+
+### Added
+
+- *(editor)* Set `JJ_GH=1` in editor env by default
+- *(schema)* publish frontmatter schema
+- *(pr)* defer creation auto-merge until stacks are linked
+- *(pr)* make editor auto-merge stack-aware
+- *(pr)* add stack and cancel auto-merge modes
+- *(gh)* add stack-aware auto-merge operations
+
+### Fixed
+
+- *(clippy)* expect lint
+- *(pr-create)* Push all below current rev in stack before creating PR
+- *(stack)* append safely and guard auto-merge cancels
+- *(stack)* append safely and validate unstack results
+
+### Other
+
+- *(deps)* bump noyalib from 0.0.58 to 0.0.60 ([#414](https://github.com/mrjones2014/jj-gh/pull/414))
+- *(deps)* bump syn ([#413](https://github.com/mrjones2014/jj-gh/pull/413))
+- *(ui)* add ui/prompt logging helpers and migrate callers
+- *(gh)* expose stack auto-merge state
+- *(docs)* Update README.md
+
 ## [0.3.9](https://github.com/mrjones2014/jj-gh/compare/jj-gh-v0.3.8...jj-gh-v0.3.9) - 2026-11-21
 
 ### Other
